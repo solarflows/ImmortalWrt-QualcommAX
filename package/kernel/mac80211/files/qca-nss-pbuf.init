@@ -219,7 +219,10 @@ start() {
 	local hash_bitmap num_cpus
 
 	pbuf_config_applied=0
-	ath11k_device_available || return 0
+	ath11k_device_available || {
+		logger -t "$NAME" -p user.notice "no Wi-Fi hardware detected. Skipping applying wifi nss configs"
+		return 0
+	}
 	ath11k_nss_offload_enabled || {
 		logger -t "$NAME" -p user.notice "ath11k NSS offload is unavailable or disabled. Skipping applying wifi nss configs"
 		return 0

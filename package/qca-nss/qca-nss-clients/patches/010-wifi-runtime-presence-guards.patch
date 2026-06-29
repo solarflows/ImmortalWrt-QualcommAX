@@ -86,14 +86,14 @@
  	int error,ret;
  
 +	if (!nss_nlwifili_wifi_device_available()) {
-+		nss_nl_info("ath11k device is unavailable; skipping wifili family\n");
++		printk(KERN_INFO "qca-nss-netlink: no Wi-Fi hardware detected; skipping wifili family\n");
 +		return true;
 +	}
 +
  	nss_nl_info_always("Init NSS netlink wifili handler\n");
  
 +	if (!nss_wifili_get_context()) {
-+		nss_nl_info("wifili NSS context is unavailable; skipping wifili family\n");
++		printk(KERN_INFO "qca-nss-netlink: no Wi-Fi NSS context detected; skipping wifili family\n");
 +		return true;
 +	}
 +
@@ -218,18 +218,19 @@
  	/*
  	 * Check if there are any mesh I/F. Delete all the mesh I/F from NSS FW and free.
  	 */
-@@ -1977,6 +2029,10 @@ static int __init nss_wifi_meshmgr_init_
+@@ -1977,6 +2029,11 @@ static int __init nss_wifi_meshmgr_init_
  	}
  #endif
  
 +	if (!nss_wifi_meshmgr_wifi_device_available()) {
++		pr_info("qca-nss-wifi-meshmgr: no Wi-Fi hardware detected; skipping Wi-Fi mesh manager\n");
 +		return 0;
 +	}
 +
  	nss_ctx = nss_wifi_mesh_get_context();
  	if (!nss_ctx) {
  		nss_wifi_meshmgr_warn("NSS SoC context is NULL.\n");
-@@ -1988,6 +2044,7 @@ static int __init nss_wifi_meshmgr_init_
+@@ -1988,6 +2045,7 @@ static int __init nss_wifi_meshmgr_init_
  		wmgr_ctx.mesh_ctx[idx] = NULL;
  	}
  

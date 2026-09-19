@@ -6,7 +6,7 @@ msgstr ""
 #: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/tools/fullconenat-sonic.js:44
 #: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/tools/fullconenat-sonic.js:51
 msgid "Fullcone NAT"
-msgstr "全锥型 NAT"
+msgstr "全锥型NAT"
 
 #: package/emortal/luci-app-fullconenat-sonic/root/usr/share/rpcd/acl.d/luci-app-fullconenat-sonic.json:3
 msgid "Grant access to fullcone firewall settings"

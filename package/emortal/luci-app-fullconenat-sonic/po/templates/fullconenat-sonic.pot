@@ -25,3 +25,120 @@ msgid ""
 "this zone. Disabling Fullcone NAT leaves masquerading unchanged. Usually "
 "enable this only on the WAN zone."
 msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:204
+msgid "%s: no current address, NAT1 is not applied"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:208
+msgid "%s: no static lease, the address may change"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:165
+msgid "Additional IP addresses"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:117
+msgid "Devices"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:144
+msgid "Devices (by MAC)"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:121
+msgid "Devices chosen by MAC address are resolved to their current IP address "
+"every time this page is saved, because the firewall works with "
+"addresses. Devices without a static lease may change their address at "
+"any time, so configuring a static lease for them is recommended."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:136
+msgid "Enable"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:105
+msgid "Fullcone NAT - Device Access Control"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:108
+msgid "General Settings"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/root/usr/share/rpcd/acl.d/luci-app-fullconenat-sonic-acl.json:3
+msgid "Grant access to the fullcone NAT device access control settings"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:168
+msgid "IP address or subnet, e.g. 192.168.1.50 or 192.168.1.0/24"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:106
+msgid "Limits fullcone NAT (NAT1) to the devices listed below. Devices that are "
+"not listed keep ordinary masquerading and are not reachable from the "
+"internet through this mapping. The master switch and the per-zone switch "
+"are configured under Firewall - Zone Settings; this page only takes "
+"effect for zones that have fullcone NAT enabled there."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:213
+msgid "No device address configured - fullcone NAT is disabled for every device "
+"of this zone."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:112
+msgid "Only allow NAT1 for the listed devices"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:147
+msgid "Pick a device or enter its MAC address"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:221
+msgid "Re-resolve the MAC addresses above to their current IP addresses. Saving "
+"this page does this automatically."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:219
+msgid "Refresh"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:140
+msgid "Remarks"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:218
+msgid "Resolve MAC addresses"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:239
+msgid "Resolved %d address(es). Save the configuration to apply them."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:189
+msgid "Status"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:115
+msgid "Until this is enabled, every device of a zone with fullcone NAT enabled "
+"receives NAT1 mappings. Once enabled, only the devices listed below do; "
+"an empty list therefore disables fullcone NAT mappings entirely."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:169
+msgid "Use these entries for devices with a fixed address; they are applied as "
+"given and are not resolved."
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:142
+msgid "e.g. living room PC"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:150
+msgid "offline"
+msgstr ""
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:153
+msgid "static lease"
+msgstr ""
+

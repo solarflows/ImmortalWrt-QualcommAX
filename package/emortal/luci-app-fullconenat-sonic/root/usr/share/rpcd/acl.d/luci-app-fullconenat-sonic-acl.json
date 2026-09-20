@@ -1,0 +1,7 @@
+{
+	"luci-app-fullconenat-sonic-acl": {
+		"description": "Grant access to the fullcone NAT device access control settings",
+		"read": { "uci": [ "firewall", "dhcp" ] },
+		"write": { "uci": [ "firewall" ] }
+	}
+}

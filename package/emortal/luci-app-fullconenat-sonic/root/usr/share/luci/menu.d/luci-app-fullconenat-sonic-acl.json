@@ -1,0 +1,14 @@
+{
+	"admin/network/firewall/fullconenat-acl": {
+		"title": "Fullcone NAT ACL",
+		"order": 16,
+		"action": {
+			"type": "view",
+			"path": "firewall/fullconenat-acl"
+		},
+		"depends": {
+			"acl": [ "luci-app-fullconenat-sonic-acl" ],
+			"uci": { "firewall": true }
+		}
+	}
+}

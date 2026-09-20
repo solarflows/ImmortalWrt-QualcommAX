@@ -33,3 +33,123 @@ msgstr ""
 "使用所有受支持的协议。启用全锥型NAT时自动开启 IPv4 地址伪装。关闭地址伪装时，"
 "也会关闭对应区域的全锥型NAT。关闭全锥型NAT不会更改地址伪装设置。通常仅需在 "
 "WAN 区域开启。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:204
+msgid "%s: no current address, NAT1 is not applied"
+msgstr "%s：当前没有可用地址，NAT1 不会生效"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:208
+msgid "%s: no static lease, the address may change"
+msgstr "%s：没有静态租约，地址可能会变化"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:165
+msgid "Additional IP addresses"
+msgstr "附加 IP 地址"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:117
+msgid "Devices"
+msgstr "设备"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:144
+msgid "Devices (by MAC)"
+msgstr "设备（按 MAC）"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:121
+msgid "Devices chosen by MAC address are resolved to their current IP address "
+"every time this page is saved, because the firewall works with "
+"addresses. Devices without a static lease may change their address at "
+"any time, so configuring a static lease for them is recommended."
+msgstr "由于防火墙按地址工作，按 MAC 选择的设备会在每次保存本页时解析为其当前 IP "
+"地址。未配置静态租约的设备地址可能随时变化，建议为其配置静态租约。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:136
+msgid "Enable"
+msgstr "启用"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:105
+msgid "Fullcone NAT - Device Access Control"
+msgstr "全锥形 NAT - 设备访问控制"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:108
+msgid "General Settings"
+msgstr "常规设置"
+
+#: package/emortal/luci-app-fullconenat-sonic/root/usr/share/rpcd/acl.d/luci-app-fullconenat-sonic-acl.json:3
+msgid "Grant access to the fullcone NAT device access control settings"
+msgstr "授予访问全锥形 NAT 设备访问控制设置的权限"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:168
+msgid "IP address or subnet, e.g. 192.168.1.50 or 192.168.1.0/24"
+msgstr "IP 地址或子网，例如 192.168.1.50 或 192.168.1.0/24"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:106
+msgid "Limits fullcone NAT (NAT1) to the devices listed below. Devices that are "
+"not listed keep ordinary masquerading and are not reachable from the "
+"internet through this mapping. The master switch and the per-zone switch "
+"are configured under Firewall - Zone Settings; this page only takes "
+"effect for zones that have fullcone NAT enabled there."
+msgstr "把全锥形 NAT（NAT1）限制为下方列出的设备使用。未列出的设备仍使用普通地址伪装，不会被该映射暴露到公网。总开关与各区域开关位于\"防火墙 "
+"- 区域设置\"，本页仅对在那里已启用全锥形 NAT 的区域生效。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:213
+msgid "No device address configured - fullcone NAT is disabled for every device "
+"of this zone."
+msgstr "未配置任何设备地址——该区域内所有设备的全锥形 NAT 均被禁用。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:112
+msgid "Only allow NAT1 for the listed devices"
+msgstr "仅对列表中的设备启用 NAT1"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:147
+msgid "Pick a device or enter its MAC address"
+msgstr "选择设备或直接输入其 MAC 地址"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:221
+msgid "Re-resolve the MAC addresses above to their current IP addresses. Saving "
+"this page does this automatically."
+msgstr "将上述 MAC 地址重新解析为当前 IP 地址。保存本页时会自动执行该操作。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:219
+msgid "Refresh"
+msgstr "刷新"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:140
+msgid "Remarks"
+msgstr "备注"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:218
+msgid "Resolve MAC addresses"
+msgstr "解析 MAC 地址"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:239
+msgid "Resolved %d address(es). Save the configuration to apply them."
+msgstr "已解析出 %d 个地址。保存配置后生效。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:189
+msgid "Status"
+msgstr "状态"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:115
+msgid "Until this is enabled, every device of a zone with fullcone NAT enabled "
+"receives NAT1 mappings. Once enabled, only the devices listed below do; "
+"an empty list therefore disables fullcone NAT mappings entirely."
+msgstr "未启用时，已开启全锥形 NAT 的区域内的所有设备都会获得 NAT1 映射；启用后则仅列表中的设备获得，因此列表为空时完全不创建 NAT1 "
+"映射。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:169
+msgid "Use these entries for devices with a fixed address; they are applied as "
+"given and are not resolved."
+msgstr "固定地址的设备可直接使用此列表；条目按原样应用，不做解析。"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:142
+msgid "e.g. living room PC"
+msgstr "例如：客厅的电脑"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:150
+msgid "offline"
+msgstr "离线"
+
+#: package/emortal/luci-app-fullconenat-sonic/htdocs/luci-static/resources/view/firewall/fullconenat-acl.js:153
+msgid "static lease"
+msgstr "静态租约"
+

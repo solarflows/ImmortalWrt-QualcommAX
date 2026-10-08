@@ -19,8 +19,7 @@ define Package/fullconenat-sonic
   SUBMENU:=Firewall
   TITLE:=SONiC full cone NAT support for firewall3/firewall4
   URL:=$(PKG_URL)
-  DEPENDS:=@LINUX_6_18 @(PACKAGE_firewall4||PACKAGE_firewall) +PACKAGE_firewall4:kmod-nft-nat +PACKAGE_firewall:kmod-ipt-nat
-  DEFAULT:=y if PACKAGE_firewall4 || PACKAGE_firewall
+  DEPENDS:=@LINUX_6_18 +kmod-nft-nat
   CONFLICTS:=$(SONIC_LEGACY_PACKAGES)
   # APK packaging does not emit CONFLICTS; reject all legacy package versions.
   EXTRA_DEPENDS:=$(if $(CONFIG_USE_APK),$(foreach pkg,$(SONIC_LEGACY_PACKAGES),!$(pkg) (>=0)$(comma)))

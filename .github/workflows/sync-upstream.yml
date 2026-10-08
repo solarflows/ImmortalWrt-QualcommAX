@@ -53,6 +53,7 @@ jobs:
           echo "Julius NSS-EDMA head: ${JULIUS_HEAD}"
           echo "Julius previous sha:  ${JULIUS_PREV}"
           echo "julius_head=${JULIUS_HEAD}" >> "$GITHUB_OUTPUT"
+          echo "julius_prev=${JULIUS_PREV}" >> "$GITHUB_OUTPUT"
 
           # Check ImmortalWrt updates
           IMMORTAL_HEAD=$(git rev-parse upstream_immortal/master)
@@ -102,17 +103,31 @@ jobs:
             git diff-index --quiet HEAD || git commit -m "sync(immortalwrt): update base to ${{ steps.check_update.outputs.immortal_head }}"
           fi
 
-          # If Julius NSS-EDMA drivers changed, sync the hardware acceleration tree from Julius
+          # If Julius NSS-EDMA drivers changed, dynamically sync all modified paths from Julius
           if [ "${{ steps.check_update.outputs.julius_updated }}" = "true" ]; then
-            echo "Syncing updated NSS-EDMA hardware paths from Julius..."
-            git checkout upstream_julius/nss-edma-rework -- \
-              package/kernel/qca-ppe-nss \
-              package/nss/nss-tools \
-              package/kernel/mac80211/patches/nss \
-              package/kernel/nat46 \
-              target/linux/qualcommax/files \
-              target/linux/qualcommax/patches-6.18 \
-              target/linux/qualcommax/dts 2>/dev/null || true
+            echo "Syncing updated NSS-EDMA files from Julius..."
+            PREV="${{ steps.check_update.outputs.julius_prev }}"
+            HEAD="${{ steps.check_update.outputs.julius_head }}"
+
+            if [ -n "$PREV" ]; then
+              CHANGED_FILES=$(git diff --name-only "$PREV" "$HEAD" 2>/dev/null || true)
+            else
+              CHANGED_FILES=$(git diff --name-only "upstream_julius/nss-edma-rework~35" "$HEAD" 2>/dev/null || true)
+            fi
+
+            # Protect custom innovations from being overwritten
+            PROTECTED="^(feeds\.conf\.default|\.github/workflows/|package/network/config/firewall4/|package/network/utils/fullconenat-sonic/|package/emortal/luci-app-fullconenat-sonic/|target/linux/generic/hack-6.18/98[456]-|target/linux/qualcommax/Makefile|target/linux/qualcommax/base-files/etc/config/nss_freq|target/linux/qualcommax/base-files/usr/bin/nss_freq|target/linux/qualcommax/base-files/etc/init\.d/set-irq-affinity|target/linux/qualcommax/base-files/etc/uci-defaults/)"
+
+            SYNC_FILES=$(echo "$CHANGED_FILES" | grep -v -E "$PROTECTED" || true)
+
+            if [ -n "$SYNC_FILES" ]; then
+              echo "Discovered files updated by Julius:"
+              echo "$SYNC_FILES"
+              echo "$SYNC_FILES" | xargs -r git checkout "$HEAD" --
+            fi
+
+            # Ensure ATH11K_NSS_SUPPORT defaults to y on qualcommax
+            sed -i 's/default n/default y if TARGET_qualcommax/' package/kernel/mac80211/ath.mk 2>/dev/null || true
 
             # Re-apply our custom hardware flags
             echo "Re-applying ARMv8 CE crypto, SONiC FullCone, and target tweaks..."

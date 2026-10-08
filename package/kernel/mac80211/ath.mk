@@ -409,7 +409,7 @@ define KernelPackage/ath11k/config
                	 TARGET_qualcommax_ipq807x_DEVICE_xiaomi_ax3600 || \
                	 TARGET_qualcommax_ipq807x_DEVICE_zte_mf269 )
                select ATH11K_MEM_PROFILE_256M if TARGET_qualcommax_ipq807x_DEVICE_netgear_wax218
-               default n
+               default y if TARGET_qualcommax
                help
                   Say Y to offload the ath11k data path to the NSS cores
                   (wifili). Requires the qca-ppe-nss glue to arm the NSS

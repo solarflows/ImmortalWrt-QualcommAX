@@ -125,25 +125,27 @@ jobs:
 
             # Re-apply our custom hardware flags
             echo "Re-applying ARMv8 CE crypto, SONiC FullCone, and target tweaks..."
-            grep -q "CONFIG_ARM64_CRYPTO=y" target/linux/qualcommax/config-6.18 || cat << 'EOF' >> target/linux/qualcommax/config-6.18
-CONFIG_ARM64_CRYPTO=y
-CONFIG_CRYPTO_AES_ARM64_CE=y
-CONFIG_CRYPTO_AES_ARM64_CE_BLK=y
-CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y
-CONFIG_CRYPTO_SHA2_ARM64_CE=y
-CONFIG_CRYPTO_GHASH_ARM64_CE=y
-CONFIG_CRYPTO_CRC32_ARM64_CE=y
-CONFIG_NF_NAT_FULLCONE=y
-EOF
+            if ! grep -q "CONFIG_ARM64_CRYPTO=y" target/linux/qualcommax/config-6.18; then
+              printf '%s\n' \
+                "CONFIG_ARM64_CRYPTO=y" \
+                "CONFIG_CRYPTO_AES_ARM64_CE=y" \
+                "CONFIG_CRYPTO_AES_ARM64_CE_BLK=y" \
+                "CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" \
+                "CONFIG_CRYPTO_SHA2_ARM64_CE=y" \
+                "CONFIG_CRYPTO_GHASH_ARM64_CE=y" \
+                "CONFIG_CRYPTO_CRC32_ARM64_CE=y" \
+                "CONFIG_NF_NAT_FULLCONE=y" >> target/linux/qualcommax/config-6.18
+            fi
+
             # Ensure custom feeds.conf.default stays intact
-            cat << 'EOF' > feeds.conf.default
-src-git packages https://github.com/solarflows/packages.git;qualcommax
-src-git nss https://github.com/JuliusBairaktaris/nss-packages.git;edma-nss
-src-git luci https://github.com/immortalwrt/luci.git
-src-git routing https://github.com/openwrt/routing.git
-src-git telephony https://github.com/openwrt/telephony.git
-src-git video https://github.com/openwrt/video.git
-EOF
+            printf '%s\n' \
+              "src-git packages https://github.com/solarflows/packages.git;qualcommax" \
+              "src-git nss https://github.com/JuliusBairaktaris/nss-packages.git;edma-nss" \
+              "src-git luci https://github.com/immortalwrt/luci.git" \
+              "src-git routing https://github.com/openwrt/routing.git" \
+              "src-git telephony https://github.com/openwrt/telephony.git" \
+              "src-git video https://github.com/openwrt/video.git" > feeds.conf.default
+
             git add -A
             git diff-index --quiet HEAD || git commit -m "sync(nss-edma): update QualcommAX drivers from JuliusBairaktaris/openwrt-nss-edma"
           fi

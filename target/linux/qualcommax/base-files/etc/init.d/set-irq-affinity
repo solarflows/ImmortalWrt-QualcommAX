@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+get_cpu_mask() {
+	local cpu range start end mask=0
+
+	for range in $(tr ',' ' ' < /sys/devices/system/cpu/online 2> /dev/null); do
+		start="${range%-*}"
+		end="${range#*-}"
+		[ "$start" = "$end" ] && end="$start"
+
+		for cpu in $(seq "$start" "$end"); do
+			mask=$((mask | (1 << cpu)))
+		done
+	done
+
+	[ "$mask" -gt 0 ] || mask=1
+	printf '%x' "$mask"
+}
+
+start() {
+	local flow_cnt sock_flow_entries cpu_mask
+
+	flow_cnt=8192
+	sock_flow_entries=65535
+	cpu_mask="$(get_cpu_mask)"
+
+	for eth in $(jsonfilter -i "/etc/board.json" -e "@.network[*].device"); do
+		[ -d "/sys/class/net/$eth" ] || continue
+		for i in "/sys/class/net/$eth"/queues/rx-*/rps_cpus; do [ -w "$i" ] && echo "$cpu_mask" > "$i"; done
+		for i in "/sys/class/net/$eth"/queues/rx-*/rps_flow_cnt; do [ -w "$i" ] && echo "$flow_cnt" > "$i"; done
+		for i in "/sys/class/net/$eth"/queues/tx-*/xps_cpus; do [ -w "$i" ] && echo "$cpu_mask" > "$i"; done
+	done
+
+	[ -w "/proc/sys/net/core/rps_sock_flow_entries" ] && echo "$sock_flow_entries" > "/proc/sys/net/core/rps_sock_flow_entries"
+}

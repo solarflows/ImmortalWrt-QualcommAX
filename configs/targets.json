@@ -1,21 +1,19 @@
 {
-  "_comment": "ImmortalWrt QualcommAX Multi-Device Matrix Configuration",
+  "_comment": "ImmortalWrt QualcommAX Matrix Targets Configuration",
   "targets": [
     {
-      "target": "rbr750",
+      "target": "ipq807x",
       "name": "Netgear RBR750 (IPQ8074, 1GB RAM)",
-      "config": "rbr750",
-      "source_ref": "nss-edma-custom",
-      "passwall_tag": "passwall-rbr750",
-      "release_tag_prefix": "rbr750-"
+      "packages_branch": "qualcommax",
+      "firmware_release_tag_prefix": "ipq807x-",
+      "passwall_tag": "packages-ipq807x"
     },
     {
-      "target": "nn6000",
+      "target": "ipq60xx",
       "name": "Link NN6000 v2 (IPQ6000, 1GB RAM)",
-      "config": "nn6000",
-      "source_ref": "nss-edma-custom",
-      "passwall_tag": "passwall-nn6000",
-      "release_tag_prefix": "nn6000-"
+      "packages_branch": "qualcommax",
+      "firmware_release_tag_prefix": "ipq60xx-",
+      "passwall_tag": "packages-ipq60xx"
     }
   ]
 }

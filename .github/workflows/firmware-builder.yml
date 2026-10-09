@@ -17,6 +17,14 @@ on:
           - 'ipq807x'
           - 'ipq60xx'
           - 'both'
+      branch:
+        description: '源码分支 (nss-edma-julius / nss-edma-custom)'
+        required: false
+        default: 'nss-edma-julius'
+        type: choice
+        options:
+          - 'nss-edma-julius'
+          - 'nss-edma-custom'
       clean_cache:
         description: '刷新缓存 (跳过缓存恢复, 强制重新编译)'
         required: false
@@ -64,7 +72,7 @@ jobs:
     with:
       matrix_target:                      ${{ matrix.target }}
       matrix_repo:                        'solarflows/ImmortalWrt-QualcommAX'
-      matrix_ref:                         'nss-edma-custom'
+      matrix_ref:                         ${{ inputs.branch || 'nss-edma-julius' }}
       matrix_packages_branch:             'qualcommax'
       matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'
       matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'

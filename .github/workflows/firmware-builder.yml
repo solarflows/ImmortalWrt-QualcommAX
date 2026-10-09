@@ -1,503 +1,87 @@
+# ════════════════════════════════════════════════════════════════════════
+# ImmortalWrt QualcommAX Builder (Caller Workflow)
+# 纯粹的 Reusable Workflow 调度器，调用 AutoWorkFlows 核心编译流水线
+# 固件产出、Release 与专属 10GB Cache 归属于本仓库
+# ════════════════════════════════════════════════════════════════════════
 name: "ImmortalWrt QualcommAX Builder"
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: '选择构建目标 (ipq807x / ipq60xx / all)'
+        description: '选择构建目标 (ipq807x / ipq60xx / both)'
         required: true
         default: 'ipq807x'
         type: choice
         options:
           - 'ipq807x'
           - 'ipq60xx'
-          - 'all'
-      release:
-        description: '是否发布到 Release'
-        required: false
-        default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      use_ccache:
-        description: '是否启用 ccache 编译缓存'
-        required: false
-        default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      force_rebuild:
-        description: '强制重新编译（忽略并清空所有旧缓存）'
+          - 'both'
+      clean_cache:
+        description: '刷新缓存 (跳过缓存恢复, 强制重新编译)'
         required: false
         default: false
         type: boolean
       free_disk_space:
-        description: '深度清理 Runner 磁盘空间（释放约35G可用空间）'
+        description: '清理磁盘空间'
         required: false
-        default: true
+        default: false
         type: boolean
   schedule:
     - cron: '18 22 * * 0'  # 每周日 22:18 UTC (北京时间每周一 06:18，一周运行一次)
-
-concurrency:
-  group: firmware-build-${{ github.ref }}
-  cancel-in-progress: false
 
 permissions:
   actions: write
   contents: write
 
-env:
-  TZ: Asia/Shanghai
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
-  # ========== 构建矩阵（从 configs/targets.json 读取） ==========
-  define-matrix:
+  plan:
+    name: Prepare Build Matrix
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      version: ${{ steps.set-version.outputs.version }}
     steps:
-      - name: Checkout Hub repository
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: configs/targets.json
-          path: hub
-
+      - id: set-version
+        run: echo "version=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       - id: set-matrix
         run: |
-          TARGET_FILTER="${{ github.event.inputs.target || 'all' }}"
-          JSON_FILE="hub/configs/targets.json"
-
-          if [ ! -f "$JSON_FILE" ]; then
-            echo "❌ 配置文件不存在: $JSON_FILE"
-            exit 1
+          TARGET="${{ inputs.target || 'ipq807x' }}"
+          if [ "$TARGET" = "both" ]; then
+            echo 'matrix=[{"target":"ipq807x","tag_prefix":"ipq807x-"},{"target":"ipq60xx","tag_prefix":"ipq60xx-"}]' >> $GITHUB_OUTPUT
+          else
+            echo "matrix=[{\"target\":\"$TARGET\",\"tag_prefix\":\"$TARGET-\"}]" >> $GITHUB_OUTPUT
           fi
-          echo "📋 加载构建目标: $JSON_FILE"
-          echo "🎯 过滤条件: $TARGET_FILTER"
 
-          FILTERED=$(jq -c --arg t "$TARGET_FILTER" '
-            if $t == "all" then .targets
-            else [.targets[] | select(.target == $t)] end
-          ' "$JSON_FILE")
-
-          echo "matrix=$FILTERED" >> $GITHUB_OUTPUT
-          echo "✅ 构建矩阵: $FILTERED"
-
-  # ========== 构建任务（矩阵并行） ==========
-  build:
-    name: Build ${{ matrix.name }}
-    needs: define-matrix
-    runs-on: ubuntu-24.04
-    timeout-minutes: 360
+  call-compile:
+    name: Compile
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.define-matrix.outputs.matrix) }}
-    steps:
-      - name: Checkout Hub configs
-        uses: actions/checkout@v4
-        with:
-          path: hub
-
-      - name: Checkout Source Tree
-        uses: actions/checkout@v4
-        with:
-          ref: nss-edma-custom
-          path: openwrt
-          fetch-depth: 0
-
-      - name: 🔍 Get source commit SHA
-        id: current_sha
-        run: |
-          SHA=$(git -C openwrt rev-parse HEAD)
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-          echo "📋 源码 SHA: $SHA"
-
-      - name: 🔧 Compute toolchain fingerprint
-        id: toolchain_hash
-        run: |
-          HASH=$(git -C openwrt log --pretty=tformat:"%h" -n1 tools toolchain 2>/dev/null || echo "unknown")
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
-          echo "🔧 工具链指纹: $HASH"
-
-      - name: 💾 Last-SHA cache
-        id: cache_sha
-        uses: actions/cache@v4
-        with:
-          path: .last_sha_${{ matrix.target }}
-          key: last-sha-${{ matrix.target }}-${{ runner.os }}
-
-      - name: 🕵️ Detect source changes
-        id: check
-        run: |
-          CURRENT="${{ steps.current_sha.outputs.sha }}"
-          LAST_FILE=".last_sha_${{ matrix.target }}"
-          if [ -f "$LAST_FILE" ]; then LAST=$(cat "$LAST_FILE"); else LAST=""; fi
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ "$CURRENT" != "$LAST" ]; then
-              echo "changed=true" >> $GITHUB_OUTPUT
-              echo "🔵 定时触发 · 源码有更新 → 继续构建"
-            else
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "⏭️ 定时触发 · 源码无变化 → 跳过构建"
-            fi
-          else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "🟢 手动/触发构建 → 强制构建"
-          fi
-
-      - name: 🧹 Free Disk Space
-        if: steps.check.outputs.changed == 'true' && (github.event.inputs.free_disk_space != 'false')
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          swap-storage: true
-
-      - name: 📦 Prepare Build Environment
-        if: steps.check.outputs.changed == 'true'
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo -E apt update
-          sudo -E apt -yqq install dos2unix libfuse-dev
-          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.eu.org/init_build_environment.sh)'
-          sudo timedatectl set-timezone "$TZ"
-
-      # ───────── 独享缓存池（工具链 + ccache）─────────
-      - name: 🔧 Restore toolchain cache
-        if: steps.check.outputs.changed == 'true' && github.event.inputs.force_rebuild != 'true'
-        id: cache-tc
-        uses: actions/cache@v4
-        with:
-          key: immwrt-tc-${{ matrix.target }}-${{ steps.toolchain_hash.outputs.hash }}
-          restore-keys: |
-            immwrt-tc-${{ matrix.target }}-
-          path: |
-            openwrt/staging_dir/host*
-            openwrt/staging_dir/tool*
-
-      - name: ⚡ Restore ccache
-        if: steps.check.outputs.changed == 'true' && github.event.inputs.use_ccache != 'false' && github.event.inputs.force_rebuild != 'true'
-        id: cache-cc
-        uses: actions/cache@v4
-        with:
-          key: immwrt-cc-${{ matrix.target }}-${{ github.run_id }}
-          restore-keys: |
-            immwrt-cc-${{ matrix.target }}-
-          path: openwrt/.ccache
-
-      - name: 📊 Refresh cache stamps
-        if: steps.check.outputs.changed == 'true'
-        id: cache-refresh
-        run: |
-          TOOLCHAIN_RESTORED="false"
-          if [ -d "openwrt/staging_dir" ] && [ "$(find openwrt/staging_dir -type d -name "stamp" -not -path "*target*" 2>/dev/null | head -1)" ]; then
-            find openwrt/staging_dir -type d -name "stamp" -not -path "*target*" 2>/dev/null | while read -r d; do
-              find "$d" -type f -exec touch {} +
-            done
-            mkdir -p openwrt/tmp && echo "1" > openwrt/tmp/.build
-            TOOLCHAIN_RESTORED="true"
-            echo "🔧 工具链缓存已恢复 · stamp 已刷新"
-          fi
-          echo "toolchain_restored=${TOOLCHAIN_RESTORED}" >> $GITHUB_OUTPUT
-
-          CCACHE_RESTORED="false"
-          if [ -d "openwrt/.ccache" ] && [ "$(find openwrt/.ccache -type f 2>/dev/null | head -1)" ]; then
-            CCACHE_RESTORED="true"
-            echo "⚡ ccache 缓存已恢复"
-          fi
-          echo "ccache_restored=${CCACHE_RESTORED}" >> $GITHUB_OUTPUT
-
-      # ───────── 内置软件源（克隆形式直接植入 package/solarflows + 锁定 packages 源）─────────
-      - name: 📦 Clone in-tree packages & lock custom feed
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          cd openwrt
-          echo "📦 克隆 openwrt-packages (${{ matrix.packages_branch }}) 至 package/solarflows ..."
-          git clone --depth 1 https://github.com/solarflows/openwrt-packages.git package/solarflows -b ${{ matrix.packages_branch }}
-          PKG_SHA=$(git -C package/solarflows rev-parse --short HEAD)
-          echo "packages_sha=${PKG_SHA}" >> "$GITHUB_OUTPUT"
-          echo "📋 openwrt-packages @ ${PKG_SHA}"
-
-          # 确保 feeds.conf.default 中的 packages 源对齐 solarflows/packages
-          STANDARD_FEED_URL="https://github.com/solarflows/packages.git"
-          if grep -Eq '^src-git[[:space:]]+packages[[:space:]]' feeds.conf.default; then
-            sed -i -E "s|^src-git[[:space:]]+packages[[:space:]].*$|src-git packages ${STANDARD_FEED_URL};${{ matrix.packages_branch }}|" feeds.conf.default
-          else
-            printf '%s\n' "src-git packages ${STANDARD_FEED_URL};${{ matrix.packages_branch }}" >> feeds.conf.default
-          fi
-
-      - name: 📥 Update Feeds
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          cd openwrt
-          ./scripts/feeds update -a && ./scripts/feeds install -a
-
-      # ───────── 仿照 AutoWorkFlows 按序合并所有 *.seed 文件 ─────────
-      - name: ⚙️ Apply Configuration
-        if: steps.check.outputs.changed == 'true'
-        id: apply_config
-        run: |
-          cd openwrt
-          SEED_DIR="../hub/configs/${{ matrix.target }}"
-          echo "📄 正在按序合并种子配置文件: $SEED_DIR"
-
-          find "$SEED_DIR" -type f -name '*.seed' | sort | while read -r f; do
-            echo "  + $(basename "$f")" >&2
-            if [ ! -s "$f" ]; then
-              echo "    ⚠️ 跳过空文件" >&2
-              continue
-            fi
-            cat "$f"
-            [ -z "$(tail -c1 "$f")" ] || echo
-          done > .config
-
-          sed -i 's/\r$//; s/\xef\xbb\xbf//g' .config
-          echo "✅ 已生成 .config 种子 ($(wc -l < .config) 行)"
-
-          echo "🔧 执行 make defconfig..."
-          make defconfig
-
-          USE_APK=$(grep -q "CONFIG_USE_APK=y" .config && echo "true" || echo "false")
-          echo "use_apk=${USE_APK}" >> "$GITHUB_OUTPUT"
-          echo "📦 包管理器模式: $([ "$USE_APK" = "true" ] && echo APK || echo IPK)"
-
-      # ───────── 签名密钥注入（从仓库 Secrets 读取，与 AutoWorkFlows 逻辑对齐）─────────
-      - name: 🔑 Setup Signing Key
-        if: steps.check.outputs.changed == 'true'
-        id: signing_key
-        env:
-          APK_BUILD_KEY: ${{ secrets.APK_BUILD_KEY }}
-          USIGN_KEY: ${{ secrets.USIGN_KEY }}
-        run: |
-          set -euo pipefail
-          USE_APK="${{ steps.apply_config.outputs.use_apk }}"
-
-          if [ "$USE_APK" = "true" ]; then
-            if [ -n "$APK_BUILD_KEY" ]; then
-              printf '%s' "$APK_BUILD_KEY" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' > openwrt/private-key.pem
-              chmod 600 openwrt/private-key.pem
-              sed -i 's/\r$//' openwrt/private-key.pem
-              openssl ec -in openwrt/private-key.pem -pubout -out openwrt/public-key.pem 2>/dev/null || \
-                openssl rsa -in openwrt/private-key.pem -pubout -out openwrt/public-key.pem
-              chmod 644 openwrt/public-key.pem
-              echo "✅ ECDSA/RSA 私钥注入成功，已派生公钥"
-              cp openwrt/public-key.pem openwrt/solarflows-apk-public.pem
-              echo "signed=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "::warning::未配置 APK_BUILD_KEY secret，构建系统将生成随机密钥"
-              echo "signed=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            if [ -n "$USIGN_KEY" ]; then
-              printf '%s\n' "$USIGN_KEY" > openwrt/key-build
-              chmod 600 openwrt/key-build
-              sed -i 's/\r$//' openwrt/key-build
-              echo "✅ USIGN 私钥注入成功"
-              echo "signed=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "::warning::未配置 USIGN_KEY secret，构建系统将生成随机密钥"
-              echo "signed=false" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
-      - name: 📥 Download Packages
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          cd openwrt
-          make download -j$(nproc)
-          find dl -maxdepth 1 -size -1024c -print -exec rm -f {} \; 2>/dev/null || true
-
-      - name: 🔨 Build Firmware
-        if: steps.check.outputs.changed == 'true'
-        id: build
-        run: |
-          START_TIME=$(date +%s)
-          cd openwrt
-          echo "🔨 开始并发编译 ($(nproc) 线程)..."
-          set +o pipefail
-          make -j$(( $(nproc) + 1 )) -k V=s 2>&1 | tee build.log | grep '^time: ' || true
-          MAKE_EXIT=${PIPESTATUS[0]}
-          set -o pipefail
-
-          if [ "$MAKE_EXIT" -ne 0 ]; then
-            echo "⚠️ 并发编译遇错（退出码: $MAKE_EXIT）→ 刷新 feed 单线程输出详细排错日志..."
-            ./scripts/feeds update -a && ./scripts/feeds install -a
-            make -j1 V=sc 2>&1 | tee -a build.log || {
-              echo "💥 构建彻底失败 · 请检查 build.log"
-              exit 1
-            }
-          fi
-          END_TIME=$(date +%s)
-          DURATION_SEC=$((END_TIME - START_TIME))
-          DURATION_FMT=$(printf '%dh %dm %ds' $((DURATION_SEC/3600)) $(((DURATION_SEC%3600)/60)) $((DURATION_SEC%60)))
-          echo "duration=${DURATION_SEC}" >> $GITHUB_OUTPUT
-          echo "duration_fmt=${DURATION_FMT}" >> $GITHUB_OUTPUT
-          echo "⏱️ 编译耗时: ${DURATION_FMT}"
-
-      - name: 📦 Package Artifacts
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          cd openwrt
-          mkdir -p release/firmware release/passwall
-
-          # 收集固件镜像产物（排除 packages/ 子目录）
-          find bin/targets -type f -not -path "*/packages/*" -exec cp {} release/firmware/ \; 2>/dev/null || true
-
-          # 附带公开签名公钥，方便刷机用户导入免报错
-          cp -f public-key.pem release/firmware/solarflows-apk-public.pem 2>/dev/null || true
-          cp -f key-build.pub release/firmware/solarflows-usign-public.pub 2>/dev/null || true
-
-          # 收集 PassWall 相关独立包（统一放在 release/passwall）
-          find bin/packages -name "*passwall*.ipk" -o -name "*passwall*.apk" -exec cp {} release/passwall/ \; 2>/dev/null || true
-          DEPS=(chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy shadowsocksr simple-obfs sing-box tcping xray-core)
-          for dep in "${DEPS[@]}"; do
-            find bin/packages \( -name "*${dep}*.ipk" -o -name "*${dep}*.apk" \) -exec cp {} release/passwall/ \; 2>/dev/null || true
-          done
-
-          cd release && tar czf ../${{ matrix.target }}-release.tar.gz .
-
-      - name: 📋 Generate build info
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          NOW=$(date +'%Y-%m-%d %H:%M:%S')
-          cat > build-info.json <<JSONEOF
-          {
-            "target": "${{ matrix.target }}",
-            "name": "${{ matrix.name }}",
-            "source_ref": "nss-edma-custom",
-            "source_sha": "${{ steps.current_sha.outputs.sha }}",
-            "source_sha_short": "$(echo "${{ steps.current_sha.outputs.sha }}" | cut -c1-7)",
-            "duration_fmt": "${{ steps.build.outputs.duration_fmt }}",
-            "signed": "${{ steps.signing_key.outputs.signed }}",
-            "toolchain_hit": "${{ steps.cache-refresh.outputs.toolchain_restored }}",
-            "ccache_hit": "${{ steps.cache-refresh.outputs.ccache_restored }}",
-            "passwall_tag": "${{ matrix.passwall_tag }}",
-            "release_tag_prefix": "${{ matrix.release_tag_prefix }}",
-            "timestamp": "${NOW}"
-          }
-          JSONEOF
-
-      - name: 📤 Upload firmware artifact
-        if: steps.check.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.target }}-release
-          path: openwrt/${{ matrix.target }}-release.tar.gz
-          retention-days: 7
-
-      - name: 📤 Upload build info artifact
-        if: steps.check.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.target }}-build-info
-          path: build-info.json
-          retention-days: 7
-
-  # ========== 发布任务（直接在本仓库发布，不往外部发布） ==========
-  publish:
-    name: Publish Releases
-    needs: build
-    if: |
-      !cancelled() &&
-      needs.build.result != 'skipped' &&
-      (github.event.inputs.release != 'false' || github.event_name == 'schedule')
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Publish target releases
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          publish_target() {
-            local TARGET="$1"
-            local INFO_FILE="artifacts/${TARGET}-build-info/build-info.json"
-            if [ ! -f "$INFO_FILE" ]; then
-              echo "⏭️ [${TARGET}] 未找到构建产物，跳过发布。"
-              return 0
-            fi
-
-            local TARGET_NAME SHORT_SHA DURATION_FMT TIMESTAMP PASSWALL_TAG TAG_PREFIX SIGNED
-            TARGET_NAME=$(jq -r '.name' "$INFO_FILE")
-            SHORT_SHA=$(jq -r '.source_sha_short' "$INFO_FILE")
-            DURATION_FMT=$(jq -r '.duration_fmt' "$INFO_FILE")
-            TIMESTAMP=$(jq -r '.timestamp' "$INFO_FILE")
-            PASSWALL_TAG=$(jq -r '.passwall_tag' "$INFO_FILE")
-            TAG_PREFIX=$(jq -r '.release_tag_prefix' "$INFO_FILE")
-            SIGNED=$(jq -r '.signed' "$INFO_FILE")
-
-            local DATE_TAG TAG TITLE
-            DATE_TAG="v$(date +'%Y%m%d-%H%M')"
-            TAG="${TAG_PREFIX}${DATE_TAG}"
-            TITLE="${TARGET_NAME} Build ${DATE_TAG}"
-            echo "🏷️ 创建固件 Release: $TAG"
-
-            local RELEASE_TAR="artifacts/${TARGET}-release/${TARGET}-release.tar.gz"
-            if [ -f "$RELEASE_TAR" ]; then
-              mkdir -p "artifacts/${TARGET}-expanded"
-              tar xzf "$RELEASE_TAR" -C "artifacts/${TARGET}-expanded/"
-            fi
-
-            # 1. 发布固件 Release 到本仓库
-            local FW_DIR="artifacts/${TARGET}-expanded/firmware"
-            if [ -d "$FW_DIR" ]; then
-              cat > /tmp/release_body.md <<RELEOF
-          ## ${TITLE}
-
-          | 项目 | 详情 |
-          |------|------|
-          | **设备** | ${TARGET_NAME} |
-          | **源码分支** | \`nss-edma-custom\` |
-          | **源码提交** | \`${SHORT_SHA}\` |
-          | **构建时间** | ${TIMESTAMP} |
-          | **编译耗时** | ${DURATION_FMT} |
-          | **官方签名** | $([ "$SIGNED" = "true" ] && echo "✅ 官方证书签名" || echo "⚠️ 自动生成未受信密钥") |
-
-          ### 核心特性
-          - 高通 NSS-EDMA / PPE 现代数据面解耦驱动栈 (Linux 6.18)
-          - SONiC 3-tuple FullCone NAT1 (原生硬件流表卸载兼容)
-          - ARMv8 Crypto Extensions (AES/SHA/GHASH/CRC32 矢量指令硬加速)
-          - 出厂默认安全中频 (748.8 MHz) + 软中断多核心调度优化
-          - 内置 PassWall 代理生态与中文支持
-          RELEOF
-
-              gh release create "$TAG" "$FW_DIR"/* \
-                --title "$TITLE" \
-                --notes-file /tmp/release_body.md \
-                --latest
-              echo "✅ [${TARGET}] 固件已成功发布至本仓库 Release: $TAG"
-            fi
-
-            # 2. 发布 Passwall 独立固化 Release（在本仓库固化更新，不外发）
-            local PW_DIR="artifacts/${TARGET}-expanded/passwall"
-            if [ -d "$PW_DIR" ] && [ "$(ls -A "$PW_DIR" 2>/dev/null)" ]; then
-              echo "📦 正在更新本仓库固定 Passwall Release: $PASSWALL_TAG ..."
-              if gh release view "$PASSWALL_TAG" &>/dev/null; then
-                gh release upload "$PASSWALL_TAG" "$PW_DIR"/* --clobber
-              else
-                gh release create "$PASSWALL_TAG" "$PW_DIR"/* \
-                  --title "Passwall Packages (${TARGET})" \
-                  --notes "Passwall 架构独立软件包库（更新于 ${TIMESTAMP}）" \
-                  --latest=false
-              fi
-              echo "✅ [${TARGET}] 本仓库固定 Passwall 软件包库更新完成"
-            fi
-          }
-
-          # 执行矩阵发布
-          for t in $(jq -r '.targets[].target' hub/configs/targets.json); do
-            publish_target "$t"
-          done
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
+    uses: solarflows/AutoWorkFlows/.github/workflows/compile-firmware.yml@main
+    with:
+      matrix_target:                      ${{ matrix.target }}
+      matrix_repo:                        'solarflows/ImmortalWrt-QualcommAX'
+      matrix_ref:                         'nss-edma-custom'
+      matrix_packages_branch:             'qualcommax'
+      matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'
+      matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'
+      matrix_passwall_tag:                'packages-${{ matrix.target }}'
+      matrix_firmware_release_tag_prefix: ${{ matrix.tag_prefix }}
+      matrix_artifacts_release_repo:      'solarflows/ImmortalWrt-QualcommAX'
+      matrix_artifacts_release_tag:       'artifacts-${{ matrix.target }}'
+      defaults_repo:                      'solarflows/AutoWorkFlows'
+      defaults_ref:                       'main'
+      config_repo:                        'solarflows/ImmortalWrt-QualcommAX'
+      config_ref:                         'main'
+      config_path:                        'configs'
+      version:                            ${{ needs.plan.outputs.version }}
+      clean_cache:                        ${{ inputs.clean_cache || false }}
+      free_disk_space:                    ${{ inputs.free_disk_space || false }}
+      publish_sdk_ib:                     false
+    secrets:
+      ACCESS_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+      APK_BUILD_KEY: ${{ secrets.APK_BUILD_KEY }}
+      USIGN_KEY:     ${{ secrets.USIGN_KEY }}

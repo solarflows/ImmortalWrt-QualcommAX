@@ -16,9 +16,9 @@ solarflows/ImmortalWrt-QualcommAX
 ├── main 分支 (默认分支 · 轻量级 GitOps 管控中枢)
 │   ├── .github/workflows/
 │   │   ├── sync-upstream.yml       # 双上游同步工作流（追踪 Julius NSS-EDMA + ImmortalWrt Master）
-│   │   └── firmware-builder.yml    # 固件编译流水线（独享 10GB 缓存，自动编译并发版）
+│   │   └── firmware-builder.yml    # 固件编译流水线（Reusable Caller 调度器，调用 AutoWorkFlows）
 │   ├── .github/patches/            # 核心自研特性原子补丁队列（0001 ~ 0006）
-│   ├── configs/                    # 矩阵设备种子配置与 PassWall 扩展包定义
+│   ├── configs/                    # 矩阵设备种子配置与自定义软件包定义
 │   └── README.md                   # 架构与项目文档
 │
 └── nss-edma-custom 分支 (纯净源码产出分支)

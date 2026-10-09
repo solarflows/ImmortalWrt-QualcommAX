@@ -45,13 +45,17 @@ permissions:
 jobs:
   plan:
     name: Prepare Build Matrix
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       version: ${{ steps.set-version.outputs.version }}
     steps:
       - id: set-version
-        run: echo "version=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        run: |
+          NOW=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M:%S')
+          VERSION="V$(echo "$NOW" | awk '{gsub(/[:-]/," "); split($0,a," "); printf "%s%s%s", substr(a[1],3), a[2], a[3]}')"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
       - id: set-matrix
         run: |
           TARGET="${{ inputs.target || 'ipq807x' }}"
@@ -61,8 +65,8 @@ jobs:
             echo "matrix=[{\"target\":\"$TARGET\",\"tag_prefix\":\"$TARGET\"}]" >> $GITHUB_OUTPUT
           fi
 
-  call-compile:
-    name: Compile
+  compile:
+    name: Compile Firmware / ${{ matrix.target }}
     needs: plan
     strategy:
       fail-fast: false

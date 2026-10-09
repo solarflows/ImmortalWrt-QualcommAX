@@ -436,7 +436,7 @@ define KernelPackage/ath11k/config
                select PACKAGE_kmod-qca-nss-drv-wifi-meshmgr
                select NSS_DRV_WIFI_MESH_ENABLE
                select PACKAGE_MAC80211_MESH
-               default n
+               default y if TARGET_qualcommax
                help
                   Say Y to offload 802.11s mesh forwarding (mesh path and
                   proxy path tables) to the NSS cores via the Wi-Fi mesh

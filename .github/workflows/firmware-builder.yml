@@ -48,9 +48,9 @@ jobs:
         run: |
           TARGET="${{ inputs.target || 'ipq807x' }}"
           if [ "$TARGET" = "both" ]; then
-            echo 'matrix=[{"target":"ipq807x","tag_prefix":"ipq807x-"},{"target":"ipq60xx","tag_prefix":"ipq60xx-"}]' >> $GITHUB_OUTPUT
+            echo 'matrix=[{"target":"ipq807x","tag_prefix":"ipq807x"},{"target":"ipq60xx","tag_prefix":"ipq60xx"}]' >> $GITHUB_OUTPUT
           else
-            echo "matrix=[{\"target\":\"$TARGET\",\"tag_prefix\":\"$TARGET-\"}]" >> $GITHUB_OUTPUT
+            echo "matrix=[{\"target\":\"$TARGET\",\"tag_prefix\":\"$TARGET\"}]" >> $GITHUB_OUTPUT
           fi
 
   call-compile:
@@ -70,12 +70,8 @@ jobs:
       matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'
       matrix_passwall_tag:                'packages-${{ matrix.target }}'
       matrix_firmware_release_tag_prefix: ${{ matrix.tag_prefix }}
-      matrix_artifacts_release_repo:      'solarflows/ImmortalWrt-QualcommAX'
-      matrix_artifacts_release_tag:       'artifacts-${{ matrix.target }}'
       defaults_repo:                      'solarflows/AutoWorkFlows'
       defaults_ref:                       'main'
-      config_repo:                        'solarflows/ImmortalWrt-QualcommAX'
-      config_ref:                         'main'
       config_path:                        'configs'
       version:                            ${{ needs.plan.outputs.version }}
       clean_cache:                        ${{ inputs.clean_cache || false }}

@@ -1,4 +1,4 @@
-name: "Dual-Upstream Sync (Julius NSS-EDMA + ImmortalWrt)"
+name: "Upstream Sync (Julius NSS-EDMA Rebase-Top)"
 
 on:
   schedule:
@@ -6,18 +6,18 @@ on:
   workflow_dispatch:
     inputs:
       force_sync:
-        description: 'Force sync even if upstreams are unchanged'
+        description: '强制执行同步与变基置顶'
         type: boolean
         required: false
         default: false
 
 permissions:
   contents: write
-  actions: write
+  issues: write
 
 jobs:
   sync_and_rebase:
-    name: Sync Dual Upstreams and Rebase
+    name: Sync Julius Upstream & Rebase Top
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -33,138 +33,54 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch both upstreams
+      - name: Fetch Julius NSS-EDMA Upstream
         run: |
-          # 1. Julius Bairaktaris NSS-EDMA Driver Core (Highest priority for QualcommAX)
-          git remote add upstream_julius https://github.com/JuliusBairaktaris/openwrt-nss-edma.git || \
-            git remote set-url upstream_julius https://github.com/JuliusBairaktaris/openwrt-nss-edma.git
-          git fetch upstream_julius nss-edma-rework --force
+          git remote add upstream https://github.com/JuliusBairaktaris/openwrt-nss-edma.git || \
+            git remote set-url upstream https://github.com/JuliusBairaktaris/openwrt-nss-edma.git
+          git fetch upstream nss-edma-rework --force
 
-          # 2. ImmortalWrt Ecosystem & Base Packages
-          git remote add upstream_immortal https://github.com/immortalwrt/immortalwrt.git || \
-            git remote set-url upstream_immortal https://github.com/immortalwrt/immortalwrt.git
-          git fetch upstream_immortal master --force
-
-      - name: Check for upstream updates
-        id: check_update
+      - name: Check for upstream changes
+        id: check
         run: |
-          # Check Julius NSS-EDMA updates
-          JULIUS_HEAD=$(git rev-parse upstream_julius/nss-edma-rework)
-          JULIUS_PREV=$(cat .github/julius.sha 2>/dev/null || echo "")
-          echo "Julius NSS-EDMA head: ${JULIUS_HEAD}"
-          echo "Julius previous sha:  ${JULIUS_PREV}"
-          echo "julius_head=${JULIUS_HEAD}" >> "$GITHUB_OUTPUT"
-          echo "julius_prev=${JULIUS_PREV}" >> "$GITHUB_OUTPUT"
+          UPSTREAM_HEAD=$(git rev-parse upstream/nss-edma-rework)
+          BASE_SHA=$(cat .github/julius.sha 2>/dev/null | tr -d '[:space:]' || echo "")
+          echo "Upstream Head: ${UPSTREAM_HEAD}"
+          echo "Recorded Base: ${BASE_SHA}"
 
-          # Check ImmortalWrt updates
-          IMMORTAL_HEAD=$(git rev-parse upstream_immortal/master)
-          IMMORTAL_PREV=$(cat .github/immortal.sha 2>/dev/null || echo "")
-          echo "ImmortalWrt head:     ${IMMORTAL_HEAD}"
-          echo "ImmortalWrt previous: ${IMMORTAL_PREV}"
-          echo "immortal_head=${IMMORTAL_HEAD}" >> "$GITHUB_OUTPUT"
+          echo "upstream_head=${UPSTREAM_HEAD}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
 
-          JULIUS_UPDATED=false
-          IMMORTAL_UPDATED=false
-
-          if [ "$JULIUS_HEAD" != "$JULIUS_PREV" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
-            JULIUS_UPDATED=true
-          fi
-
-          if [ "$IMMORTAL_HEAD" != "$IMMORTAL_PREV" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
-            IMMORTAL_UPDATED=true
-          fi
-
-          echo "julius_updated=${JULIUS_UPDATED}" >> "$GITHUB_OUTPUT"
-          echo "immortal_updated=${IMMORTAL_UPDATED}" >> "$GITHUB_OUTPUT"
-
-          if [ "$JULIUS_UPDATED" = "true" ] || [ "$IMMORTAL_UPDATED" = "true" ]; then
+          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
             echo "has_update=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream commits detected. Rebase required."
           else
             echo "has_update=false" >> "$GITHUB_OUTPUT"
-            echo "All upstreams are already up to date. Nothing to do."
+            echo "Already aligned with Julius upstream. Nothing to do."
           fi
 
-      - name: Rebase and synthesize custom branch
-        if: steps.check_update.outputs.has_update == 'true'
+      - name: Perform Linear Rebase
+        if: steps.check.outputs.has_update == 'true'
         run: |
-          git checkout nss-edma-custom
+          UPSTREAM_HEAD="${{ steps.check.outputs.upstream_head }}"
+          BASE_SHA="${{ steps.check.outputs.base_sha }}"
 
-          # If ImmortalWrt upstream changed, rebase onto updated upstream_immortal/master
-          if [ "${{ steps.check_update.outputs.immortal_updated }}" = "true" ]; then
-            echo "Rebasing onto updated ImmortalWrt upstream..."
-            if ! git rebase upstream_immortal/master; then
-              echo "::warning::ImmortalWrt rebase conflict, resolving known config files..."
-              git checkout --theirs feeds.conf.default 2>/dev/null || true
-              git checkout --theirs .github/workflows/ 2>/dev/null || true
-              git add feeds.conf.default .github/workflows/ 2>/dev/null || true
-              GIT_EDITOR=true git rebase --continue || { git rebase --abort; exit 1; }
-            fi
-            echo "${{ steps.check_update.outputs.immortal_head }}" > .github/immortal.sha
-            git add .github/immortal.sha
-            git diff-index --quiet HEAD || git commit -m "sync(immortalwrt): update base to ${{ steps.check_update.outputs.immortal_head }}"
+          echo "Fetching target branches..."
+          git fetch origin nss-edma-julius:nss-edma-julius --force
+          git checkout nss-edma-julius
+
+          echo "Rebasing our custom commits onto upstream/nss-edma-rework (${UPSTREAM_HEAD})..."
+          if ! git rebase --onto "upstream/nss-edma-rework" "$BASE_SHA" nss-edma-julius; then
+            echo "::error::Rebase conflict detected!"
+            git rebase --abort || true
+            exit 1
           fi
 
-          # If Julius NSS-EDMA drivers changed, dynamically sync all modified paths from Julius
-          if [ "${{ steps.check_update.outputs.julius_updated }}" = "true" ]; then
-            echo "Syncing updated NSS-EDMA files from Julius..."
-            PREV="${{ steps.check_update.outputs.julius_prev }}"
-            HEAD="${{ steps.check_update.outputs.julius_head }}"
+          echo "Rebase succeeded! Pushing updated nss-edma-julius branch..."
+          git push --force-with-lease origin nss-edma-julius
 
-            if [ -n "$PREV" ]; then
-              CHANGED_FILES=$(git diff --name-only "$PREV" "$HEAD" 2>/dev/null || true)
-            else
-              CHANGED_FILES=$(git diff --name-only "upstream_julius/nss-edma-rework~35" "$HEAD" 2>/dev/null || true)
-            fi
-
-            # Protect custom innovations from being overwritten
-            PROTECTED="^(feeds\.conf\.default|\.github/workflows/|package/network/config/firewall4/|package/network/utils/fullconenat-sonic/|package/emortal/luci-app-fullconenat-sonic/|target/linux/generic/hack-6.18/98[456]-|target/linux/qualcommax/Makefile|target/linux/qualcommax/base-files/etc/config/nss_freq|target/linux/qualcommax/base-files/usr/bin/nss_freq|target/linux/qualcommax/base-files/etc/init\.d/set-irq-affinity|target/linux/qualcommax/base-files/etc/uci-defaults/)"
-
-            SYNC_FILES=$(echo "$CHANGED_FILES" | grep -v -E "$PROTECTED" || true)
-
-            if [ -n "$SYNC_FILES" ]; then
-              echo "Discovered files updated by Julius:"
-              echo "$SYNC_FILES"
-              echo "$SYNC_FILES" | xargs -r git checkout "$HEAD" --
-            fi
-
-            # Ensure ATH11K_NSS_SUPPORT defaults to y on qualcommax
-            sed -i 's/default n/default y if TARGET_qualcommax/' package/kernel/mac80211/ath.mk 2>/dev/null || true
-
-            # Re-apply our custom hardware flags
-            echo "Re-applying ARMv8 CE crypto, SONiC FullCone, and target tweaks..."
-            if ! grep -q "CONFIG_ARM64_CRYPTO=y" target/linux/qualcommax/config-6.18; then
-              printf '%s\n' \
-                "CONFIG_ARM64_CRYPTO=y" \
-                "CONFIG_CRYPTO_AES_ARM64_CE=y" \
-                "CONFIG_CRYPTO_AES_ARM64_CE_BLK=y" \
-                "CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y" \
-                "CONFIG_CRYPTO_SHA2_ARM64_CE=y" \
-                "CONFIG_CRYPTO_GHASH_ARM64_CE=y" \
-                "CONFIG_CRYPTO_CRC32_ARM64_CE=y" \
-                "CONFIG_NF_NAT_FULLCONE=y" >> target/linux/qualcommax/config-6.18
-            fi
-
-            # Ensure custom feeds.conf.default stays intact
-            printf '%s\n' \
-              "src-git packages https://github.com/solarflows/packages.git;qualcommax" \
-              "src-git nss https://github.com/JuliusBairaktaris/nss-packages.git;edma-nss" \
-              "src-git luci https://github.com/immortalwrt/luci.git" \
-              "src-git routing https://github.com/openwrt/routing.git" \
-              "src-git telephony https://github.com/openwrt/telephony.git" \
-              "src-git video https://github.com/openwrt/video.git" > feeds.conf.default
-
-            echo "${{ steps.check_update.outputs.julius_head }}" > .github/julius.sha
-            git add -A
-            git diff-index --quiet HEAD || git commit -m "sync(nss-edma): update QualcommAX drivers to ${{ steps.check_update.outputs.julius_head }}"
-          fi
-
-          echo "Pushing updated nss-edma-custom branch..."
-          git push origin nss-edma-custom --force-with-lease
-
-          # Sync SHA tracking files back to main branch
+          echo "Updating recorded baseline in main branch..."
           git checkout main
-          cp -f .github/julius.sha .github/immortal.sha /tmp/ 2>/dev/null || true
-          git checkout nss-edma-custom -- .github/julius.sha .github/immortal.sha 2>/dev/null || true
-          git add .github/julius.sha .github/immortal.sha 2>/dev/null || true
-          git diff-index --quiet HEAD || git commit -m "chore(sync): update upstream SHA tracking records"
+          echo "$UPSTREAM_HEAD" > .github/julius.sha
+          git add .github/julius.sha
+          git commit -m "chore(sync): update Julius base tracking SHA to ${UPSTREAM_HEAD}" || true
           git push origin main

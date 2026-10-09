@@ -1,26 +1,24 @@
 # ────────────────────────────────────────────────────────────
-# ipq60xx (qualcommax) — passwall/passwall2 完整配置
-#
-# 源码: https://github.com/Openwrt-Passwall/openwrt-passwall (v26.7.16)
-#       https://github.com/Openwrt-Passwall/openwrt-passwall2 (v26.7.16)
-#
-# INCLUDE_* 的 Kconfig `select` 不影响 ipk/apk 的 Depends 字段
-# (Depends 仅由 LUCI_DEPENDS 控制)，这里全量启用所有后端。
-# qualcommax: nftables + APK, aarch64
+# ipq60xx — 出海代理生态 (Proxy Ecosystem)
 # ────────────────────────────────────────────────────────────
 
-# ── passwall 核心 ──
+# ═══════ 控制面板 ═══════
 CONFIG_PACKAGE_luci-app-passwall=y
 CONFIG_PACKAGE_luci-app-passwall2=y
+CONFIG_PACKAGE_luci-app-homeproxy=y
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_luci-app-privoxy=y
+CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-homeproxy-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-privoxy-zh-cn=y
 
-# ── 透明代理 ──
+# ═══════ 透明代理链 ═══════
 CONFIG_PACKAGE_luci-app-passwall_Nftables_Transparent_Proxy=y
 CONFIG_PACKAGE_luci-app-passwall2_Nftables_Transparent_Proxy=y
 CONFIG_PACKAGE_luci-app-passwall2_Basic_Core_All=y
 
-# ════════════════════════════════════════════════════════════
-# INCLUDE_* — 全量启用（Kconfig select 不进 ipk Depends）
-# ════════════════════════════════════════════════════════════
+# ═══════ PassWall (v1) INCLUDE 开关 ═══════
 CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Geoview=y
 CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Haproxy=y
 CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Hysteria=y
@@ -37,6 +35,7 @@ CONFIG_PACKAGE_luci-app-passwall_INCLUDE_V2ray_Plugin=y
 CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y
 CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray_Plugin=y
 
+# ═══════ PassWall2 INCLUDE 开关 ═══════
 CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Haproxy=y
 CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Hysteria=y
 CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NaiveProxy=y
@@ -47,17 +46,34 @@ CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server=y
 CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Simple_Obfs=y
 CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_V2ray_Plugin=y
 
-# ════════════════════════════════════════════════════════════
-# LUCI_DEPENDS 独立包
-# ════════════════════════════════════════════════════════════
+# ═══════ 强制预装后端二进制 (消除 SDK/IB 缺失隐患) ═══════
+CONFIG_PACKAGE_sing-box=y
+CONFIG_PACKAGE_xray-core=y
+CONFIG_PACKAGE_xray-plugin=y
+CONFIG_PACKAGE_shadowsocks-rust-sslocal=y
+CONFIG_PACKAGE_shadowsocks-rust-ssserver=y
+CONFIG_PACKAGE_shadowsocksr-libev-ssr-server=y
+CONFIG_PACKAGE_haproxy=y
+CONFIG_PACKAGE_hysteria=y
+CONFIG_PACKAGE_naiveproxy=y
+CONFIG_PACKAGE_shadow-tls=y
+CONFIG_PACKAGE_simple-obfs-client=y
+CONFIG_PACKAGE_v2ray-plugin=y
+CONFIG_PACKAGE_privoxy=y
+
+# ═══════ 地理规则库 ═══════
+CONFIG_PACKAGE_geoview=y
+CONFIG_PACKAGE_v2ray-geoip-full=y
+CONFIG_PACKAGE_v2ray-geosite-full=y
+
+# ═══════ 核心辅助工具 ═══════
 CONFIG_PACKAGE_chinadns-ng=y
 CONFIG_PACKAGE_dns2socks=y
 CONFIG_PACKAGE_ipt2socks=y
 CONFIG_PACKAGE_microsocks=y
 CONFIG_PACKAGE_tcping=y
-CONFIG_PACKAGE_unzip=y
 
-# ── sing-box 子选项 ──
+# ═══════ sing-box 编译特性子选项 ═══════
 CONFIG_SING_BOX_BUILD_ACME=y
 CONFIG_SING_BOX_BUILD_CLASH_API=y
 CONFIG_SING_BOX_BUILD_GVISOR=y

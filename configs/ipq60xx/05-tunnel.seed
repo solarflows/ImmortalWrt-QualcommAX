@@ -1,0 +1,48 @@
+# ────────────────────────────────────────────────────────────
+# ipq60xx — 隧道协议与穿透组网 (Tunneling, VPN & Reverse Proxy)
+# ────────────────────────────────────────────────────────────
+
+# ═══════ WireGuard VPN ═══════
+CONFIG_PACKAGE_kmod-wireguard=y
+CONFIG_PACKAGE_wireguard-tools=y
+CONFIG_PACKAGE_luci-proto-wireguard=y
+
+# ═══════ ZeroTier 虚拟局域网 ═══════
+CONFIG_PACKAGE_zerotier=y
+CONFIG_PACKAGE_luci-app-zerotier=y
+CONFIG_PACKAGE_luci-i18n-zerotier-zh-cn=y
+
+# ═══════ NATMap TCP/UDP 打洞 ═══════
+CONFIG_PACKAGE_natmap=y
+CONFIG_PACKAGE_luci-app-natmap=y
+CONFIG_PACKAGE_luci-i18n-natmap-zh-cn=y
+
+# ═══════ DDNSTO 内网穿透 ═══════
+CONFIG_PACKAGE_ddnsto=y
+CONFIG_PACKAGE_luci-app-ddnsto=y
+CONFIG_PACKAGE_luci-i18n-ddnsto-zh-cn=y
+
+# ═══════ FRP 内网穿透客户端与服务端 ═══════
+CONFIG_PACKAGE_frpc=y
+CONFIG_PACKAGE_frps=y
+CONFIG_PACKAGE_luci-app-frpc=y
+CONFIG_PACKAGE_luci-app-frps=y
+CONFIG_PACKAGE_luci-i18n-frpc-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-frps-zh-cn=y
+
+# ═══════ Lucky 大吉反向代理 ═══════
+CONFIG_PACKAGE_lucky=y
+CONFIG_PACKAGE_luci-app-lucky=y
+CONFIG_PACKAGE_luci-i18n-lucky-zh-cn=y
+
+# ═══════ PBR 策略分流 ═══════
+CONFIG_PACKAGE_pbr=y
+CONFIG_PACKAGE_luci-app-pbr=y
+CONFIG_PACKAGE_luci-i18n-pbr-zh-cn=y
+
+# ═══════ Cloudflare Tunnel & 测速 ═══════
+CONFIG_PACKAGE_cloudflared=y
+CONFIG_PACKAGE_luci-app-cloudflared=y
+CONFIG_PACKAGE_luci-i18n-cloudflared-zh-cn=y
+CONFIG_PACKAGE_luci-app-cloudflarespeedtest=y
+CONFIG_PACKAGE_luci-i18n-cloudflarespeedtest-zh-cn=y

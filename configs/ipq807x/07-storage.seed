@@ -1,0 +1,11 @@
+# ────────────────────────────────────────────────────────────
+# ipq807x — 存储与文件共享服务 (Storage & File Sharing)
+# ────────────────────────────────────────────────────────────
+
+# ═══════ SFTP 与 Web 文件管理 ═══════
+CONFIG_PACKAGE_openssh-sftp-server=y
+CONFIG_PACKAGE_dufs=y
+CONFIG_PACKAGE_luci-app-dufs=y
+CONFIG_PACKAGE_luci-i18n-dufs-zh-cn=y
+CONFIG_PACKAGE_luci-app-filemanager=y
+CONFIG_PACKAGE_luci-i18n-filemanager-zh-cn=y

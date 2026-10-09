@@ -1,0 +1,101 @@
+# ────────────────────────────────────────────────────────────
+# ipq807x — 核心网络与路由增强 (Networking, NAT1 & DNS)
+# ────────────────────────────────────────────────────────────
+
+# ═══════ SONiC FullCone NAT1 (硬件流表卸载共存) ═══════
+CONFIG_PACKAGE_fullconenat-sonic=y
+CONFIG_PACKAGE_luci-app-fullconenat-sonic=y
+CONFIG_PACKAGE_luci-i18n-fullconenat-sonic-zh-cn=y
+
+# ═══════ Netfilter / 内核网络栈支持 ═══════
+CONFIG_PACKAGE_kmod-inet-diag=y
+CONFIG_PACKAGE_kmod-netlink-diag=y
+CONFIG_PACKAGE_kmod-nf-ipt=y
+CONFIG_PACKAGE_kmod-nf-socket=y
+CONFIG_PACKAGE_kmod-nf-tproxy=y
+CONFIG_PACKAGE_kmod-nft-compat=y
+CONFIG_PACKAGE_kmod-nft-socket=y
+CONFIG_PACKAGE_kmod-nft-tproxy=y
+CONFIG_PACKAGE_kmod-ipt-core=y
+CONFIG_PACKAGE_kmod-ipt-ipopt=y
+CONFIG_PACKAGE_kmod-ipt-ipset=y
+CONFIG_PACKAGE_kmod-iptables=y
+CONFIG_PACKAGE_kmod-sched-cake=y
+CONFIG_PACKAGE_kmod-tun=y
+CONFIG_PACKAGE_ipset=y
+CONFIG_PACKAGE_iptables-mod-ipopt=y
+CONFIG_PACKAGE_iptables-nft=y
+CONFIG_PACKAGE_xtables-nft=y
+CONFIG_PACKAGE_libipset=y
+CONFIG_PACKAGE_libiptext=y
+CONFIG_PACKAGE_libiptext-nft=y
+CONFIG_PACKAGE_libiptext6=y
+CONFIG_PACKAGE_libxtables=y
+CONFIG_PACKAGE_lyaml=y
+
+# ═══════ DNS 引擎与域名分流过滤 ═══════
+CONFIG_PACKAGE_smartdns=y
+CONFIG_PACKAGE_luci-app-smartdns=y
+CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y
+CONFIG_PACKAGE_luci-app-dnsfilter=y
+CONFIG_PACKAGE_luci-i18n-dnsfilter-zh-cn=y
+CONFIG_PACKAGE_bind-client=y
+CONFIG_PACKAGE_bind-dig=y
+CONFIG_PACKAGE_bind-libs=y
+
+# ═══════ UPnP & IPTV 组播 ═══════
+CONFIG_PACKAGE_miniupnpd-nftables=y
+CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-i18n-upnp-zh-cn=y
+CONFIG_PACKAGE_libminiupnpc=y
+CONFIG_PACKAGE_libnatpmp=y
+CONFIG_PACKAGE_msd_lite=y
+CONFIG_PACKAGE_luci-app-msd_lite=y
+CONFIG_PACKAGE_luci-i18n-msd_lite-zh-cn=y
+
+# ═══════ DDNS 动态域名服务 ═══════
+CONFIG_PACKAGE_ddns-scripts=y
+CONFIG_PACKAGE_ddns-scripts-aliyun=y
+CONFIG_PACKAGE_ddns-scripts-beget=y
+CONFIG_PACKAGE_ddns-scripts-blazingfast=y
+CONFIG_PACKAGE_ddns-scripts-cloudflare=y
+CONFIG_PACKAGE_ddns-scripts-cnkuai=y
+CONFIG_PACKAGE_ddns-scripts-digitalocean=y
+CONFIG_PACKAGE_ddns-scripts-dnspod=y
+CONFIG_PACKAGE_ddns-scripts-dnspod-com=y
+CONFIG_PACKAGE_ddns-scripts-dnspod-v3=y
+CONFIG_PACKAGE_ddns-scripts-huaweicloud=y
+CONFIG_PACKAGE_ddns-scripts-noip=y
+CONFIG_PACKAGE_ddns-scripts-nsupdate=y
+CONFIG_PACKAGE_ddns-scripts-services=y
+CONFIG_PACKAGE_ddns-scripts-utils=y
+CONFIG_PACKAGE_giflib-utils=y
+CONFIG_PACKAGE_luci-app-ddns=y
+CONFIG_PACKAGE_luci-i18n-ddns-zh-cn=y
+
+# ═══════ 局域网唤醒 & ARP 绑定 ═══════
+CONFIG_PACKAGE_etherwake=y
+CONFIG_PACKAGE_luci-app-wol=y
+CONFIG_PACKAGE_luci-i18n-wol-zh-cn=y
+CONFIG_PACKAGE_luci-app-timewol=y
+CONFIG_PACKAGE_luci-i18n-timewol-zh-cn=y
+CONFIG_PACKAGE_luci-app-arpbind=y
+CONFIG_PACKAGE_luci-i18n-arpbind-zh-cn=y
+
+# ═══════ 流量控制 & 网络诊断排错 ═══════
+CONFIG_PACKAGE_sqm-scripts=y
+CONFIG_PACKAGE_luci-app-sqm=y
+CONFIG_PACKAGE_luci-i18n-sqm-zh-cn=y
+CONFIG_PACKAGE_ethtool-full=y
+CONFIG_PACKAGE_ip-full=y
+CONFIG_PACKAGE_iputils-arping=y
+CONFIG_PACKAGE_resolveip=y
+CONFIG_PACKAGE_tc-tiny=y
+CONFIG_PACKAGE_pppoe-discovery=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_wget-ssl=y
+CONFIG_PACKAGE_iperf3=y
+CONFIG_PACKAGE_tcpdump=y
+CONFIG_PACKAGE_socat=y
+CONFIG_PACKAGE_iftop=y
+CONFIG_PACKAGE_mtr-json=y

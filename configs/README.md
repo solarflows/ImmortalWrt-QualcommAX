@@ -27,7 +27,7 @@
 | 编号 | 种子文件名 | 领域职责定义 (Scope) | 典型配置项与包示例 |
 | :--- | :--- | :--- | :--- |
 | **01** | `01-base.seed` | **目标平台、设备画像与全局构建参数**<br>决定芯片架构、机型 Profile、全局编译器优化与日志。 | `CONFIG_TARGET_qualcommax=y`<br>`CONFIG_TARGET_..._DEVICE_...=y`<br>`CONFIG_DEVEL=y`<br>`CONFIG_CCACHE=y`<br>`CONFIG_BUILD_LOG=y` |
-| **02** | `02-hardware.seed` | **硬件加速、指令集扩展与底层外设**<br>CPU 特性、密码学硬件卸载、调频、LED/按键。 | `CONFIG_MBEDTLS_AESCE_C=y`<br>`CONFIG_MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT=y`<br>`luci-app-cpufreq`<br>`kmod-leds-*` |
+| **02** | `02-hardware.seed` | **硬件加速、指令集扩展与底层外设**<br>CPU 特性、密码学硬件卸载、调频、LED/按键。 | `CONFIG_MBEDTLS_AESCE_C=y`<br>`CONFIG_MBEDTLS_SHA256_USE_ARMV8_A_CRYPTO_IF_PRESENT=y`<br>`cpufreq`, `luci-app-cpufreq`<br>`kmod-leds-*` |
 | **03** | `03-system.seed` | **系统基础库、Shell 终端与 LuCI 框架**<br>核心系统动态库、命令行工具、文本编辑器、Web 界面底座、本地化与基础运维插件。 | `libc`, `libcurl`, `libpcre2`<br>`bash`, `coreutils`, `nano-plus`, `vim` (Tiny), `htop`, `jq`<br>`default-settings-chn`, `luci-theme-aurora`<br>`ttyd`, `taskplan`, `vlmcsd`, `wechatpush` |
 | **04** | `04-network.seed` | **核心网络栈、NAT、DNS 与网络诊断**<br>网络协议栈、NAT1 穿透、DNS 解析过滤、UPnP、组播、DDNS、QoS 流控与网络排错工具。 | `fullconenat-sonic`, `luci-app-fullconenat-sonic`<br>`smartdns`, `luci-app-dnsfilter`<br>`bind-client`, `bind-dig` (仅客户端库)<br>`miniupnpd-nftables`, `ddns-scripts`<br>`sqm-scripts`, `iperf3`, `tcpdump`, `socat` |
 | **05** | `05-tunnel.seed` | **隧道互联、异地组网与内网穿透**<br>安全隧道协议、虚拟局域网、P2P 打洞、反向代理穿透客户端。 | `kmod-wireguard`, `wireguard-tools`<br>`zerotier`, `natmap`, `ddnsto`<br>`frpc`, `frps`, `lucky`, `cloudflared` |

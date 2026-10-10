@@ -5,7 +5,24 @@
 CPUINFO_PATH="/proc/cpuinfo"
 CPUFREQ_PATH="/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_cur_freq"
 
-cpu_arch="$(cat "$CPUINFO_PATH" 2>/dev/null | awk -F ': ' '/model name/ {print $2}' | head -n1 || echo 'N/A')"
+cpu_arch="$(awk -F ': ' '/model name/ {print $2}' "$CPUINFO_PATH" 2>/dev/null | head -n1)"
+if [ -z "$cpu_arch" ]; then
+	cpu_part="$(awk -F ': ' '/CPU part/ {print $2}' "$CPUINFO_PATH" 2>/dev/null | head -n1)"
+	case "$cpu_part" in
+		0xd03) cpu_arch="ARM Cortex-A53" ;;
+		0xd05) cpu_arch="ARM Cortex-A55" ;;
+		0xd07) cpu_arch="ARM Cortex-A57" ;;
+		0xd08) cpu_arch="ARM Cortex-A72" ;;
+		0xd09) cpu_arch="ARM Cortex-A73" ;;
+		0xd0a) cpu_arch="ARM Cortex-A75" ;;
+		0xd0b) cpu_arch="ARM Cortex-A76" ;;
+		0xd40) cpu_arch="ARM Neoverse V1" ;;
+		*)
+			cpu_arch="$(awk -F ': ' '/Processor/ {print $2}' "$CPUINFO_PATH" 2>/dev/null | head -n1)"
+			[ -z "$cpu_arch" ] && cpu_arch="$(uname -m)"
+			;;
+	esac
+fi
 
 case "$DISTRIB_TARGET" in
 x86/*)

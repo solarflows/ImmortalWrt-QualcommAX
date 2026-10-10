@@ -386,9 +386,25 @@ define KernelPackage/ath11k/config
                	 TARGET_qualcommax_ipq807x_DEVICE_linksys_mx4200v1 || \
                	 TARGET_qualcommax_ipq807x_DEVICE_redmi_ax6 || \
                	 TARGET_qualcommax_ipq807x_DEVICE_xiaomi_ax3600 || \
-               	 TARGET_qualcommax_ipq807x_DEVICE_zte_mf269 )
+               	 TARGET_qualcommax_ipq807x_DEVICE_zte_mf269 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_8devices_mango-dvk || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_alfa-network_ap120c-ax || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_glinet_gl-ax1800 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_glinet_gl-axt1800 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_linksys_mr7350 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_linksys_mr7500 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_netgear_rbr350 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_netgear_rbs350 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_netgear_wax214 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_netgear_wax610 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_netgear_wax610y || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_qihoo_360v6 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_tplink_eap610-outdoor || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_tplink_eap625-outdoor-hd-v1 || \
+               	 TARGET_qualcommax_ipq60xx_DEVICE_yuncore_fap650 )
                select ATH11K_MEM_PROFILE_256M if TARGET_qualcommax_ipq807x_DEVICE_netgear_wax218
-               default y if TARGET_qualcommax
+               default y if (TARGET_qualcommax_ipq807x || TARGET_qualcommax_ipq60xx)
                help
                   Say Y to offload the ath11k data path to the NSS cores
                   (wifili). Requires the qca-ppe-nss glue to arm the NSS

@@ -46,6 +46,32 @@ CONFIG_PACKAGE_kmod-crypto-lib-poly1305=y
 CONFIG_PACKAGE_kmod-crypto-xxhash=y
 CONFIG_PACKAGE_kmod-cryptodev=y
 
+# ═══════ 高通 NSS (Network Subsystem) 硬件加速与数据通路 ═══════
+CONFIG_ATH11K_NSS_SUPPORT=y
+CONFIG_PACKAGE_MAC80211_NSS_SUPPORT=y
+CONFIG_ATH11K_DEBUGFS_STA=y
+
+# 核心驱动与硬件卸载引擎 (PPE / ECM)
+CONFIG_PACKAGE_kmod-qca-nss-drv=y
+CONFIG_PACKAGE_kmod-qca-ppe-nss=y
+CONFIG_PACKAGE_kmod-qca-nss-ecm=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-bridge-mgr=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-vlan-mgr=y
+CONFIG_PACKAGE_kmod-qca-mcs=y
+
+# Julius 核心运行时工具与 LuCI 监控面板
+CONFIG_PACKAGE_nss-tools=y
+CONFIG_PACKAGE_luci-app-nss=y
+
+# NSS 流量整形、镜像与底层诊断套件
+CONFIG_PACKAGE_kmod-qca-nss-drv-qdisc=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-igs=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-mirror=y
+CONFIG_PACKAGE_kmod-qca-nss-drv-netlink=y
+CONFIG_PACKAGE_nssinfo=y
+CONFIG_PACKAGE_libnl-nss=y
+
 # ═══════ CPU 调频、中断亲和力与温度传感 ═══════
 CONFIG_PACKAGE_cpufreq=y
 CONFIG_PACKAGE_luci-app-cpufreq=y

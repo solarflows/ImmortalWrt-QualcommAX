@@ -8,6 +8,18 @@ CONFIG_TARGET_qualcommax=y
 CONFIG_TARGET_qualcommax_ipq60xx=y
 CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_link_nn6000-v2=y
 
+# ═══════ NSS 固件与内存画像 ═══════
+CONFIG_NSS_FIRMWARE_VERSION_12_5=y
+CONFIG_ATH11K_MEM_PROFILE_1G=y
+CONFIG_NSS_MEM_PROFILE_MEDIUM=y
+
+# ═══════ 内核组播与底层硬件调试 ═══════
+CONFIG_KERNEL_IP_MROUTE=y
+CONFIG_KERNEL_IPV6_MROUTE=y
+CONFIG_KERNEL_DEVMEM=y
+CONFIG_BUSYBOX_CUSTOM=y
+CONFIG_BUSYBOX_CONFIG_DEVMEM=y
+
 # ═══════ 构建选项 ═══════
 CONFIG_DEVEL=y                     # 开发者模式（保留源码树）
 CONFIG_CCACHE=y                    # 编译缓存加速

@@ -83,4 +83,5 @@ esac
 
 printf '%s\n' "$target_frequency" > "$current_freq" || die "failed to set NSS frequency"
 save_level
+echo -n "$(format_frequency "$target_frequency" | tr -d ' ')" > /tmp/nss_freq 2>/dev/null
 show_status

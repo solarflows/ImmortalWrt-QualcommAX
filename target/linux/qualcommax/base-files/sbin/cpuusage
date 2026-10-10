@@ -5,17 +5,22 @@ cpu_load="$(top -bn1 | awk 'NR==2 {print "USR: " $2 " SYS: " $4}')"
 
 nss_load="$(awk 'NR == 6 { print $2; exit }' /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi 2>/dev/null)"
 
-nss_freq="$(awk 'NF { printf "%.1fMHz", $1 / 1000000; exit }' /proc/sys/dev/nss/clock/current_freq 2>/dev/null)"
-if [ -z "$nss_freq" ]; then
-	cat /proc/sys/dev/nss/clock/current_freq >/dev/null 2>&1
-	nss_hz="$(dmesg | grep -o 'Frequency Set to [0-9]*' | tail -n 1 | awk '{print $NF}')"
-	[ -n "$nss_hz" ] && nss_freq="$(awk -v hz="$nss_hz" 'BEGIN { printf "%.1fMHz", hz / 1000000 }')"
-fi
-if [ -z "$nss_freq" ]; then
-	case "$(uci -q get nss_freq.settings.level)" in
-		high) nss_freq="1689.6MHz" ;;
-		mid) nss_freq="748.8MHz" ;;
-	esac
+if [ -s /tmp/nss_freq ]; then
+	nss_freq="$(cat /tmp/nss_freq 2>/dev/null)"
+else
+	nss_freq="$(awk 'NF { printf "%.1fMHz", $1 / 1000000; exit }' /proc/sys/dev/nss/clock/current_freq 2>/dev/null)"
+	if [ -z "$nss_freq" ]; then
+		cat /proc/sys/dev/nss/clock/current_freq >/dev/null 2>&1
+		nss_hz="$(dmesg | grep -o 'Frequency Set to [0-9]*' | tail -n 1 | awk '{print $NF}')"
+		[ -n "$nss_hz" ] && nss_freq="$(awk -v hz="$nss_hz" 'BEGIN { printf "%.1fMHz", hz / 1000000 }')"
+	fi
+	if [ -z "$nss_freq" ]; then
+		case "$(uci -q get nss_freq.settings.level)" in
+			high) nss_freq="1689.6MHz" ;;
+			mid) nss_freq="748.8MHz" ;;
+		esac
+	fi
+	[ -n "$nss_freq" ] && echo -n "$nss_freq" > /tmp/nss_freq
 fi
 
 nss_ecm="$(cat /sys/kernel/debug/ecm/ecm_db/connection_count_simple 2>/dev/null)"

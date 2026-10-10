@@ -601,7 +601,8 @@ static int qca_ppe_setup(struct dsa_switch *ds)
 		priv->port_vsi[i] = 0;
 	}
 
-	ppe_fdb_flush(priv);
+	if (ppe_fdb_flush(priv))
+		dev_warn(ds->dev, "FDB flush timed out\n");
 
 	regmap_update_bits(priv->regmap, PPE_L2_GLOBAL_CONF,
 			   PPE_L2_LRN_EN | PPE_L2_AGE_EN,

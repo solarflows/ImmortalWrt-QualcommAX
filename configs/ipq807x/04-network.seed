@@ -39,9 +39,6 @@ CONFIG_PACKAGE_luci-app-smartdns=y
 CONFIG_PACKAGE_luci-i18n-smartdns-zh-cn=y
 CONFIG_PACKAGE_luci-app-dnsfilter=y
 CONFIG_PACKAGE_luci-i18n-dnsfilter-zh-cn=y
-CONFIG_PACKAGE_bind-client=y
-CONFIG_PACKAGE_bind-dig=y
-CONFIG_PACKAGE_bind-libs=y
 
 # ═══════ UPnP & IPTV 组播 ═══════
 CONFIG_PACKAGE_miniupnpd-nftables=y
@@ -56,20 +53,13 @@ CONFIG_PACKAGE_luci-i18n-msd_lite-zh-cn=y
 # ═══════ DDNS 动态域名服务 ═══════
 CONFIG_PACKAGE_ddns-scripts=y
 CONFIG_PACKAGE_ddns-scripts-aliyun=y
-CONFIG_PACKAGE_ddns-scripts-beget=y
-CONFIG_PACKAGE_ddns-scripts-blazingfast=y
 CONFIG_PACKAGE_ddns-scripts-cloudflare=y
-CONFIG_PACKAGE_ddns-scripts-cnkuai=y
-CONFIG_PACKAGE_ddns-scripts-digitalocean=y
 CONFIG_PACKAGE_ddns-scripts-dnspod=y
 CONFIG_PACKAGE_ddns-scripts-dnspod-com=y
 CONFIG_PACKAGE_ddns-scripts-dnspod-v3=y
 CONFIG_PACKAGE_ddns-scripts-huaweicloud=y
-CONFIG_PACKAGE_ddns-scripts-noip=y
-CONFIG_PACKAGE_ddns-scripts-nsupdate=y
 CONFIG_PACKAGE_ddns-scripts-services=y
 CONFIG_PACKAGE_ddns-scripts-utils=y
-CONFIG_PACKAGE_giflib-utils=y
 CONFIG_PACKAGE_luci-app-ddns=y
 CONFIG_PACKAGE_luci-i18n-ddns-zh-cn=y
 

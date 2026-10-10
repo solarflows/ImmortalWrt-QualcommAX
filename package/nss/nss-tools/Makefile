@@ -83,7 +83,32 @@ define Package/luci-app-nssqos/description
  prioritization rules of /etc/config/nssqos.
 endef
 
+define Package/luci-i18n-nss-zh-cn
+  SECTION:=luci
+  CATEGORY:=LuCI
+  SUBMENU:=3. Applications
+  TITLE:=luci-app-nss - zh-cn translation
+  DEPENDS:=+luci-app-nss
+  PKGARCH:=all
+endef
+
+define Package/luci-i18n-nssqos-zh-cn
+  SECTION:=luci
+  CATEGORY:=LuCI
+  SUBMENU:=3. Applications
+  TITLE:=luci-app-nssqos - zh-cn translation
+  DEPENDS:=+luci-app-nssqos
+  PKGARCH:=all
+endef
+
 define Build/Compile
+	if command -v po2lmo >/dev/null 2>&1; then \
+		po2lmo ./po/zh_Hans/nss.po ./files/i18n/nss.zh-cn.lmo; \
+		po2lmo ./po/zh_Hans/nssqos.po ./files/i18n/nssqos.zh-cn.lmo; \
+	elif [ -x $(STAGING_DIR_HOSTPKG)/bin/po2lmo ]; then \
+		$(STAGING_DIR_HOSTPKG)/bin/po2lmo ./po/zh_Hans/nss.po ./files/i18n/nss.zh-cn.lmo; \
+		$(STAGING_DIR_HOSTPKG)/bin/po2lmo ./po/zh_Hans/nssqos.po ./files/i18n/nssqos.zh-cn.lmo; \
+	fi
 endef
 
 define Package/nss-tools/install
@@ -122,6 +147,8 @@ define Package/luci-app-nss/install
 	$(INSTALL_DATA) ./files/luci-app-nss.menu.json $(1)/usr/share/luci/menu.d/luci-app-nss.json
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./files/luci-app-nss.acl.json $(1)/usr/share/rpcd/acl.d/luci-app-nss.json
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	$(INSTALL_DATA) ./files/i18n/nss.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/nss.zh-cn.lmo
 endef
 
 define Package/luci-app-nssqos/install
@@ -132,9 +159,27 @@ define Package/luci-app-nssqos/install
 	$(INSTALL_DATA) ./files/luci-app-nssqos.menu.json $(1)/usr/share/luci/menu.d/luci-app-nssqos.json
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./files/luci-app-nssqos.acl.json $(1)/usr/share/rpcd/acl.d/luci-app-nssqos.json
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	$(INSTALL_DATA) ./files/i18n/nssqos.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/nssqos.zh-cn.lmo
+endef
+
+define Package/luci-i18n-nss-zh-cn/install
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	echo "uci set luci.languages.zh_cn='中文 (Chinese)'; uci commit luci" > $(1)/etc/uci-defaults/luci-i18n-nss-zh-cn
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	$(INSTALL_DATA) ./files/i18n/nss.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/nss.zh-cn.lmo
+endef
+
+define Package/luci-i18n-nssqos-zh-cn/install
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	echo "uci set luci.languages.zh_cn='中文 (Chinese)'; uci commit luci" > $(1)/etc/uci-defaults/luci-i18n-nssqos-zh-cn
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	$(INSTALL_DATA) ./files/i18n/nssqos.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/nssqos.zh-cn.lmo
 endef
 
 $(eval $(call BuildPackage,nss-tools))
 $(eval $(call BuildPackage,nssqos))
 $(eval $(call BuildPackage,luci-app-nss))
 $(eval $(call BuildPackage,luci-app-nssqos))
+$(eval $(call BuildPackage,luci-i18n-nss-zh-cn))
+$(eval $(call BuildPackage,luci-i18n-nssqos-zh-cn))

@@ -1,0 +1,127 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: zh_Hans\n"
+
+msgid "NSS Offload"
+msgstr "NSS 硬件加速"
+
+msgid "Offload active"
+msgstr "硬件加速已启用"
+
+msgid "Firmware armed but heartbeat silent — check the system log; a reboot returns to the host stack"
+msgstr "固件已就绪但无心跳响应 — 请检查系统日志；重启可恢复至主机网络栈"
+
+msgid "Host stack (NSS plane not armed)"
+msgstr "主机网络栈 (NSS 数据面未启用)"
+
+msgid "loaded"
+msgstr "已加载"
+
+msgid "not loaded"
+msgstr "未加载"
+
+msgid "NSS offload active (wifili, 802.11s mesh offloaded)"
+msgstr "NSS 硬件加速已启用 (wifili，802.11s Mesh 已卸载)"
+
+msgid "NSS offload active (wifili)"
+msgstr "NSS 硬件加速已启用 (wifili 无线转发)"
+
+msgid "host mode (mesh configured; firmware supports mesh offload)"
+msgstr "主机模式 (已配置 Mesh；固件支持 Mesh 卸载)"
+
+msgid "host mode (mesh configured; mesh offload needs the 11.4 NSS firmware)"
+msgstr "主机模式 (已配置 Mesh；Mesh 卸载需要 11.4 版 NSS 固件)"
+
+msgid "host mode"
+msgstr "主机模式"
+
+msgid "ath11k not loaded"
+msgstr "ath11k 驱动未加载"
+
+msgid "Port"
+msgstr "端口"
+
+msgid "Started"
+msgstr "已启动"
+
+msgid "yes"
+msgstr "是"
+
+msgid "no"
+msgstr "否"
+
+msgid "TX offloaded"
+msgstr "发送卸载 (TX)"
+
+msgid "TX via host"
+msgstr "发送经由主机 (TX)"
+
+msgid "RX offloaded"
+msgstr "接收卸载 (RX)"
+
+msgid "RX to host"
+msgstr "接收至主机 (RX)"
+
+msgid "No ports attached — host stack"
+msgstr "未挂载硬件端口 — 当前运行于主机网络栈"
+
+msgid "Firmware"
+msgstr "固件版本"
+
+msgid "Heartbeat"
+msgstr "内核心跳"
+
+msgid "pkts/s (NSS→host)"
+msgstr "包/秒 (NSS→主机)"
+
+msgid "NSS core load"
+msgstr "NSS 核心负载"
+
+msgid "ECM accelerated connections"
+msgstr "ECM 硬件加速连接数"
+
+msgid "ECM not loaded"
+msgstr "ECM 模块未加载"
+
+msgid "Bridge offload (bridge-mgr)"
+msgstr "网桥硬件转发 (bridge-mgr)"
+
+msgid "Multicast snooping (qca-mcs)"
+msgstr "组播侦听 (qca-mcs)"
+
+msgid "PPPoE manager"
+msgstr "PPPoE 硬件卸载 (pppoe)"
+
+msgid "Wi-Fi data path"
+msgstr "Wi-Fi 数据通路"
+
+msgid "SQM shaper"
+msgstr "SQM 流控整形器"
+
+msgid "nsstbl on"
+msgstr "nsstbl 已启用在"
+
+msgid "upload IGS:"
+msgstr "上行 IGS:"
+
+msgid "no NSS shaper on"
+msgstr "未启用 NSS 整形器在"
+
+msgid "Fast lane"
+msgstr "快速通道 (Fast Lane)"
+
+msgid "egress"
+msgstr "出站"
+
+msgid "ingress"
+msgstr "入站"
+
+msgid "marking rules"
+msgstr "条标记规则"
+
+msgid "Firmware-attached ports"
+msgstr "固件挂载端口统计"
+
+msgid "Offloaded packets are forwarded by the firmware and never reach the host. \"via host\" / \"to host\" is the host↔firmware exception path — what was not offloaded — so low numbers there mean offload is working. Broadcast and multicast discovery, connection setup, short-lived flows and traffic addressed to the router itself always take that path: a flow is only offloaded once it is established, so a quiet port that carries little else shows a low offloaded share. Port totals are on Status → Overview."
+msgstr "卸载数据包由 NSS 固件直接转发，不经过 CPU 主机协议栈。\"via host\" / \"to host\" 是主机与固件之间的例外通路（未被硬件卸载的流量），因此该数值较低表明硬件加速正常生效。广播、组播发现、连接握手初期、短连接以及发往路由器自身的管理流量始终走主机通道：数据流只有在建立后才会由硬件接管，因此流量较少的空闲端口其卸载比例通常偏低。端口全局统计可在 状态 → 概览 中查看。"

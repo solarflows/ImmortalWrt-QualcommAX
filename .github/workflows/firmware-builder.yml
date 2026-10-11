@@ -25,6 +25,16 @@ on:
         options:
           - 'nss-edma-julius'
           - 'nss-edma-custom'
+      version:
+        description: '显式固件版本号 (如 V261011; 留空按版本前缀自动生成)'
+        required: false
+        default: ''
+        type: string
+      upload_artifacts:
+        description: '上传 Actions 归档产物 (固件与 SDK 归档)'
+        required: false
+        default: true
+        type: boolean
       clean_cache:
         description: '刷新缓存 (跳过缓存恢复, 强制重新编译)'
         required: false
@@ -53,8 +63,8 @@ jobs:
     steps:
       - id: set-version
         run: |
-          NOW=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M:%S')
-          VERSION="V$(echo "$NOW" | awk '{gsub(/[:-]/," "); split($0,a," "); printf "%s%s%s", substr(a[1],3), a[2], a[3]}')"
+          # 显式版本号优先，留空则由 reusable workflow 结合 version_prefix 自动推导
+          VERSION="${{ inputs.version || '' }}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
       - id: set-matrix
         run: |
@@ -78,6 +88,7 @@ jobs:
       matrix_repo:                        'solarflows/ImmortalWrt-QualcommAX'
       matrix_ref:                         ${{ inputs.branch || 'nss-edma-julius' }}
       matrix_packages_branch:             'qualcommax'
+      standard_packages_branch:           'qualcommax'
       matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'
       matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'
       matrix_passwall_tag:                'packages-${{ matrix.target }}'
@@ -86,6 +97,9 @@ jobs:
       defaults_ref:                       'main'
       config_path:                        'configs'
       version:                            ${{ needs.plan.outputs.version }}
+      version_prefix:                     'V'
+      collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
+      upload_artifacts:                   ${{ inputs.upload_artifacts != false }}
       clean_cache:                        ${{ inputs.clean_cache || false }}
       free_disk_space:                    ${{ inputs.free_disk_space || false }}
       publish_sdk_ib:                     false

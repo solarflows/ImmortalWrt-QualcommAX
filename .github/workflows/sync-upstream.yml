@@ -1,8 +1,8 @@
 name: "Upstream Sync (Julius NSS-EDMA Rebase-Top)"
 
 on:
-  schedule:
-    - cron: '0 4 * * *'  # 每日 UTC 4:00 (北京时间 12:00)
+  # schedule:
+  #   - cron: '0 4 * * *'  # 每日 UTC 4:00 (北京时间 12:00，已归档分支停用定时自动同步)
   workflow_dispatch:
     inputs:
       force_sync:

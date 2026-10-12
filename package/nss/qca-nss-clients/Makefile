@@ -23,11 +23,6 @@ PKG_CONFIG_DEPENDS:=\
 	CONFIG_NSS_FIRMWARE_VERSION_11_4
 
 include $(INCLUDE_DIR)/kernel.mk
-
-define Build/Prepare
-	mkdir -p $(PKG_BUILD_DIR)
-	$(CP) ./src/* $(PKG_BUILD_DIR)/
-endef
 include $(INCLUDE_DIR)/package.mk
 
 ifeq ($(CONFIG_TARGET_SUBTARGET), "ipq807x")
@@ -244,6 +239,11 @@ EXTRA_CFLAGS+= \
 	-Wno-missing-prototypes \
 	-Wno-missing-declarations \
 	-Wno-empty-body
+
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+	$(CP) ./src/* $(PKG_BUILD_DIR)/
+endef
 
 define Build/Compile
 	+$(MAKE) -C "$(LINUX_DIR)" $(strip $(NSS_CLIENTS_MAKE_OPTS)) \

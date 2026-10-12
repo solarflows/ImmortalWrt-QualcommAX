@@ -34,11 +34,6 @@ PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_kmod-qca-nss-drv-igs
 
 include $(INCLUDE_DIR)/kernel.mk
-
-define Build/Prepare
-	mkdir -p $(PKG_BUILD_DIR)
-	$(CP) ./src/* $(PKG_BUILD_DIR)/
-endef
 include $(INCLUDE_DIR)/package.mk
 
 define KernelPackage/qca-nss-ecm
@@ -183,6 +178,11 @@ endef
 ifeq ($(CONFIG_TARGET_BOARD), "qualcommax")
     SOC:=$(CONFIG_TARGET_SUBTARGET)
 endif
+
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+	$(CP) ./src/* $(PKG_BUILD_DIR)/
+endef
 
 define Build/Compile
 	+$(MAKE) -C "$(LINUX_DIR)" $(strip $(ECM_MAKE_OPTS)) \

@@ -55,8 +55,29 @@ n2h_sum() { awk '$1 == "n2h_rx_pkts" {s += $3} END {print s + 0}' "$DRV/n2h" 2>/
 
 heartbeat=0
 if [ -r "$DRV/n2h" ]; then
-	a=$(n2h_sum); sleep 1; b=$(n2h_sum)
-	heartbeat=$((b - a))
+	if [ -n "$R" ]; then
+		# Synthetic test harness: sample across 1s sleep window
+		a=$(n2h_sum); sleep 1; b=$(n2h_sum)
+		heartbeat=$((b - a))
+	else
+		# Live system: non-blocking delta computation against cached timestamp
+		cur_n2h=$(n2h_sum)
+		now=$(date +%s)
+		if [ -r /tmp/.nss_hb ]; then
+			read lt lc lp < /tmp/.nss_hb
+			dt=$((now - lt))
+			if [ "$dt" -gt 0 ]; then
+				heartbeat=$(( (cur_n2h - lc) / dt ))
+				[ "$heartbeat" -lt 0 ] && heartbeat=0
+				echo "$now $cur_n2h $heartbeat" > /tmp/.nss_hb
+			else
+				heartbeat=${lp:-0}
+			fi
+		else
+			[ "$cur_n2h" -gt 0 ] && heartbeat=1
+			echo "$now $cur_n2h 0" > /tmp/.nss_hb
+		fi
+	fi
 fi
 
 # "Core N:" then a Min/Avg/Max percent line; keep the Avg column per core.

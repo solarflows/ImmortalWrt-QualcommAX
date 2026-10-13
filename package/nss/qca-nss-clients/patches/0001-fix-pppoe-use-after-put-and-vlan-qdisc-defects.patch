@@ -19,6 +19,8 @@ Subject: [PATCH] qca-nss-clients: fix pppoe lifecycle, vlan unlock bug, qdisc un
 
 Signed-off-by: Husky <hyiy666@gmail.com>
 ---
+diff --git a/netlink/nss_nl.c b/netlink/nss_nl.c
+index cd10a9a..9ffb08c 100644
 --- a/netlink/nss_nl.c
 +++ b/netlink/nss_nl.c
 @@ -478,9 +478,11 @@ static int __init nss_nl_init(void)
@@ -33,7 +35,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 +	of_node_put(cmn);
  #endif
  	nss_nl_info_always("NSS Netlink manager loaded: %s\n", NSS_CLIENT_BUILD_ID);
-
+ 
 @@ -521,9 +523,11 @@ static void __exit nss_nl_exit(void)
  	/*
  	 * If the node is not compatible, don't do anything.
@@ -46,35 +48,15 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 +	of_node_put(cmn);
  #endif
  	nss_nl_info_always("NSS Netlink manager unloaded\n");
-
+ 
+diff --git a/nss_qdisc/nss_qdisc.c b/nss_qdisc/nss_qdisc.c
+index d8b24f7..1f37ca6 100644
 --- a/nss_qdisc/nss_qdisc.c
 +++ b/nss_qdisc/nss_qdisc.c
-@@ -1312,7 +1312,7 @@ static inline int nss_qdisc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
- 		return NET_XMIT_SUCCESS;
- 	}
- #else
--	if (skb_skip_tc_classify_offload(skb)) {
-+	if (skb_skip_tc_classify(skb)) {
- 		nss_qdisc_mark_and_schedule(nq->qdisc, skb);
- 		return NET_XMIT_SUCCESS;
- 	}
-@@ -2033,10 +2033,10 @@ void nss_qdisc_destroy(struct nss_qdisc *nq)
-  * __nss_qdisc_init()
-  */
- #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
--int __nss_qdisc_init(struct Qdisc *sch, struct nss_qdisc *nq, nss_shaper_node_type_t type, uint32_t classid, uint32_t accel_mode)
-+static int __nss_qdisc_init(struct Qdisc *sch, struct nss_qdisc *nq, nss_shaper_node_type_t type, uint32_t classid, uint32_t accel_mode)
- {
- #else
--int __nss_qdisc_init(struct Qdisc *sch, struct nss_qdisc *nq, nss_shaper_node_type_t type, uint32_t classid, uint32_t accel_mode,
-+static int __nss_qdisc_init(struct Qdisc *sch, struct nss_qdisc *nq, nss_shaper_node_type_t type, uint32_t classid, uint32_t accel_mode,
- 		struct netlink_ext_ack *extack)
- {
- 	int err;
 @@ -2633,88 +2633,57 @@ static struct notifier_block nss_qdisc_device_notifier = {
-
+ 
  /* ================== Module registration ================= */
-
+ 
 +static struct Qdisc_ops *nss_qdisc_ops_list[] = {
 +	&nss_pfifo_qdisc_ops,
 +	&nss_bfifo_qdisc_ops,
@@ -108,7 +90,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  #endif
  	nss_qdisc_info("Module initializing\n");
  	nss_qdisc_ctx = nss_shaper_register_shaping();
-
+ 
 -	ret = register_qdisc(&nss_pfifo_qdisc_ops);
 -	if (ret != 0)
 -		return ret;
@@ -184,7 +166,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 +		}
 +		nss_qdisc_info("%s registered\n", nss_qdisc_ops_list[i]->id);
 +	}
-
+ 
  	ret = register_netdevice_notifier(&nss_qdisc_device_notifier);
 -	if (ret != 0)
 +	if (ret != 0) {
@@ -194,10 +176,10 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  		return ret;
 +	}
  	nss_qdisc_info("nss qdisc device notifiers registered\n");
-
+ 
  	if (!nss_qdisc_stats_work_queue_init()) {
-@@ -2731,52 +2700,24 @@ static int __init nss_qdisc_module_init(void)
-
+@@ -2731,55 +2700,24 @@ static int __init nss_qdisc_module_init(void)
+ 
  static void __exit nss_qdisc_module_exit(void)
  {
 +	int i;
@@ -212,9 +194,9 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	}
 +	of_node_put(cmn);
  #endif
-
+ 
  	nss_qdisc_stats_work_queue_exit();
-
+ 
 -	unregister_qdisc(&nss_pfifo_qdisc_ops);
 -	nss_qdisc_info("nsspfifo unregistered\n");
 -
@@ -250,29 +232,34 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 -
 -	unregister_qdisc(&nss_red_qdisc_ops);
 -	nss_qdisc_info("nssred unregistered\n");
+-
+-	unregister_qdisc(&nss_wred_qdisc_ops);
+-	nss_qdisc_info("nsswred unregistered\n");
 +	for (i = 0; i < ARRAY_SIZE(nss_qdisc_ops_list); i++) {
 +		unregister_qdisc(nss_qdisc_ops_list[i]);
 +		nss_qdisc_info("%s unregistered\n", nss_qdisc_ops_list[i]->id);
 +	}
-
- 	unregister_qdisc(&nss_wred_qdisc_ops);
- 	nss_qdisc_info("nsswred unregistered\n");
+ 
+ 	unregister_netdevice_notifier(&nss_qdisc_device_notifier);
+ 
+diff --git a/pppoe/nss_connmgr_pppoe.c b/pppoe/nss_connmgr_pppoe.c
+index 00bc794..cfc0a4a 100644
 --- a/pppoe/nss_connmgr_pppoe.c
 +++ b/pppoe/nss_connmgr_pppoe.c
 @@ -75,7 +75,6 @@ static int nss_connmgr_pppoe_get_session(struct net_device *dev,  struct pppoe_o
  		return -1;
  	}
-
+ 
 -	dev_put(addressing->dev);
  	ppp_release_channels(channel, 1);
  	return 0;
  }
 @@ -171,7 +170,6 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
  	}
-
+ 
  	hash_del_rcu(&entry->hash_list);
 -	synchronize_rcu();
-
+ 
  	memset(&npm, 0, sizeof(struct nss_pppoe_msg));
  	npm_destroy = &npm.msg.destroy;
 @@ -183,7 +181,6 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
@@ -291,7 +278,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 +	kfree_rcu(entry, rcu);
  	return NOTIFY_DONE;
  }
-
+ 
 @@ -244,6 +241,7 @@ static int nss_connmgr_pppoe_connect(struct net_device *dev)
  	if_number = nss_dynamic_interface_alloc_node(NSS_DYNAMIC_INTERFACE_TYPE_PPPOE);
  	if (if_number == -1) {
@@ -299,23 +286,23 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 +		dev_put(opt.dev);
  		return NOTIFY_DONE;
  	}
-
+ 
 @@ -345,6 +343,7 @@ static int nss_connmgr_pppoe_connect(struct net_device *dev)
  		goto connect_fail3;
  	}
  	nss_connmgr_pppoe_info("%px: PPPoE session creation is successful\n", dev);
 +	dev_put(opt.dev);
-
+ 
  	return NOTIFY_DONE;
-
+ 
 @@ -353,10 +352,10 @@ connect_fail3:
-
+ 
  connect_fail2:
  	hash_del_rcu(&entry->hash_list);
 -	synchronize_rcu();
 -	kfree(entry);
 +	kfree_rcu(entry, rcu);
-
+ 
  connect_fail1:
 +	dev_put(opt.dev);
  	status = nss_dynamic_interface_dealloc_node(if_number, NSS_DYNAMIC_INTERFACE_TYPE_PPPOE);
@@ -332,7 +319,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	}
 +	of_node_put(cmn);
  #endif
-
+ 
  	/*
 @@ -423,9 +424,11 @@ int __init nss_connmgr_pppoe_init_module(void)
  	/*
@@ -347,6 +334,8 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  #endif
  	/*
  	 * Register the module to the PPP channel events.
+diff --git a/pppoe/nss_connmgr_pppoe.h b/pppoe/nss_connmgr_pppoe.h
+index eed16f8..ec7f8d1 100644
 --- a/pppoe/nss_connmgr_pppoe.h
 +++ b/pppoe/nss_connmgr_pppoe.h
 @@ -83,5 +83,6 @@ struct nss_connmgr_pppoe_session_entry {
@@ -356,12 +345,14 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 +	struct rcu_head rcu;
  };
  #endif
+diff --git a/vlan/nss_vlan_mgr.c b/vlan/nss_vlan_mgr.c
+index e966646..a96cd9f 100644
 --- a/vlan/nss_vlan_mgr.c
 +++ b/vlan/nss_vlan_mgr.c
 @@ -1622,29 +1622,6 @@ static struct ctl_table nss_vlan_table[] = {
  	}
  };
-
+ 
 -/*
 - * nss_vlan sysctl dir
 - */
@@ -385,7 +376,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
 -	},
 -	{ }
 -};
-
+ 
  /*
   * nss_vlan_mgr_add_bond_slave()
 @@ -1777,7 +1754,6 @@ int nss_vlan_mgr_delete_bond_slave(struct net_device *slave_dev)
@@ -398,13 +389,15 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	}
 @@ -1985,7 +1961,7 @@ int __init nss_vlan_mgr_init_module(void)
  	vlan_mgr_ctx.stpid = ETH_P_8021Q;
-
+ 
  #ifdef NSS_VLAN_MGR_PPE_SUPPORT
 -	vlan_mgr_ctx.sys_hdr = register_sysctl_table(nss_vlan_root_dir);
 +	vlan_mgr_ctx.sys_hdr = register_sysctl("nss/vlan_client", nss_vlan_table);
  	if (!vlan_mgr_ctx.sys_hdr) {
  		nss_vlan_mgr_warn("Unabled to register sysctl table for vlan manager\n");
  		return -EFAULT;
+diff --git a/wifi_meshmgr/nss_wifi_meshmgr.c b/wifi_meshmgr/nss_wifi_meshmgr.c
+index 97dbe0c..fd516c0 100644
 --- a/wifi_meshmgr/nss_wifi_meshmgr.c
 +++ b/wifi_meshmgr/nss_wifi_meshmgr.c
 @@ -1974,10 +1974,12 @@ static int __init nss_wifi_meshmgr_init_module(void)
@@ -419,5 +412,5 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	}
 +	of_node_put(cmn);
  #endif
-
+ 
  	nss_ctx = nss_wifi_mesh_get_context();

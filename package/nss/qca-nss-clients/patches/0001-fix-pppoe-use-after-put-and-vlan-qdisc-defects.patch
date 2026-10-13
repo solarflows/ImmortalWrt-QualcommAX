@@ -1,0 +1,401 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-clients: fix pppoe lifecycle, vlan unlock bug, qdisc unwind, and of_node leaks
+
+1. In pppoe/nss_connmgr_pppoe.c:
+   - Remove premature dev_put() in nss_connmgr_pppoe_get_session() so opt.dev
+     remains held by dev_hold() during connect; pair dev_put(opt.dev) at the
+     end of connect and error unwinds.
+   - Embed struct rcu_head in struct nss_connmgr_pppoe_session_entry and switch
+     to non-blocking kfree_rcu(), eliminating synchronize_rcu() stalls.
+   - Always call nss_unregister_pppoe_session_if() and dealloc dynamic interface
+     on disconnect even when firmware message fails, preventing dangling entries.
+2. In vlan/nss_vlan_mgr.c:
+   - Remove unbalanced spin_unlock(&vlan_mgr_ctx.lock) in nss_vlan_mgr_delete_bond_slave().
+   - Modernize sysctl registration to register_sysctl("nss/vlan_client", ...) for Linux 6.18.
+3. In nss_qdisc/nss_qdisc.c:
+   - Consolidate qdisc registration into a loop with full reverse unwinding on failure.
+4. Across pppoe, netlink, wifi_meshmgr, qdisc:
+   - Add of_node_put() calls after of_find_node_by_name(NULL, "nss-common").
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/netlink/nss_nl.c
++++ b/netlink/nss_nl.c
+@@ -478,9 +478,11 @@ static int __init nss_nl_init(void)
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		return 0;
+ 	}
++	of_node_put(cmn);
+ #endif
+ 	nss_nl_info_always("NSS Netlink manager loaded: %s\n", NSS_CLIENT_BUILD_ID);
+
+@@ -521,9 +523,11 @@ static void __exit nss_nl_exit(void)
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		return;
+ 	}
++	of_node_put(cmn);
+ #endif
+ 	nss_nl_info_always("NSS Netlink manager unloaded\n");
+
+--- a/nss_qdisc/nss_qdisc.c
++++ b/nss_qdisc/nss_qdisc.c
+@@ -2633,88 +2633,57 @@ static struct notifier_block nss_qdisc_device_notifier = {
+
+ /* ================== Module registration ================= */
+
++static struct Qdisc_ops *nss_qdisc_ops_list[] = {
++	&nss_pfifo_qdisc_ops,
++	&nss_bfifo_qdisc_ops,
++	&nss_codel_qdisc_ops,
++	&nss_fq_codel_qdisc_ops,
++	&nss_tbl_qdisc_ops,
++	&nss_prio_qdisc_ops,
++	&nss_bf_qdisc_ops,
++	&nss_wrr_qdisc_ops,
++	&nss_wfq_qdisc_ops,
++	&nss_htb_qdisc_ops,
++	&nss_blackhole_qdisc_ops,
++	&nss_red_qdisc_ops,
++	&nss_wred_qdisc_ops,
++};
++
+ static int __init nss_qdisc_module_init(void)
+ {
+-	int ret;
++	int ret, i, j;
+ #ifdef CONFIG_OF
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		return 0;
+ 	}
++	of_node_put(cmn);
+ #endif
+ 	nss_qdisc_info("Module initializing\n");
+ 	nss_qdisc_ctx = nss_shaper_register_shaping();
+
+-	ret = register_qdisc(&nss_pfifo_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsspfifo registered\n");
+-
+-	ret = register_qdisc(&nss_bfifo_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nssbfifo registered\n");
+-
+-	ret = register_qdisc(&nss_codel_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsscodel registered\n");
+-
+-	ret = register_qdisc(&nss_fq_codel_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nssfq_codel registered\n");
+-
+-	ret = register_qdisc(&nss_tbl_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsstbl registered\n");
+-
+-	ret = register_qdisc(&nss_prio_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nssprio registered\n");
+-
+-	ret = register_qdisc(&nss_bf_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nssbf registered\n");
+-
+-	ret = register_qdisc(&nss_wrr_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsswrr registered\n");
+-
+-	ret = register_qdisc(&nss_wfq_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsswfq registered\n");
+-
+-	ret = register_qdisc(&nss_htb_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsshtb registered\n");
+-
+-	ret = register_qdisc(&nss_blackhole_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nssblackhole registered\n");
+-
+-	ret = register_qdisc(&nss_red_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nssred registered\n");
+-
+-	ret = register_qdisc(&nss_wred_qdisc_ops);
+-	if (ret != 0)
+-		return ret;
+-	nss_qdisc_info("nsswred registered\n");
++	for (i = 0; i < ARRAY_SIZE(nss_qdisc_ops_list); i++) {
++		ret = register_qdisc(nss_qdisc_ops_list[i]);
++		if (ret != 0) {
++			nss_qdisc_error("Failed to register qdisc %s: %d\n", nss_qdisc_ops_list[i]->id, ret);
++			for (j = 0; j < i; j++) {
++				unregister_qdisc(nss_qdisc_ops_list[j]);
++			}
++			return ret;
++		}
++		nss_qdisc_info("%s registered\n", nss_qdisc_ops_list[i]->id);
++	}
+
+ 	ret = register_netdevice_notifier(&nss_qdisc_device_notifier);
+-	if (ret != 0)
++	if (ret != 0) {
++		for (j = 0; j < ARRAY_SIZE(nss_qdisc_ops_list); j++) {
++			unregister_qdisc(nss_qdisc_ops_list[j]);
++		}
+ 		return ret;
++	}
+ 	nss_qdisc_info("nss qdisc device notifiers registered\n");
+
+ 	if (!nss_qdisc_stats_work_queue_init()) {
+@@ -2731,52 +2700,24 @@ static int __init nss_qdisc_module_init(void)
+
+ static void __exit nss_qdisc_module_exit(void)
+ {
++	int i;
+ #ifdef CONFIG_OF
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		return;
+ 	}
++	of_node_put(cmn);
+ #endif
+
+ 	nss_qdisc_stats_work_queue_exit();
+
+-	unregister_qdisc(&nss_pfifo_qdisc_ops);
+-	nss_qdisc_info("nsspfifo unregistered\n");
+-
+-	unregister_qdisc(&nss_bfifo_qdisc_ops);
+-	nss_qdisc_info("nssbfifo unregistered\n");
+-
+-	unregister_qdisc(&nss_codel_qdisc_ops);
+-	nss_qdisc_info("nsscodel unregistered\n");
+-
+-	unregister_qdisc(&nss_fq_codel_qdisc_ops);
+-	nss_qdisc_info("nssfq_codel unregistered\n");
+-
+-	unregister_qdisc(&nss_tbl_qdisc_ops);
+-	nss_qdisc_info("nsstbl unregistered\n");
+-
+-	unregister_qdisc(&nss_prio_qdisc_ops);
+-	nss_qdisc_info("nssprio unregistered\n");
+-
+-	unregister_qdisc(&nss_bf_qdisc_ops);
+-	nss_qdisc_info("nssbf unregistered\n");
+-
+-	unregister_qdisc(&nss_wrr_qdisc_ops);
+-	nss_qdisc_info("nsswrr unregistered\n");
+-
+-	unregister_qdisc(&nss_wfq_qdisc_ops);
+-	nss_qdisc_info("nsswfq unregistered\n");
+-
+-	unregister_qdisc(&nss_htb_qdisc_ops);
+-	nss_qdisc_info("nsshtb unregistered\n");
+-
+-	unregister_qdisc(&nss_blackhole_qdisc_ops);
+-	nss_qdisc_info("nssblackhole unregistered\n");
+-
+-	unregister_qdisc(&nss_red_qdisc_ops);
+-	nss_qdisc_info("nssred unregistered\n");
++	for (i = 0; i < ARRAY_SIZE(nss_qdisc_ops_list); i++) {
++		unregister_qdisc(nss_qdisc_ops_list[i]);
++		nss_qdisc_info("%s unregistered\n", nss_qdisc_ops_list[i]->id);
++	}
+
+ 	unregister_qdisc(&nss_wred_qdisc_ops);
+ 	nss_qdisc_info("nsswred unregistered\n");
+--- a/pppoe/nss_connmgr_pppoe.c
++++ b/pppoe/nss_connmgr_pppoe.c
+@@ -75,7 +75,6 @@ static int nss_connmgr_pppoe_get_session(struct net_device *dev,  struct pppoe_o
+ 		return -1;
+ 	}
+
+-	dev_put(addressing->dev);
+ 	ppp_release_channels(channel, 1);
+ 	return 0;
+ }
+@@ -171,7 +170,6 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
+ 	}
+
+ 	hash_del_rcu(&entry->hash_list);
+-	synchronize_rcu();
+
+ 	memset(&npm, 0, sizeof(struct nss_pppoe_msg));
+ 	npm_destroy = &npm.msg.destroy;
+@@ -183,7 +181,6 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
+ 	status = nss_pppoe_tx_msg_sync(nss_pppoe_get_context(), &npm);
+ 	if (status != NSS_TX_SUCCESS) {
+ 		nss_connmgr_pppoe_warn("%px: pppoe session destroy command failed, if_number = %d\n", dev, if_number);
+-		goto done;
+ 	}
+ 	nss_unregister_pppoe_session_if(if_number);
+ 	status = nss_dynamic_interface_dealloc_node(if_number, NSS_DYNAMIC_INTERFACE_TYPE_PPPOE);
+@@ -195,7 +192,7 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
+ 				       entry->info.server_mac, entry->info.local_mac);
+ 	}
+ done:
+-	kfree(entry);
++	kfree_rcu(entry, rcu);
+ 	return NOTIFY_DONE;
+ }
+
+@@ -244,6 +241,7 @@ static int nss_connmgr_pppoe_connect(struct net_device *dev)
+ 	if_number = nss_dynamic_interface_alloc_node(NSS_DYNAMIC_INTERFACE_TYPE_PPPOE);
+ 	if (if_number == -1) {
+ 		nss_connmgr_pppoe_warn("%px: Request interface number failed\n", dev);
++		dev_put(opt.dev);
+ 		return NOTIFY_DONE;
+ 	}
+
+@@ -345,6 +343,7 @@ static int nss_connmgr_pppoe_connect(struct net_device *dev)
+ 		goto connect_fail3;
+ 	}
+ 	nss_connmgr_pppoe_info("%px: PPPoE session creation is successful\n", dev);
++	dev_put(opt.dev);
+
+ 	return NOTIFY_DONE;
+
+@@ -353,10 +352,10 @@ connect_fail3:
+
+ connect_fail2:
+ 	hash_del_rcu(&entry->hash_list);
+-	synchronize_rcu();
+-	kfree(entry);
++	kfree_rcu(entry, rcu);
+
+ connect_fail1:
++	dev_put(opt.dev);
+ 	status = nss_dynamic_interface_dealloc_node(if_number, NSS_DYNAMIC_INTERFACE_TYPE_PPPOE);
+ 	if (status != NSS_TX_SUCCESS) {
+ 		nss_connmgr_pppoe_warn("%px: Unable to dealloc the node[%d] in the NSS fw!\n", dev, if_number);
+@@ -402,9 +401,11 @@ void __exit nss_connmgr_pppoe_exit_module(void)
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		return;
+ 	}
++	of_node_put(cmn);
+ #endif
+
+ 	/*
+@@ -423,9 +424,11 @@ int __init nss_connmgr_pppoe_init_module(void)
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		return 0;
+ 	}
++	of_node_put(cmn);
+ #endif
+ 	/*
+ 	 * Register the module to the PPP channel events.
+--- a/pppoe/nss_connmgr_pppoe.h
++++ b/pppoe/nss_connmgr_pppoe.h
+@@ -83,5 +83,6 @@ struct nss_connmgr_pppoe_session_entry {
+ 	struct nss_connmgr_pppoe_session_info info;
+ 	struct net_device *dev;
+ 	struct hlist_node hash_list;
++	struct rcu_head rcu;
+ };
+ #endif
+--- a/vlan/nss_vlan_mgr.c
++++ b/vlan/nss_vlan_mgr.c
+@@ -1622,29 +1622,6 @@ static struct ctl_table nss_vlan_table[] = {
+ 	}
+ };
+
+-/*
+- * nss_vlan sysctl dir
+- */
+-static struct ctl_table nss_vlan_dir[] = {
+-	{
+-		.procname		= "vlan_client",
+-		.mode			= 0555,
+-		.child			= nss_vlan_table,
+-	},
+-	{ }
+-};
+-
+-/*
+- * nss_vlan systel root dir
+- */
+-static struct ctl_table nss_vlan_root_dir[] = {
+-	{
+-		.procname		= "nss",
+-		.mode			= 0555,
+-		.child			= nss_vlan_dir,
+-	},
+-	{ }
+-};
+
+ /*
+  * nss_vlan_mgr_add_bond_slave()
+@@ -1777,7 +1754,6 @@ int nss_vlan_mgr_delete_bond_slave(struct net_device *slave_dev)
+ 	 */
+ 	port = nss_cmn_get_interface_number_by_dev(slave_dev);
+ 	if (!NSS_VLAN_PHY_PORT_CHK(port)) {
+-		spin_unlock(&vlan_mgr_ctx.lock);
+ 		nss_vlan_mgr_warn("%s: %d is not valid physical port\n", slave_dev->name, port);
+ 		return -1;
+ 	}
+@@ -1985,7 +1961,7 @@ int __init nss_vlan_mgr_init_module(void)
+ 	vlan_mgr_ctx.stpid = ETH_P_8021Q;
+
+ #ifdef NSS_VLAN_MGR_PPE_SUPPORT
+-	vlan_mgr_ctx.sys_hdr = register_sysctl_table(nss_vlan_root_dir);
++	vlan_mgr_ctx.sys_hdr = register_sysctl("nss/vlan_client", nss_vlan_table);
+ 	if (!vlan_mgr_ctx.sys_hdr) {
+ 		nss_vlan_mgr_warn("Unabled to register sysctl table for vlan manager\n");
+ 		return -EFAULT;
+--- a/wifi_meshmgr/nss_wifi_meshmgr.c
++++ b/wifi_meshmgr/nss_wifi_meshmgr.c
+@@ -1974,10 +1974,12 @@ static int __init nss_wifi_meshmgr_init_module(void)
+ 	/*
+ 	 * If the node is not compatible, don't do anything.
+ 	 */
+-	if (!of_find_node_by_name(NULL, "nss-common")) {
++	struct device_node *cmn = of_find_node_by_name(NULL, "nss-common");
++	if (!cmn) {
+ 		nss_wifi_meshmgr_warn("NSS common not found.\n");
+ 		return -1;
+ 	}
++	of_node_put(cmn);
+ #endif
+
+ 	nss_ctx = nss_wifi_mesh_get_context();

@@ -1,0 +1,89 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] netfilter: conntrack: decouple ECM offload event notifier from ctnetlink
+
+In Linux 6.18, net->ct.nf_conntrack_event_cb is a single RCU pointer intended
+exclusively for ctnetlink. The historical QCA ECM patch (0960) deleted
+WARN_ON_ONCE(notify) and forcibly overwrote net->ct.nf_conntrack_event_cb,
+causing mutual clobbering between kmod-nf-conntrack-netlink and qca-nss-ecm.
+
+This patch cleanly decouples the offload engine notifier:
+1. Retains net->ct.nf_conntrack_event_cb and WARN_ON_ONCE for ctnetlink.
+2. Adds a dedicated net->ct.nf_conntrack_ecm_cb slot in struct netns_ct.
+3. Implements and exports nf_conntrack_register_ecm_notifier() and
+   nf_conntrack_unregister_ecm_notifier().
+4. Dispatches events to both listeners in nf_conntrack_eventmask_report()
+   via atomic RCU dereference without locks or blocking.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/include/net/netns/conntrack.h
++++ b/include/net/netns/conntrack.h
+@@ -115,6 +115,9 @@ struct netns_ct {
+
+ 	struct ip_conntrack_stat __percpu *stat;
+ 	struct nf_ct_event_notifier __rcu *nf_conntrack_event_cb;
++#ifdef CONFIG_NF_CONNTRACK_EVENTS
++	struct nf_ct_event_notifier __rcu *nf_conntrack_ecm_cb;
++#endif
+ 	struct nf_exp_event_notifier __rcu *nf_expect_event_cb;
+ 	struct nf_ct_ecache __percpu *ecache;
+--- a/include/net/netfilter/nf_conntrack_ecache.h
++++ b/include/net/netfilter/nf_conntrack_ecache.h
+@@ -70,6 +70,8 @@ struct nf_ct_event_notifier {
+
+ void nf_conntrack_register_notifier(struct net *net,
+ 				   struct nf_ct_event_notifier *nb);
++void nf_conntrack_register_ecm_notifier(struct net *net, struct nf_ct_event_notifier *nb);
++void nf_conntrack_unregister_ecm_notifier(struct net *net);
+ void nf_conntrack_unregister_notifier(struct net *net);
+--- a/net/netfilter/nf_conntrack_ecache.c
++++ b/net/netfilter/nf_conntrack_ecache.c
+@@ -173,8 +173,11 @@ int nf_conntrack_eventmask_report(unsign
+
+ 	rcu_read_lock();
+ 	notify = rcu_dereference(net->ct.nf_conntrack_event_cb);
+-	if (!notify)
+-		goto out_unlock;
++	if (notify)
++		ret = notify->fcn(eventmask, &item);
++
++	notify = rcu_dereference(net->ct.nf_conntrack_ecm_cb);
++	if (notify)
++		notify->fcn(eventmask, &item);
+
+-	ret = notify->fcn(eventmask, &item);
+-out_unlock:
+ 	rcu_read_unlock();
+ 	return ret;
+ }
+@@ -278,6 +281,7 @@ void nf_conntrack_register_notifier(stru
+ 	mutex_lock(&nf_ct_ecache_mutex);
+ 	notify = rcu_dereference_protected(net->ct.nf_conntrack_event_cb,
+ 					   lockdep_is_held(&nf_ct_ecache_mutex));
++	WARN_ON_ONCE(notify);
+ 	rcu_assign_pointer(net->ct.nf_conntrack_event_cb, new);
+ 	mutex_unlock(&nf_ct_ecache_mutex);
+ }
+@@ -284,3 +288,19 @@ void nf_conntrack_unregister_notifier(st
+ 	mutex_unlock(&nf_ct_ecache_mutex);
+ }
+ EXPORT_SYMBOL_GPL(nf_conntrack_unregister_notifier);
++
++/* QCA NSS ECM support - Start */
++void nf_conntrack_register_ecm_notifier(struct net *net,
++					struct nf_ct_event_notifier *new)
++{
++	mutex_lock(&nf_ct_ecache_mutex);
++	rcu_assign_pointer(net->ct.nf_conntrack_ecm_cb, new);
++	mutex_unlock(&nf_ct_ecache_mutex);
++}
++EXPORT_SYMBOL(nf_conntrack_register_ecm_notifier);
++
++void nf_conntrack_unregister_ecm_notifier(struct net *net)
++{
++	mutex_lock(&nf_ct_ecache_mutex);
++	RCU_INIT_POINTER(net->ct.nf_conntrack_ecm_cb, NULL);
++	mutex_unlock(&nf_ct_ecache_mutex);
++}
++EXPORT_SYMBOL(nf_conntrack_unregister_ecm_notifier);
++/* QCA NSS ECM support - End */

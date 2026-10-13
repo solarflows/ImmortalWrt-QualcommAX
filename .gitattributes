@@ -1,0 +1,6 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+*.seed text eol=lf working-tree-encoding=UTF-8
+*.json text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

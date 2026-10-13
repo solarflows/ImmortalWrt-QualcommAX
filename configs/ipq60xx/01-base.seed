@@ -23,3 +23,4 @@ CONFIG_BUSYBOX_CONFIG_DEVMEM=y
 CONFIG_DEVEL=y                     # 开发者模式（保留源码树）
 CONFIG_CCACHE=y                    # 编译缓存加速
 CONFIG_BUILD_LOG=y                 # 输出编译日志分析
+CONFIG_AUTOREMOVE=y                # 可重现时间戳与构建中间产物按需清理

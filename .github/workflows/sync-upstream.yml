@@ -51,37 +51,87 @@ jobs:
           echo "upstream_head=${UPSTREAM_HEAD}" >> "$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
 
-          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
-            echo "has_update=true" >> "$GITHUB_OUTPUT"
-            echo "New upstream commits detected. Rebase required."
+          git fetch origin nss-edma-julius:nss-edma-julius --force
+
+          # 同步并强校验 ImmortalWrt 官方快照签名公钥 (APK ECDSA + usign Ed25519)
+          KEY_CHANGED="false"
+          APK_KEY_URL="https://raw.githubusercontent.com/immortalwrt/keyring/master/apk/immortalwrt-snapshots.pem"
+          USIGN_KEY_URL="https://raw.githubusercontent.com/immortalwrt/keyring/master/usign/8ead5420c4005b0d"
+
+          if curl -fsSL --max-time 15 "$APK_KEY_URL" -o /tmp/immortalwrt-snapshots.pem && \
+             [ "$(wc -c < /tmp/immortalwrt-snapshots.pem)" -gt 64 ] && \
+             [ "$(wc -c < /tmp/immortalwrt-snapshots.pem)" -lt 512 ] && \
+             openssl pkey -pubin -in /tmp/immortalwrt-snapshots.pem -noout >/dev/null 2>&1; then
+            CUR_APK_HASH=$(git show nss-edma-julius:package/system/openwrt-keyring/files/apk/immortalwrt-snapshots.pem 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+            NEW_APK_HASH=$(sha256sum /tmp/immortalwrt-snapshots.pem | awk '{print $1}')
+            if [ "$CUR_APK_HASH" != "$NEW_APK_HASH" ]; then
+              echo "ImmortalWrt APK public key update detected: ${CUR_APK_HASH:-none} -> ${NEW_APK_HASH}"
+              KEY_CHANGED="true"
+            fi
           else
-            echo "has_update=false" >> "$GITHUB_OUTPUT"
-            echo "Already aligned with Julius upstream. Nothing to do."
+            echo "::warning::Failed to fetch or validate ImmortalWrt APK public key; keeping existing key."
+            rm -f /tmp/immortalwrt-snapshots.pem
           fi
 
-      - name: Perform Linear Rebase
+          if curl -fsSL --max-time 15 "$USIGN_KEY_URL" -o /tmp/8ead5420c4005b0d && \
+             [ "$(wc -c < /tmp/8ead5420c4005b0d)" -gt 40 ] && \
+             [ "$(wc -c < /tmp/8ead5420c4005b0d)" -lt 256 ] && \
+             grep -v '^untrusted comment:' /tmp/8ead5420c4005b0d | grep -qxE 'RWS[A-Za-z0-9+/=]{50,60}'; then
+            CUR_USIGN_HASH=$(git show nss-edma-julius:package/system/openwrt-keyring/files/usign/8ead5420c4005b0d 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+            NEW_USIGN_HASH=$(sha256sum /tmp/8ead5420c4005b0d | awk '{print $1}')
+            if [ "$CUR_USIGN_HASH" != "$NEW_USIGN_HASH" ]; then
+              echo "ImmortalWrt usign public key update detected: ${CUR_USIGN_HASH:-none} -> ${NEW_USIGN_HASH}"
+              KEY_CHANGED="true"
+            fi
+          else
+            echo "::warning::Failed to fetch or validate ImmortalWrt usign public key; keeping existing key."
+            rm -f /tmp/8ead5420c4005b0d
+          fi
+
+          echo "key_changed=${KEY_CHANGED}" >> "$GITHUB_OUTPUT"
+
+          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ] || [ "$KEY_CHANGED" = "true" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            echo "Update or key rotation detected. Sync required."
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+            echo "Already aligned with Julius upstream and ImmortalWrt keyring. Nothing to do."
+          fi
+
+      - name: Perform Linear Rebase & Keyring Sync
         if: steps.check.outputs.has_update == 'true'
         run: |
           UPSTREAM_HEAD="${{ steps.check.outputs.upstream_head }}"
           BASE_SHA="${{ steps.check.outputs.base_sha }}"
+          KEY_CHANGED="${{ steps.check.outputs.key_changed }}"
 
-          echo "Fetching target branches..."
-          git fetch origin nss-edma-julius:nss-edma-julius --force
           git checkout nss-edma-julius
 
-          echo "Rebasing our custom commits onto upstream/nss-edma-rework (${UPSTREAM_HEAD})..."
-          if ! git rebase --onto "upstream/nss-edma-rework" "$BASE_SHA" nss-edma-julius; then
-            echo "::error::Rebase conflict detected!"
-            git rebase --abort || true
-            exit 1
+          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
+            echo "Rebasing our custom commits onto upstream/nss-edma-rework (${UPSTREAM_HEAD})..."
+            if ! git rebase --onto "upstream/nss-edma-rework" "$BASE_SHA" nss-edma-julius; then
+              echo "::error::Rebase conflict detected!"
+              git rebase --abort || true
+              exit 1
+            fi
           fi
 
-          echo "Rebase succeeded! Pushing updated nss-edma-julius branch..."
+          if [ "$KEY_CHANGED" = "true" ]; then
+            mkdir -p package/system/openwrt-keyring/files/apk package/system/openwrt-keyring/files/usign
+            [ -f /tmp/immortalwrt-snapshots.pem ] && cp /tmp/immortalwrt-snapshots.pem package/system/openwrt-keyring/files/apk/immortalwrt-snapshots.pem
+            [ -f /tmp/8ead5420c4005b0d ] && cp /tmp/8ead5420c4005b0d package/system/openwrt-keyring/files/usign/8ead5420c4005b0d
+            git add package/system/openwrt-keyring/files/
+            git commit -m "chore(keyring): sync ImmortalWrt snapshot public keys" || true
+          fi
+
+          echo "Pushing updated nss-edma-julius branch..."
           git push --force-with-lease origin nss-edma-julius
 
-          echo "Updating recorded baseline in main branch..."
-          git checkout main
-          echo "$UPSTREAM_HEAD" > .github/julius.sha
-          git add .github/julius.sha
-          git commit -m "chore(sync): update Julius base tracking SHA to ${UPSTREAM_HEAD}" || true
-          git push origin main
+          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ]; then
+            echo "Updating recorded baseline in main branch..."
+            git checkout main
+            echo "$UPSTREAM_HEAD" > .github/julius.sha
+            git add .github/julius.sha
+            git commit -m "chore(sync): update Julius base tracking SHA to ${UPSTREAM_HEAD}" || true
+            git push origin main
+          fi

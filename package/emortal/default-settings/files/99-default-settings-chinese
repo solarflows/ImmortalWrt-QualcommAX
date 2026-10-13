@@ -34,6 +34,13 @@ if [ -z "$apk_mirror" ]; then
 	EOF
 fi
 
-sed -i.bak "s,https://downloads.immortalwrt.org,$apk_mirror,g" "/etc/apk/repositories.d/distfeeds.list"
+apk_arch="$(tr -d '[:space:]' < /etc/apk/arch 2>/dev/null)"
+[ -n "$apk_arch" ] || apk_arch="$(. /etc/openwrt_release 2>/dev/null && echo "$DISTRIB_ARCH")"
+if [ -n "$apk_arch" ] && [ -d "/etc/apk/repositories.d" ]; then
+	cat > "/etc/apk/repositories.d/immortalwrt.list" <<-EOF
+		${apk_mirror}/snapshots/packages/${apk_arch}/packages/packages.adb
+		${apk_mirror}/snapshots/packages/${apk_arch}/luci/packages.adb
+	EOF
+fi
 
 exit 0

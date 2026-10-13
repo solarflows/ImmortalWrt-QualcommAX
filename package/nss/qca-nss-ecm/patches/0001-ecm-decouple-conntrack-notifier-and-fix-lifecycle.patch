@@ -30,7 +30,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 +
 +#ifndef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
-+extern void nf_conntrack_register_ecm_notifier(struct net *net, struct nf_ct_event_notifier *nb);
++extern void nf_conntrack_register_ecm_notifier(struct net *net, const struct nf_ct_event_notifier *nb);
 +extern void nf_conntrack_unregister_ecm_notifier(struct net *net);
 +#endif
  #include <net/netfilter/ipv4/nf_defrag_ipv4.h>

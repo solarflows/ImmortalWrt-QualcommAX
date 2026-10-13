@@ -13,8 +13,8 @@ Subject: [PATCH] qca-nss-ecm: decouple conntrack notifier, fix tail packet accou
    - Replace msleep_interruptible(4) with high-resolution usleep_range(3800, 4000).
    - In periodic stats sync, replace msleep_interruptible blocking inside the
      workqueue with non-blocking queue_delayed_work() rescheduling.
-   - In ecm_nss_ipv6.c, relax stats sync timeout from 5000ms to 10000ms to eliminate
-     firmware multi-batch scan cascade timeouts.
+   - In ecm_nss_ipv4.c and ecm_nss_ipv6.c, relax stats sync timeout from 5000ms
+     to 10000ms to eliminate firmware multi-batch scan cascade timeouts.
 3. In frontends/sfe/ecm_sfe_ipv4.c and frontends/sfe/ecm_sfe_ipv6.c:
    - Replace msleep blocking inside workqueue with queue_delayed_work() rescheduling.
 
@@ -65,6 +65,15 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	/*
 --- a/frontends/nss/ecm_nss_ipv4.c
 +++ b/frontends/nss/ecm_nss_ipv4.c
+@@ -92,7 +92,7 @@
+ 
+ #define ECM_NSS_IPV4_STATS_SYNC_PERIOD msecs_to_jiffies(1000)
+ #define ECM_NSS_IPV4_STATS_SYNC_UDELAY 4000	/* Delay for 4 ms */
+-#define ECM_NSS_IPV4_STATS_SYNC_TIMEOUT msecs_to_jiffies(5000)	/* Give up on an unanswered request */
++#define ECM_NSS_IPV4_STATS_SYNC_TIMEOUT msecs_to_jiffies(10000)	/* Give up on an unanswered request */
+ 
+ int ecm_nss_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
+ int ecm_nss_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
 @@ -218,7 +218,7 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
  	struct ecm_classifier_rule_sync class_sync;
  	int flow_dir;

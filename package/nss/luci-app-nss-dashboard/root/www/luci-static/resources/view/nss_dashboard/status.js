@@ -137,7 +137,6 @@ function renderStickyBar(d, p) {
 }
 
 function renderStatus(d) {
-	// Lock-in static hardware profile once
 	if (!staticProfile && d.soc) {
 		staticProfile = {
 			soc: d.soc,
@@ -170,7 +169,7 @@ function renderStatus(d) {
 		]);
 	}
 
-	// 2. NPU 双核/单核负载条
+	// 2. NPU 负载
 	var coreLoadView;
 	if (p.cores === 1) {
 		coreLoadView = E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
@@ -206,9 +205,9 @@ function renderStatus(d) {
 	if (!tempElements.length)
 		tempElements.push(badge('badge-neutral', _('未检测到物理温度')));
 
-	// ── 分区 ①：核心算力与驱动模块 (标准 cbi-section) ──
-	var section1 = E('div', { 'class': 'cbi-section', 'style': 'margin-bottom:14px;' }, [
-		E('h3', { 'class': 'cbi-section-title', 'style': 'display:flex; justify-content:space-between; align-items:center;' }, [
+	// 分区 ①：核心算力与驱动模块
+	var section1 = E('div', { 'class': 'cbi-section nss-module-box' }, [
+		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('核心算力与驱动模块') ]),
 			badge('badge-success', 'FW ' + (p.fw_version || '11.4') + ' [' + (p.fw_mask || '0x1f') + ']')
 		]),
@@ -250,9 +249,9 @@ function renderStatus(d) {
 		])
 	]);
 
-	// ── 分区 ②：流表引擎与数据通道 (标准 cbi-section) ──
-	var section2 = E('div', { 'class': 'cbi-section', 'style': 'margin-bottom:14px;' }, [
-		E('h3', { 'class': 'cbi-section-title', 'style': 'display:flex; justify-content:space-between; align-items:center;' }, [
+	// 分区 ②：流表引擎与数据通道
+	var section2 = E('div', { 'class': 'cbi-section nss-module-box' }, [
+		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('流表引擎与数据通道') ]),
 			badge('badge-info', totalConns.toLocaleString() + ' ' + _('活动流'))
 		]),
@@ -295,8 +294,9 @@ function renderStatus(d) {
 	]);
 
 	return E('div', {}, [
-		conflictBanner,
 		renderStickyBar(d, p),
+		E('h2', {}, [ _('NSS 硬件网络加速 - 运行状态') ]),
+		conflictBanner,
 		section1,
 		section2
 	]);
@@ -304,19 +304,19 @@ function renderStatus(d) {
 
 return view.extend({
 	load: function() {
-		return Promise.resolve(null);
+		return L.resolveDefault(callNssStatus(), {});
 	},
 
-	render: function() {
+	render: function(d) {
 		ensureCss();
 
 		var container = E('div', {}, [
-			E('p', { 'class': 'spinning' }, [ _('正在获取 NSS 运行时态势…') ])
+			renderStatus(d || {})
 		]);
 
 		var update = function() {
-			return callNssStatus().then(function(d) {
-				dom.content(container, renderStatus(d));
+			return callNssStatus().then(function(res) {
+				dom.content(container, renderStatus(res || {}));
 			}).catch(function(err) {
 				dom.content(container, E('div', { 'class': 'alert-message warning' }, [
 					_('无法获取 NSS 状态: '), err.message
@@ -324,13 +324,9 @@ return view.extend({
 			});
 		};
 
-		update();
 		poll.add(update, 5);
 
-		return E('div', {}, [
-			E('h2', {}, [ _('NSS 硬件网络加速 - 运行状态') ]),
-			container
-		]);
+		return container;
 	},
 
 	handleSave: null,

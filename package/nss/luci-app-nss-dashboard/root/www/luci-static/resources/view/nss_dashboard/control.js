@@ -31,6 +31,79 @@ function ensureCss() {
 	}
 }
 
+function badge(cls, text, dot) {
+	var children = [];
+	if (dot) {
+		children.push(E('span', { 'class': 'badge-dot' }));
+	}
+	if (Array.isArray(text)) {
+		children = children.concat(text);
+	} else {
+		children.push(text);
+	}
+
+	return E('span', {
+		'class': 'badge ' + (cls || 'badge-neutral')
+	}, children);
+}
+
+function renderStickyBar(d) {
+	if (!d || !d.soc) return E('div');
+	var t = parseFloat(d.cpu_temp) || 0;
+	var tempClass = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
+	var soc = d.soc || 'IPQ8074';
+	var cores = d.cores || 2;
+	var freqStr = (d.nss_freq || '1478.4 MHz').replace(' MHz', 'M');
+	var totalConns = (d.ecm_total != null) ? d.ecm_total : 0;
+
+	var header = document.querySelector('header');
+	var navHeight = header ? header.offsetHeight : 40;
+
+	return E('div', {
+		'id': 'nss-sticky-telemetry-bar',
+		'style': 'top:' + navHeight + 'px;'
+	}, [
+		E('div', { 'class': 'telemetry-item' }, [
+			E('span', { 'class': 'telemetry-label' }, [ _('协处理器规格') ]),
+			E('div', { 'style': 'display:flex; align-items:center; gap:4px;' }, [
+				badge('badge-info', soc + ' ×' + cores),
+				badge('badge-neutral', freqStr)
+			])
+		]),
+		E('div', { 'class': 'telemetry-item' }, [
+			E('span', { 'class': 'telemetry-label' }, [ _('物理心跳速率') ]),
+			E('div', {}, [
+				badge('badge-success', (d.heartbeat || 0).toLocaleString() + ' pkts/s', true)
+			])
+		]),
+		E('div', { 'class': 'telemetry-item' }, [
+			E('span', { 'class': 'telemetry-label' }, [ _('ECM 加速流数') ]),
+			E('div', { 'style': 'display:flex; align-items:center; gap:4px;' }, [
+				badge('badge-info', totalConns.toLocaleString() + ' ' + _('流')),
+				badge('badge-neutral', 'v4:' + (d.ecm_v4 || 0) + ' / v6:' + (d.ecm_v6 || 0))
+			])
+		]),
+		E('div', { 'class': 'telemetry-item' }, [
+			E('span', { 'class': 'telemetry-label' }, [ _('硬件加速状态') ]),
+			E('div', {}, [
+				badge('badge-success', _('硬件直通加速中'), true)
+			])
+		]),
+		E('div', { 'class': 'telemetry-item' }, [
+			E('span', { 'class': 'telemetry-label' }, [ _('芯片结温') ]),
+			E('div', {}, [
+				badge(tempClass, t.toFixed(1) + '°C')
+			])
+		]),
+		E('div', { 'class': 'telemetry-item' }, [
+			E('span', { 'class': 'telemetry-label' }, [ _('安全协同防御') ]),
+			E('div', {}, [
+				badge((d.conflict_detected === 1) ? 'badge-warning' : 'badge-success', (d.conflict_detected === 1) ? _('已阻断冲突项') : _('阻断墙已生效'))
+			])
+		])
+	]);
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -141,12 +214,21 @@ return view.extend({
 		this.selectFreq = selectFreq;
 		this.cbAutoBlock = cbAutoBlock;
 
+		var moduleBox = E('div', { 'class': 'cbi-section nss-module-box' }, [
+			E('h3', { 'class': 'cbi-section-title' }, [
+				E('span', {}, [ _('NSS 硬件协同控制与冲突防御') ]),
+				badge('badge-info', _('热生效 / 重启约束'))
+			]),
+			E('div', { 'class': 'cbi-section-node' }, [ table ])
+		]);
+
 		return E('div', {}, [
+			renderStickyBar(d),
 			E('h2', {}, [ _('NSS 硬件网络加速 - 控制与防御') ]),
 			E('div', { 'class': 'cbi-map-descr' }, [
 				_('遵循状态自发现机制，首次加载优先读取硬件真实物理运行态；仅在保存并应用时受控下发配置。')
 			]),
-			table
+			moduleBox
 		]);
 	},
 

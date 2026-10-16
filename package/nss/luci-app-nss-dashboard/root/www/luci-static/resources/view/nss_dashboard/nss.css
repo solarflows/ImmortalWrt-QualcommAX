@@ -125,3 +125,29 @@
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 }
+
+/* 3. NSS Module Boxes & Headers (Matching Original Design Prototype) */
+.nss-module-box {
+	background: var(--background-color-high);
+	border: 1px solid var(--border-color-high);
+	border-radius: 4px;
+	margin-bottom: 16px;
+	overflow: hidden;
+}
+
+.nss-module-box .cbi-section-title {
+	background: var(--background-color-medium);
+	border-bottom: 1px solid var(--border-color-medium);
+	padding: 8px 12px;
+	margin: 0;
+	font-size: 13px;
+	font-weight: 700;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.nss-module-box .cbi-section-node {
+	padding: 0;
+}
+

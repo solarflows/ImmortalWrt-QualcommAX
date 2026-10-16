@@ -136,14 +136,71 @@ get_status() {
 }
 
 get_ports() {
-	if [ -x /usr/sbin/nss-status ]; then
-		local st_out
-		st_out=$(/usr/sbin/nss-status -j 2>/dev/null)
-		if [ -n "$st_out" ]; then
-			printf '%s\n' "$st_out"
-			return
-		fi
+	local glue="/sys/kernel/debug/qca-ppe-nss/status"
+	local net="/sys/class/net"
+
+	if [ -r "$glue" ]; then
+		awk '
+		BEGIN {
+			GLUE = "/sys/kernel/debug/qca-ppe-nss/status"
+			NET = "/sys/class/net"
+			pjson = ""
+			while ((getline line < GLUE) > 0) {
+				if (line ~ /^if_num/) {
+					n = split(line, f, /[ =:]+/)
+					ifnum = f[2]; nd = ""; st = 0; htx = 0; frx = 0
+					for (i = 3; i <= n; i++) {
+						if (f[i] == "netdev") nd = f[i+1]
+						else if (f[i] == "started") st = f[i+1]
+						else if (f[i] == "tx_redirect_pkts") htx = f[i+1]
+						else if (f[i] == "rx_fw_pkts") frx = f[i+1]
+					}
+					if (nd != "" && nd != "-") {
+						speed_file = NET "/" nd "/speed"
+						sp = -1
+						if ((getline sp_val < speed_file) > 0) sp = sp_val + 0
+						close(speed_file)
+
+						oper_file = NET "/" nd "/operstate"
+						oper = "down"
+						if ((getline op_val < oper_file) > 0) oper = op_val
+						close(oper_file)
+
+						if (oper == "down" || sp <= 0) speed_str = "未连接"
+						else if (sp >= 10000) speed_str = "10G"
+						else if (sp >= 2500) speed_str = "2.5G"
+						else if (sp == 1000) speed_str = "1000M"
+						else if (sp > 1000) speed_str = sprintf("%.1fG", sp / 1000)
+						else speed_str = sp "M"
+
+						txp_file = NET "/" nd "/statistics/tx_packets"; ttx = 0
+						if ((getline val < txp_file) > 0) ttx = val + 0; close(txp_file)
+
+						rxp_file = NET "/" nd "/statistics/rx_packets"; trx = 0
+						if ((getline val < rxp_file) > 0) trx = val + 0; close(rxp_file)
+
+						txb_file = NET "/" nd "/statistics/tx_bytes"; txb = 0
+						if ((getline val < txb_file) > 0) txb = val + 0; close(txb_file)
+
+						rxb_file = NET "/" nd "/statistics/rx_bytes"; rxb = 0
+						if ((getline val < rxb_file) > 0) rxb = val + 0; close(rxb_file)
+
+						otx = (ttx > htx) ? ttx - htx : 0
+						orx = (trx > frx) ? trx - frx : 0
+						ptx = (ttx > 0) ? (100.0 * otx / ttx) : 0
+						prx = (trx > 0) ? (100.0 * orx / trx) : 0
+
+						if (pjson != "") pjson = pjson ","
+						pjson = pjson sprintf("{\"ifnum\":%s,\"netdev\":\"%s\",\"started\":%s,\"speed\":\"%s\",\"tx_host_pkts\":%.0f,\"rx_host_pkts\":%.0f,\"tx_total\":%.0f,\"rx_total\":%.0f,\"tx_bytes\":%.0f,\"rx_bytes\":%.0f,\"tx_offloaded\":%.0f,\"rx_offloaded\":%.0f,\"tx_offload_pct\":%.1f,\"rx_offload_pct\":%.1f}", ifnum, nd, st, speed_str, htx, frx, ttx, trx, txb, rxb, otx, orx, ptx, prx)
+					}
+				}
+			}
+			close(GLUE)
+			print "{\"ports\":[" pjson "]}"
+		}
+		' /dev/null 2>/dev/null && return
 	fi
+
 	echo '{"ports":[]}'
 }
 
@@ -158,24 +215,18 @@ get_flows() {
 		done < /tmp/dhcp.leases
 	fi
 
-	# 2. Extract active hardware flows from nssqos-conns or connection database
-	local flows_json=""
-	if [ -x /usr/sbin/nssqos-conns ]; then
-		flows_json=$(/usr/sbin/nssqos-conns 2>/dev/null | awk '
-			BEGIN { count = 0; printf "[" }
-			NR > 1 && count < 60 {
-				proto = $1; src = $2; dst = $3; pkts = $4; rate = $5;
-				if (count > 0) printf ",";
-				printf "{\"proto\":\"%s\",\"src\":\"%s\",\"dst\":\"%s\",\"pkts\":%s,\"rate\":\"%s\"}", proto, src, dst, pkts, rate;
-				count++;
-			}
-			END { printf "]" }
-		' 2>/dev/null)
+	# 2. Check nssqos-conns dependency (optional component)
+	if [ ! -x /usr/sbin/nssqos-conns ]; then
+		printf '{"installed":0,"message":"未安装 nssqos 依赖组件，硬件流表不可用","hostnames":{%s},"flows":[]}\n' "$hosts_json"
+		return
 	fi
 
+	# 3. Direct consume nssqos-conns JSON output (zero awk slicing trap)
+	local flows_json
+	flows_json=$(/usr/sbin/nssqos-conns 2>/dev/null)
 	[ -z "$flows_json" ] && flows_json="[]"
 
-	printf '{"hostnames":{%s},"flows":%s}\n' "$hosts_json" "$flows_json"
+	printf '{"installed":1,"hostnames":{%s},"flows":%s}\n' "$hosts_json" "$flows_json"
 }
 
 get_settings() {

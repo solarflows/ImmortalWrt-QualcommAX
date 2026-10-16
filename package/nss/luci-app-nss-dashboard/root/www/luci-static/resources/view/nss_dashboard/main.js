@@ -829,14 +829,17 @@ return view.extend({
 			{ id: 'flows',   label: _('硬件流表') }
 		];
 
-		var tabMenuContainer = E('ul', { 'class': 'cbi-tabmenu', 'style': 'margin-bottom:14px;' });
+		var tabMenuContainer = E('ul', { 'class': 'cbi-tabmenu' });
 
 		function renderSubTabs() {
 			var items = subTabsDef.map(function(tDef) {
 				var isActive = (activeTab === tDef.id);
-				return E('li', { 'class': 'cbi-tab' + (isActive ? ' active' : '') }, [
+				return E('li', {
+					'class': isActive ? 'cbi-tab' : 'cbi-tab-disabled',
+					'data-tab': tDef.id
+				}, [
 					E('a', {
-						'style': isActive ? 'font-weight:bold; color:var(--text-color-high);' : '',
+						'href': '#' + tDef.id,
 						'click': function(ev) {
 							ev.preventDefault();
 							if (activeTab === tDef.id) return;
@@ -850,7 +853,6 @@ return view.extend({
 			});
 			dom.content(tabMenuContainer, items);
 		}
-
 		function renderActiveCard() {
 			if (activeTab === 'status') {
 				dom.content(subCardContainer, renderStatusCard(statusData, p));
@@ -919,7 +921,7 @@ return view.extend({
 		return E('div', { 'class': 'nss-dashboard-spa' }, [
 			stickyBarContainer,
 			conflictContainer,
-			tabMenuContainer,
+			E('div', { 'class': 'cbi-section', 'style': 'background:transparent; border:none; margin:0 0 16px 0; padding:0;' }, [ tabMenuContainer ]),
 			subCardContainer
 		]);
 	},

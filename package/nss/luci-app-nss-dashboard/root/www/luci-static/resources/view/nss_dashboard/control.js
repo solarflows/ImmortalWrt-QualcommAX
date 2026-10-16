@@ -19,6 +19,18 @@ var callGetStatus = rpc.declare({
 	method: 'getStatus'
 });
 
+function ensureCss() {
+	var id = 'luci-app-nss-dashboard-css';
+	if (!document.getElementById(id)) {
+		document.head.appendChild(E('link', {
+			'id': id,
+			'rel': 'stylesheet',
+			'type': 'text/css',
+			'href': L.resource('view/nss_dashboard/nss.css')
+		}));
+	}
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -28,6 +40,8 @@ return view.extend({
 	},
 
 	render: function(data) {
+		ensureCss();
+
 		var s = data[0] || {};
 		var d = data[1] || {};
 
@@ -69,21 +83,21 @@ return view.extend({
 			E('tr', { 'class': 'tr' }, [
 				E('td', { 'class': 'td left', 'style': 'width:35%' }, [
 					E('label', {}, [ E('strong', {}, [ _('NSS 硬件网络加速总开关') ]) ]),
-					E('div', { 'style': 'font-size:12px; color:#606266; margin-top:2px;' }, [
+					E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
 						_('开启后由 NSS 协处理器接管有线与无线网络流量线速转发')
 					])
 				]),
 				E('td', { 'class': 'td left' }, [
 					E('label', { 'style': 'display:inline-flex; align-items:center; gap:8px; cursor:pointer;' }, [
 						cbEnabled,
-						E('span', { 'style': 'font-weight:600; color:#2e7d32;' }, [ _('启用 (即时生效)') ])
+						E('span', { 'style': 'font-weight:600; color:var(--success-color-high);' }, [ _('启用 (即时生效)') ])
 					])
 				])
 			]),
 			E('tr', { 'class': 'tr' }, [
 				E('td', { 'class': 'td left' }, [
 					E('label', {}, [ E('strong', {}, [ _('NSS EIP-197 硬件加解密引擎 (Crypto Offload)') ]) ]),
-					E('div', { 'style': 'font-size:12px; color:#606266; margin-top:2px;' }, [
+					E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
 						_('启用高通独立安全协处理器，卸载 IPsec 与网络大包加解密 (关闭时使用 CPU ARMv8 CE 纳秒级指令)')
 					])
 				]),
@@ -93,18 +107,15 @@ return view.extend({
 							cbCrypto,
 							E('span', { 'style': 'font-weight:600;' }, [ _('启用 EIP-197 加速') ])
 						]),
-						E('span', {
-							'class': 'badge badge-warning',
-							'style': 'background:#fffbe6; color:#d48806; border:1px solid #ffe58f; padding:2px 8px; border-radius:3px; font-size:11px;'
-						}, [ '⚠️ ' + _('修改后需重启路由器生效') ])
+						E('span', { 'class': 'badge badge-warning' }, [ '⚠️ ' + _('修改后需重启生效') ])
 					])
 				])
 			]),
 			E('tr', { 'class': 'tr' }, [
 				E('td', { 'class': 'td left' }, [
 					E('label', {}, [ E('strong', {}, [ _('NSS 核心主频调节') ]) ]),
-					E('div', { 'style': 'font-size:12px; color:#606266; margin-top:2px;' }, [
-						_('调节 NSS 锁相环时钟频率 (当前识别目标规格: ') + npuLabel + ')'
+					E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
+						_('调节 NSS 锁相环时钟频率 (当前识别目标: ') + npuLabel + ')'
 					])
 				]),
 				E('td', { 'class': 'td left' }, [ selectFreq ])
@@ -112,14 +123,14 @@ return view.extend({
 			E('tr', { 'class': 'tr' }, [
 				E('td', { 'class': 'td left' }, [
 					E('label', {}, [ E('strong', {}, [ _('内核冲突配置自动阻断墙 (Auto-Block Protection)') ]) ]),
-					E('div', { 'style': 'font-size:12px; color:#606266; margin-top:2px;' }, [
+					E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
 						_('主动拦截外部 flow_offloading 与 packet_steering，防止硬件流表撕裂丢包')
 					])
 				]),
 				E('td', { 'class': 'td left' }, [
 					E('label', { 'style': 'display:inline-flex; align-items:center; gap:8px; cursor:pointer;' }, [
 						cbAutoBlock,
-						E('span', { 'style': 'font-weight:600; color:#2e7d32;' }, [ _('启用主动阻断防御') ])
+						E('span', { 'style': 'font-weight:600; color:var(--success-color-high);' }, [ _('启用主动阻断防御') ])
 					])
 				])
 			])

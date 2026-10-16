@@ -1,0 +1,127 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Standalone CSS for luci-app-nss-dashboard */
+
+/* 1. LuCI Badge Design Tokens (Theme-aware via CSS Variables) */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 7px;
+	border-radius: 3px;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 15px;
+	border: 1px solid var(--border-color-medium);
+	background: var(--background-color-medium);
+	color: var(--text-color-high);
+	white-space: nowrap;
+	text-decoration: none;
+	vertical-align: middle;
+}
+
+.badge-dot {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+	flex-shrink: 0;
+}
+
+.badge.badge-success {
+	background: rgba(0, 172, 89, 0.12);
+	border-color: rgba(0, 172, 89, 0.45);
+	color: var(--success-color-high);
+}
+
+.badge.badge-info {
+	background: rgba(25, 118, 210, 0.12);
+	border-color: rgba(25, 118, 210, 0.45);
+	color: var(--primary-color-high);
+}
+
+.badge.badge-warning {
+	background: rgba(239, 189, 11, 0.12);
+	border-color: rgba(239, 189, 11, 0.45);
+	color: var(--warn-color-high);
+}
+
+.badge.badge-danger {
+	background: rgba(246, 43, 18, 0.12);
+	border-color: rgba(246, 43, 18, 0.45);
+	color: var(--error-color-high);
+}
+
+.badge.badge-neutral {
+	background: var(--background-color-low);
+	border-color: var(--border-color-medium);
+	color: var(--text-color-medium);
+}
+
+/* Dark Mode Overrides */
+[data-darkmode="true"] .badge.badge-success {
+	background: rgba(0, 166, 108, 0.18);
+	border-color: rgba(0, 166, 108, 0.45);
+	color: #3fb950;
+}
+
+[data-darkmode="true"] .badge.badge-info {
+	background: rgba(77, 161, 192, 0.18);
+	border-color: rgba(77, 161, 192, 0.45);
+	color: #58a6ff;
+}
+
+[data-darkmode="true"] .badge.badge-warning {
+	background: rgba(166, 148, 97, 0.18);
+	border-color: rgba(166, 148, 97, 0.5);
+	color: #d29922;
+}
+
+[data-darkmode="true"] .badge.badge-danger {
+	background: rgba(209, 86, 83, 0.18);
+	border-color: rgba(209, 86, 83, 0.5);
+	color: #f85149;
+}
+
+[data-darkmode="true"] .badge.badge-neutral {
+	background: rgba(255, 255, 255, 0.05);
+	border-color: var(--border-color-high);
+	color: #8b949e;
+}
+
+/* 2. Top Sticky Telemetry Bar */
+#nss-sticky-telemetry-bar {
+	position: sticky;
+	top: 40px;
+	z-index: 100;
+	background: var(--background-color-high);
+	border: 1px solid var(--border-color-high);
+	border-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	padding: 8px 12px;
+	margin-bottom: 16px;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+	gap: 8px 12px;
+}
+
+@media screen and (max-width: 854px) {
+	#nss-sticky-telemetry-bar {
+		top: 80px;
+	}
+}
+
+.telemetry-item {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.telemetry-label {
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--text-color-medium);
+	margin-bottom: 3px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}

@@ -11,6 +11,18 @@ var callGetFlows = rpc.declare({
 
 var currentSubTab = 'clients'; // 'clients' | 'all' | 'ipv4' | 'ipv6'
 
+function ensureCss() {
+	var id = 'luci-app-nss-dashboard-css';
+	if (!document.getElementById(id)) {
+		document.head.appendChild(E('link', {
+			'id': id,
+			'rel': 'stylesheet',
+			'type': 'text/css',
+			'href': L.resource('view/nss_dashboard/nss.css')
+		}));
+	}
+}
+
 function renderFlows(d, onTabSwitch) {
 	var hostnames = d.hostnames || {};
 	var rawFlows = d.flows || [];
@@ -71,7 +83,7 @@ function renderFlows(d, onTabSwitch) {
 		var isActive = (currentSubTab === tab.id);
 		return E('li', { 'class': 'cbi-tab' + (isActive ? ' active' : '') }, [
 			E('a', {
-				'style': isActive ? 'font-weight:bold; color:var(--text-main);' : '',
+				'style': isActive ? 'font-weight:bold; color:var(--text-color-high);' : '',
 				'click': function(ev) {
 					ev.preventDefault();
 					currentSubTab = tab.id;
@@ -99,7 +111,7 @@ function renderFlows(d, onTabSwitch) {
 		if (!clientRows.length) {
 			clientRows = [
 				E('tr', { 'class': 'tr' }, [
-					E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:#909399;' }, [
+					E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 						_('当前暂无活跃的客户端硬件加速流')
 					])
 				])
@@ -146,7 +158,7 @@ function renderFlows(d, onTabSwitch) {
 		if (!flowRows.length) {
 			flowRows = [
 				E('tr', { 'class': 'tr' }, [
-					E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:#909399;' }, [
+					E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 						_('当前分类下暂无活跃硬件加速流')
 					])
 				])
@@ -184,7 +196,7 @@ function renderFlows(d, onTabSwitch) {
 			])
 		]),
 		// 原生 Tab 选项卡
-		E('ul', { 'class': 'cbi-tabmenu', 'style': 'display:flex; list-style:none; padding:0; margin:0 0 12px 0; border-bottom:1px solid #dcdfe6; gap:4px;' }, tabMenuItems),
+		E('ul', { 'class': 'cbi-tabmenu', 'style': 'display:flex; list-style:none; padding:0; margin:0 0 12px 0; border-bottom:1px solid var(--border-color-medium); gap:4px;' }, tabMenuItems),
 		tableBody
 	]);
 }
@@ -195,6 +207,8 @@ return view.extend({
 	},
 
 	render: function() {
+		ensureCss();
+
 		var lastData = null;
 		var container = E('div', {}, [
 			E('p', { 'class': 'spinning' }, [ _('正在读取 NSS 硬件流表…') ])

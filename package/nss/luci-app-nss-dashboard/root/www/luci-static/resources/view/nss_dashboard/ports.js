@@ -9,6 +9,18 @@ var callGetPorts = rpc.declare({
 	method: 'getPorts'
 });
 
+function ensureCss() {
+	var id = 'luci-app-nss-dashboard-css';
+	if (!document.getElementById(id)) {
+		document.head.appendChild(E('link', {
+			'id': id,
+			'rel': 'stylesheet',
+			'type': 'text/css',
+			'href': L.resource('view/nss_dashboard/nss.css')
+		}));
+	}
+}
+
 function progressbar(value, max) {
 	var vn = parseFloat(value) || 0,
 	    mn = parseFloat(max) || 100,
@@ -16,10 +28,13 @@ function progressbar(value, max) {
 
 	return E('div', {
 		'class': 'cbi-progressbar',
-		'style': 'width:80px; height:12px;',
+		'style': 'width:80px; height:12px; margin:0;',
 		'title': '%s%%'.format(vn)
 	}, [
-		E('div', { 'style': 'width:%.2f%%'.format(pc) })
+		E('div', {
+			'style': 'width:%.2f%%; height:100%; transition:width 0.3s ease;'.format(pc),
+			'class': (vn > 80) ? 'cbi-progressbar-danger' : (vn > 50) ? 'cbi-progressbar-warn' : ''
+		})
 	]);
 }
 
@@ -30,10 +45,15 @@ function renderPorts(d) {
 		var hwRatio = parseFloat(p.tx_offload_pct || p.rx_offload_pct || 0);
 		var offloaded = (parseInt(p.tx_offloaded || 0) + parseInt(p.rx_offloaded || 0));
 		var hostPkts = (parseInt(p.tx_host_pkts || 0) + parseInt(p.rx_host_pkts || 0));
+		var isUp = (p.started === 1);
 
 		return E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td', 'data-title': 'Port' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
-			E('td', { 'class': 'td', 'data-title': 'Speed' }, [ p.speed || (p.started ? _('已连接') : _('未连接')) ]),
+			E('td', { 'class': 'td', 'data-title': 'Speed' }, [
+				E('span', { 'class': 'badge ' + (isUp ? 'badge-success' : 'badge-neutral') }, [
+					isUp ? (p.speed || _('已连接')) : _('未连接')
+				])
+			]),
 			E('td', { 'class': 'td', 'data-title': 'HW %' }, [
 				E('div', { 'style': 'display:flex; align-items:center; gap:6px;' }, [
 					progressbar(hwRatio, 100),
@@ -51,7 +71,7 @@ function renderPorts(d) {
 	if (!rows.length) {
 		rows = [
 			E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:#909399;' }, [
+				E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 					_('当前暂未探测到已挂载的 NSS 物理以太网接口 (Host Stack Mode)')
 				])
 			])
@@ -74,7 +94,7 @@ function renderPorts(d) {
 				E('tbody', {}, rows)
 			])
 		]),
-		E('div', { 'class': 'cbi-map-descr', 'style': 'margin-top:12px; font-size:12px; color:#606266;' }, [
+		E('div', { 'class': 'cbi-map-descr', 'style': 'margin-top:12px; font-size:12px; color:var(--text-color-medium);' }, [
 			_('说明: “HW Pkts”代表由芯片固件硬件线速转发的数据包；“Host Pkts”代表建链首包握手、广播发现或路由器本机流量；HW % 接近 100% 表明硬件卸载完全生效。')
 		])
 	]);
@@ -86,6 +106,8 @@ return view.extend({
 	},
 
 	render: function() {
+		ensureCss();
+
 		var container = E('div', {}, [
 			E('p', { 'class': 'spinning' }, [ _('正在读取物理网口线速卸载数据…') ])
 		]);

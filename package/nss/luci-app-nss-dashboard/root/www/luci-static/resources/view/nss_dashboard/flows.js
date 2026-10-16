@@ -205,10 +205,13 @@ function renderFlows(d, statusData, onTabSwitch) {
 				E('td', { 'class': 'td', 'data-title': 'Conns', 'style': 'white-space:nowrap;' }, [ c.flowCount + ' ' + _('条连接') ]),
 				E('td', { 'class': 'td', 'data-title': 'Pkts', 'style': 'white-space:nowrap;' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
 				E('td', { 'class': 'td', 'data-title': 'Bytes', 'style': 'white-space:nowrap;' }, [ String.format('%1024.1mB', c.totalBytes) ]),
-				E('td', { 'class': 'td', 'data-title': 'Proto', 'style': 'white-space:nowrap;' }, [
-					Object.keys(c.protos).map(function(pr) {
-						return badge('badge-neutral', pr);
-					})
+				E('td', { 'class': 'td', 'data-title': 'Proto' }, [
+					E('div', { 'style': 'display:inline-flex; gap:4px; flex-wrap:wrap;' },
+						Object.keys(c.protos).map(function(pr) {
+							var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
+							return badge(protoCls, pr);
+						})
+					)
 				])
 			]);
 		});

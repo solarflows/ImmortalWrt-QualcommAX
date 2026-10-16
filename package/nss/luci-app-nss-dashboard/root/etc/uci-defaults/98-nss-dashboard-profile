@@ -38,11 +38,30 @@ if [ -r /sys/kernel/debug/qca-nss-drv/stats/fw_version ]; then
 	fw_ver=$(cat /sys/kernel/debug/qca-nss-drv/stats/fw_version 2>/dev/null | head -n1 | tr -d '\r\n')
 fi
 
-# 2. Persist static profile to /tmp for zero-cost runtime RPC retrieval
-mkdir -p /tmp
-printf '{"soc":"%s","cores":%d,"fw_version":"%s"}\n' "$soc" "$cores" "${fw_ver:-11.4}" > "$PROFILE_JSON"
+# 2. Probe current clock frequency ONCE at boot (Strictly lock to avoid runtime sysctl printk flooding)
+cur_freq=""
+if [ -r /proc/sys/dev/nss/clock/current_freq ]; then
+	hz=$(cat /proc/sys/dev/nss/clock/current_freq 2>/dev/null | tr -d '[:space:]')
+	[ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null && cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+fi
+if [ -z "$cur_freq" ]; then
+	cur_freq=$(uci -q get nss_dashboard.clock.frequency 2>/dev/null)
+fi
+if [ -z "$cur_freq" ]; then
+	[ "$cores" -eq 1 ] && cur_freq="1056.0 MHz" || cur_freq="1478.4 MHz"
+fi
 
-# 3. State discovery & UCI reconciliation (only initialize if not already set by user)
+# 3. Persist static profile to /tmp for zero-cost runtime RPC retrieval
+mkdir -p /tmp
+printf '{"soc":"%s","cores":%d,"fw_version":"%s","nss_freq":"%s"}\n' "$soc" "$cores" "${fw_ver:-11.4}" "$cur_freq" > "$PROFILE_JSON"
+cat > /tmp/nss_profile.env <<-EOF
+soc='$soc'
+cores=$cores
+fw_ver='${fw_ver:-11.4}'
+nss_freq='$cur_freq'
+EOF
+
+# 4. State discovery & UCI reconciliation (only initialize if not already set by user)
 [ -f /etc/config/nss_dashboard ] || touch /etc/config/nss_dashboard
 
 if ! uci -q get nss_dashboard.general >/dev/null; then
@@ -67,16 +86,6 @@ if ! uci -q get nss_dashboard.general >/dev/null; then
 		uci -q set nss_dashboard.crypto.enabled='0'
 	fi
 
-	# Probe current clock frequency
-	cur_freq=""
-	if [ -r /proc/sys/dev/nss/clock/current_freq ]; then
-		hz=$(cat /proc/sys/dev/nss/clock/current_freq 2>/dev/null | tr -d '[:space:]')
-		[ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null && cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
-	fi
-
-	if [ -z "$cur_freq" ]; then
-		[ "$cores" -eq 1 ] && cur_freq="1056.0 MHz" || cur_freq="1478.4 MHz"
-	fi
 	uci -q set nss_dashboard.clock.frequency="$cur_freq"
 
 	# Security auto-block defaults to on

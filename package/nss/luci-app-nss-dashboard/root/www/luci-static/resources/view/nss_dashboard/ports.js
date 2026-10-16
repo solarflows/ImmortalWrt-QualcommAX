@@ -32,17 +32,17 @@ function renderPorts(d) {
 		var hostPkts = (parseInt(p.tx_host_pkts || 0) + parseInt(p.rx_host_pkts || 0));
 
 		return E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
-			E('td', { 'class': 'td' }, [ p.speed || (p.started ? _('已连接') : _('未连接')) ]),
-			E('td', { 'class': 'td' }, [
+			E('td', { 'class': 'td', 'data-title': 'Port' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
+			E('td', { 'class': 'td', 'data-title': 'Speed' }, [ p.speed || (p.started ? _('已连接') : _('未连接')) ]),
+			E('td', { 'class': 'td', 'data-title': 'HW %' }, [
 				E('div', { 'style': 'display:flex; align-items:center; gap:6px;' }, [
 					progressbar(hwRatio, 100),
 					E('span', { 'style': 'font-size:11px; font-weight:bold;' }, [ hwRatio + '%' ])
 				])
 			]),
-			E('td', { 'class': 'td' }, [ offloaded.toLocaleString() + ' pkts' ]),
-			E('td', { 'class': 'td' }, [ hostPkts.toLocaleString() + ' pkts' ]),
-			E('td', { 'class': 'td' }, [
+			E('td', { 'class': 'td', 'data-title': 'HW Pkts' }, [ offloaded.toLocaleString() + ' pkts' ]),
+			E('td', { 'class': 'td', 'data-title': 'Host Pkts' }, [ hostPkts.toLocaleString() + ' pkts' ]),
+			E('td', { 'class': 'td', 'data-title': 'RX / TX' }, [
 				String.format('%1024.1mB', (p.rx_bytes || 0)) + ' / ' + String.format('%1024.1mB', (p.tx_bytes || 0))
 			])
 		]);
@@ -59,21 +59,23 @@ function renderPorts(d) {
 	}
 
 	return E('div', {}, [
-		E('table', { 'class': 'table' }, [
-			E('thead', {}, [
-				E('tr', { 'class': 'tr table-titles' }, [
-					E('th', { 'class': 'th' }, [ 'Port' ]),
-					E('th', { 'class': 'th' }, [ 'Speed' ]),
-					E('th', { 'class': 'th' }, [ 'HW %' ]),
-					E('th', { 'class': 'th' }, [ 'HW Pkts' ]),
-					E('th', { 'class': 'th' }, [ 'Host Pkts' ]),
-					E('th', { 'class': 'th' }, [ 'RX / TX' ])
-				])
-			]),
-			E('tbody', {}, rows)
+		E('div', { 'id': 'ports-scroll-wrap', 'style': 'overflow-x:auto; width:100%; -webkit-overflow-scrolling:touch;' }, [
+			E('table', { 'class': 'table' }, [
+				E('thead', {}, [
+					E('tr', { 'class': 'tr table-titles' }, [
+						E('th', { 'class': 'th' }, [ 'Port' ]),
+						E('th', { 'class': 'th' }, [ 'Speed' ]),
+						E('th', { 'class': 'th' }, [ 'HW %' ]),
+						E('th', { 'class': 'th' }, [ 'HW Pkts' ]),
+						E('th', { 'class': 'th' }, [ 'Host Pkts' ]),
+						E('th', { 'class': 'th' }, [ 'RX / TX' ])
+					])
+				]),
+				E('tbody', {}, rows)
+			])
 		]),
 		E('div', { 'class': 'cbi-map-descr', 'style': 'margin-top:12px; font-size:12px; color:#606266;' }, [
-			_('💡 说明: “HW Pkts”代表由芯片固件完全线速直通转发的数据包；“Host Pkts”代表建链首包握手、广播发现或路由器本机流量；HW % 接近 100% 表明硬件卸载完全生效。')
+			_('说明: “HW Pkts”代表由芯片固件硬件线速转发的数据包；“Host Pkts”代表建链首包握手、广播发现或路由器本机流量；HW % 接近 100% 表明硬件卸载完全生效。')
 		])
 	]);
 }
@@ -90,7 +92,13 @@ return view.extend({
 
 		var update = function() {
 			return callGetPorts().then(function(d) {
+				var oldWrap = container.querySelector('#ports-scroll-wrap');
+				var prevScrollLeft = oldWrap ? oldWrap.scrollLeft : 0;
 				dom.content(container, renderPorts(d));
+				var newWrap = container.querySelector('#ports-scroll-wrap');
+				if (newWrap && prevScrollLeft > 0) {
+					newWrap.scrollLeft = prevScrollLeft;
+				}
 			}).catch(function(err) {
 				dom.content(container, E('div', { 'class': 'alert-message warning' }, [
 					_('无法读取端口数据: '), err.message
@@ -104,7 +112,7 @@ return view.extend({
 		return E('div', {}, [
 			E('h2', {}, [ _('NSS 硬件网络加速 - 端口线速矩阵') ]),
 			E('div', { 'class': 'cbi-map-descr' }, [
-				_('实时按需监控各物理网络接口线速直通率。离开当前页面定时器自动销毁，0 后台消耗。')
+				_('实时按需监控各物理网络接口硬件卸载率。离开当前页面定时器自动销毁，0 后台消耗。')
 			]),
 			container
 		]);

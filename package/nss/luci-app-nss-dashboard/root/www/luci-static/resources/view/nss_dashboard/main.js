@@ -226,7 +226,7 @@ function renderStatusCard(d, p) {
 	if (!tempElements.length)
 		tempElements.push(badge('badge-neutral', _('未检测到物理温度')));
 
-	var section1 = E('div', { 'class': 'cbi-section nss-module-box' }, [
+	var section1 = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('核心算力与驱动模块') ]),
 			badge('badge-success', 'FW ' + (p.fw_version || '11.4') + ' [' + (p.fw_mask || '0x1f') + ']')
@@ -269,7 +269,7 @@ function renderStatusCard(d, p) {
 		])
 	]);
 
-	var section2 = E('div', { 'class': 'cbi-section nss-module-box' }, [
+	var section2 = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('流表引擎与数据通道') ]),
 			badge('badge-info', totalConns.toLocaleString() + ' ' + _('活动流'))
@@ -432,7 +432,7 @@ function renderControlCard(s, d) {
 		}
 	}, [ _('保存并应用 (Save & Apply)') ]);
 
-	var moduleBox = E('div', { 'class': 'cbi-section nss-module-box' }, [
+	var moduleBox = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('NSS 硬件协同控制与冲突防御') ]),
 			badge('badge-info', _('热生效 / 重启约束'))
@@ -522,7 +522,7 @@ function renderPortsCard(d) {
 		];
 	}
 
-	var moduleBox = E('div', { 'class': 'cbi-section nss-module-box' }, [
+	var moduleBox = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('以太网物理端口线速卸载矩阵') ]),
 			badge('badge-success', _('硬件线速卸载监测'))
@@ -629,11 +629,15 @@ function renderFlowsCard(d, onSubTabSwitch) {
 		{ id: 'ipv6',    label: _('IPv6 流') }
 	].map(function(tab) {
 		var isActive = (flowSubTab === tab.id);
-		return E('li', { 'class': 'cbi-tab' + (isActive ? ' active' : '') }, [
+		return E('li', {
+			'class': isActive ? 'cbi-tab' : 'cbi-tab-disabled',
+			'data-tab': tab.id
+		}, [
 			E('a', {
-				'style': isActive ? 'font-weight:bold; color:var(--text-color-high);' : '',
+				'href': '#' + tab.id,
 				'click': function(ev) {
 					ev.preventDefault();
+					if (flowSubTab === tab.id) return;
 					flowSubTab = tab.id;
 					if (onSubTabSwitch) onSubTabSwitch();
 				}
@@ -740,7 +744,7 @@ function renderFlowsCard(d, onSubTabSwitch) {
 		]);
 	}
 
-	var moduleBox = E('div', { 'class': 'cbi-section nss-module-box' }, [
+	var secSummary = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('NSS 硬件流表与连接概况') ]),
 			badge('badge-info', isInstalled ? (rawFlows.length + ' ' + _('活动流')) : _('未安装 nssqos'))
@@ -757,15 +761,16 @@ function renderFlowsCard(d, onSubTabSwitch) {
 						])
 					])
 				])
-			]),
-			isInstalled ? E('div', { 'style': 'padding:10px 12px 0 12px;' }, [
-				E('ul', { 'class': 'cbi-tabmenu', 'style': 'margin-bottom:12px; gap:4px;' }, tabMenuItems)
-			]) : E('div'),
-			tableBody
+			])
 		])
 	]);
 
-	return moduleBox;
+	var secTable = E('div', { 'class': 'cbi-section' }, [
+		isInstalled ? E('ul', { 'class': 'cbi-tabmenu' }, tabMenuItems) : E('div'),
+		E('div', { 'class': 'cbi-section-node' }, [ tableBody ])
+	]);
+
+	return E('div', {}, [ secSummary, secTable ]);
 }
 
 // ── 7. SPA 统一主入口视图 ──
@@ -921,7 +926,7 @@ return view.extend({
 		return E('div', { 'class': 'nss-dashboard-spa' }, [
 			stickyBarContainer,
 			conflictContainer,
-			E('div', { 'class': 'cbi-section', 'style': 'background:transparent; border:none; margin:0 0 16px 0; padding:0;' }, [ tabMenuContainer ]),
+			tabMenuContainer,
 			subCardContainer
 		]);
 	},

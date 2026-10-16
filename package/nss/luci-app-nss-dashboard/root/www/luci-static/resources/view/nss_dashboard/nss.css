@@ -1,7 +1,45 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Standalone CSS for luci-app-nss-dashboard */
+/* Clean, minimal CSS for luci-app-nss-dashboard */
+/* Rely 100% on LuCI native cascade.css and Design Tokens */
 
-/* 1. LuCI Badge Design Tokens (Theme-aware via CSS Variables) */
+/* 1. Functional Sticky Telemetry Bar */
+#nss-sticky-telemetry-bar {
+	position: sticky;
+	top: 40px;
+	z-index: 100;
+	background: var(--background-color-high);
+	border: 1px solid var(--border-color-high);
+	border-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	padding: 8px 12px;
+	margin-bottom: 16px;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+	gap: 8px 12px;
+}
+
+@media screen and (max-width: 854px) {
+	#nss-sticky-telemetry-bar {
+		top: 80px;
+	}
+}
+
+.telemetry-item {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.telemetry-label {
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--text-color-medium);
+	margin-bottom: 3px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+/* 2. Pure Design Tokens Badges (Pure CSS Variables, Zero Hardcoded Hex) */
 .badge {
 	display: inline-flex;
 	align-items: center;
@@ -57,98 +95,3 @@
 	border-color: var(--border-color-medium);
 	color: var(--text-color-medium);
 }
-
-/* Dark Mode Overrides */
-[data-darkmode="true"] .badge.badge-success {
-	background: rgba(0, 166, 108, 0.18);
-	border-color: rgba(0, 166, 108, 0.45);
-	color: #3fb950;
-}
-
-[data-darkmode="true"] .badge.badge-info {
-	background: rgba(77, 161, 192, 0.18);
-	border-color: rgba(77, 161, 192, 0.45);
-	color: #58a6ff;
-}
-
-[data-darkmode="true"] .badge.badge-warning {
-	background: rgba(166, 148, 97, 0.18);
-	border-color: rgba(166, 148, 97, 0.5);
-	color: #d29922;
-}
-
-[data-darkmode="true"] .badge.badge-danger {
-	background: rgba(209, 86, 83, 0.18);
-	border-color: rgba(209, 86, 83, 0.5);
-	color: #f85149;
-}
-
-[data-darkmode="true"] .badge.badge-neutral {
-	background: rgba(255, 255, 255, 0.05);
-	border-color: var(--border-color-high);
-	color: #8b949e;
-}
-
-/* 2. Top Sticky Telemetry Bar */
-#nss-sticky-telemetry-bar {
-	position: sticky;
-	top: 40px;
-	z-index: 100;
-	background: var(--background-color-high);
-	border: 1px solid var(--border-color-high);
-	border-radius: 4px;
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-	padding: 8px 12px;
-	margin-bottom: 16px;
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-	gap: 8px 12px;
-}
-
-@media screen and (max-width: 854px) {
-	#nss-sticky-telemetry-bar {
-		top: 80px;
-	}
-}
-
-.telemetry-item {
-	display: flex;
-	flex-direction: column;
-	justify-content: center;
-}
-
-.telemetry-label {
-	font-size: 10px;
-	font-weight: 600;
-	color: var(--text-color-medium);
-	margin-bottom: 3px;
-	text-transform: uppercase;
-	letter-spacing: 0.5px;
-}
-
-/* 3. NSS Module Boxes & Headers (Matching Original Design Prototype) */
-.nss-module-box {
-	background: var(--background-color-high);
-	border: 1px solid var(--border-color-high);
-	border-radius: 4px;
-	margin-bottom: 16px;
-	overflow: hidden;
-}
-
-.nss-module-box .cbi-section-title {
-	background: var(--background-color-medium);
-	border-bottom: 1px solid var(--border-color-medium);
-	padding: 8px 12px;
-	margin: 0;
-	font-size: 13px;
-	font-weight: 700;
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-}
-
-.nss-module-box .cbi-section-node {
-	padding: 0;
-}
-
-

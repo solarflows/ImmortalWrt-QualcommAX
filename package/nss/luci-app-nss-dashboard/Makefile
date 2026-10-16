@@ -35,6 +35,8 @@ endef
 
 define Package/luci-app-nss-dashboard/install
 	$(CP) ./root/* $(1)/
+	chmod 0755 $(1)/usr/libexec/rpcd/luci.nss_dashboard
+	chmod 0755 $(1)/etc/uci-defaults/98-nss-dashboard-profile
 endef
 
 $(eval $(call BuildPackage,luci-app-nss-dashboard))

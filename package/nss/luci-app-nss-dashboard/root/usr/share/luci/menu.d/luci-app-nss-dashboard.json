@@ -1,0 +1,45 @@
+{
+	"admin/status/nss_dashboard": {
+		"title": "NSS Dashboard",
+		"order": 56,
+		"action": {
+			"type": "alias",
+			"path": "admin/status/nss_dashboard/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-nss-dashboard" ]
+		}
+	},
+	"admin/status/nss_dashboard/status": {
+		"title": "Status",
+		"order": 1,
+		"action": {
+			"type": "view",
+			"path": "nss_dashboard/status"
+		}
+	},
+	"admin/status/nss_dashboard/control": {
+		"title": "Controls",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "nss_dashboard/control"
+		}
+	},
+	"admin/status/nss_dashboard/ports": {
+		"title": "Ports",
+		"order": 3,
+		"action": {
+			"type": "view",
+			"path": "nss_dashboard/ports"
+		}
+	},
+	"admin/status/nss_dashboard/flows": {
+		"title": "Flows",
+		"order": 4,
+		"action": {
+			"type": "view",
+			"path": "nss_dashboard/flows"
+		}
+	}
+}

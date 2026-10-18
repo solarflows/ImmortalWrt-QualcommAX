@@ -75,11 +75,6 @@ PKG_CONFIG_DEPENDS:= \
 	CONFIG_NSS_DRV_WIFI_LEGACY_ENABLE
 
 include $(INCLUDE_DIR)/kernel.mk
-
-define Build/Prepare
-	mkdir -p $(PKG_BUILD_DIR)
-	$(CP) ./src/* $(PKG_BUILD_DIR)/
-endef
 include $(INCLUDE_DIR)/package.mk
 
 
@@ -349,6 +344,11 @@ endif
 ifndef CONFIG_NSS_DRV_WIFI_LEGACY_ENABLE
    DRV_MAKE_OPTS += NSS_DRV_WIFI_LEGACY_ENABLE=n
 endif
+
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+	$(CP) ./src/* $(PKG_BUILD_DIR)/
+endef
 
 define Build/Configure
 	$(LN) arch/nss_$(SOC).h $(PKG_BUILD_DIR)/exports/nss_arch.h

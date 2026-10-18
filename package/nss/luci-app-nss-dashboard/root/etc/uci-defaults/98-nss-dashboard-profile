@@ -1,0 +1,166 @@
+#!/bin/sh
+# 98-nss-dashboard-profile: NSS hardware state discovery & profile initialization
+# Executed on firstboot or boot to reconcile UCI configuration with actual hardware state.
+# Read-before-write principle: probe physical/kernel reality before touching settings.
+
+PROFILE_JSON="/tmp/nss_profile.json"
+
+# 1. Detect SoC and NPU core count
+soc="IPQ8074"
+cores=2
+
+if [ -f /proc/device-tree/compatible ]; then
+	compat=$(tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null)
+	case "$compat" in
+		*ipq60*|*qcom,ipq6018*)
+			soc="IPQ6018"
+			cores=1
+			;;
+		*ipq50*|*qcom,ipq5018*)
+			soc="IPQ5018"
+			cores=1
+			;;
+		*ipq807*)
+			soc="IPQ8074"
+			cores=2
+			;;
+	esac
+fi
+
+# 2. Probe NSS firmware version and capability mask
+fw_ver=""
+if [ -s /tmp/.nss_fw_version ]; then
+	read -r fw_ver < /tmp/.nss_fw_version 2>/dev/null
+fi
+if [ -z "$fw_ver" ]; then
+	for blob in /lib/firmware/qca-nss0.bin /lib/firmware/qca-nss0-retail.bin /lib/firmware/qca-nss-retail.bin; do
+		if [ -r "$blob" ]; then
+			fw_ver=$(grep -aom1 'NSS\.[A-Z][A-Z]*\.[0-9][0-9A-Za-z.-]*' "$blob" 2>/dev/null)
+			[ -n "$fw_ver" ] && break
+		fi
+	done
+fi
+[ -n "$fw_ver" ] && echo "$fw_ver" > /tmp/.nss_fw_version
+[ -z "$fw_ver" ] && fw_ver="unknown"
+
+fw_mask="0x0"
+if [ -r /sys/kernel/debug/qca-ppe-nss/fw_mask ]; then
+	read -r fw_mask < /sys/kernel/debug/qca-ppe-nss/fw_mask 2>/dev/null
+fi
+[ -z "$fw_mask" ] && fw_mask="0x0"
+
+# 3. Probe current clock frequency ONCE at boot (Strictly lock to avoid runtime sysctl printk flooding)
+cur_freq=""
+if [ -r /proc/sys/dev/nss/clock/current_freq ]; then
+	hz=$(cat /proc/sys/dev/nss/clock/current_freq 2>/dev/null | tr -d '[:space:]')
+	[ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null && cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+fi
+if [ -z "$cur_freq" ]; then
+	cur_freq=$(uci -q get nss_dashboard.clock.frequency 2>/dev/null)
+fi
+if [ -z "$cur_freq" ]; then
+	[ "$cores" -eq 1 ] && cur_freq="1056.0 MHz" || cur_freq="1478.4 MHz"
+fi
+
+# 4. Probe kernel acceleration module state with authentic tri-state semantics:
+#    2 = Active (loaded in /sys/module)
+#    1 = Standby (.ko packaged in /lib/modules)
+#    0 = Absent (not packaged in firmware)
+check_mod() {
+	local sys_mods="$1"
+	local ko_names="$2"
+
+	for sm in $sys_mods; do
+		if [ -d "/sys/module/$sm" ]; then
+			echo 2
+			return
+		fi
+	done
+
+	local cur_kver
+	cur_kver=$(uname -r 2>/dev/null)
+	for kn in $ko_names; do
+		if ls /lib/modules/"$cur_kver"/$kn >/dev/null 2>&1 || ls /lib/modules/*/$kn >/dev/null 2>&1; then
+			echo 1
+			return
+		fi
+	done
+
+	echo 0
+}
+
+mod_pppoe=$(check_mod "qca_nss_pppoe nss_connmgr_pppoe" "qca-nss-pppoe.ko nss-connmgr-pppoe.ko")
+mod_vlan=$(check_mod "qca_nss_vlan qca_nss_vlan_mgr nss_vlan_mgr" "qca-nss-vlan.ko qca-nss-vlan-mgr.ko nss-vlan-mgr.ko")
+mod_bridge=$(check_mod "qca_nss_bridge_mgr nss_bridge_mgr" "qca-nss-bridge-mgr.ko nss-bridge-mgr.ko")
+mod_qdisc=$(check_mod "qca_nss_qdisc" "qca-nss-qdisc.ko")
+mod_crypto=$(check_mod "qca_nss_crypto qca_nss_eip197 eip197" "qca-nss-crypto.ko qca-nss-eip197.ko eip197.ko")
+
+# 5. Probe SQM traffic shaping integration
+sqm_state=-1
+if [ -x /etc/init.d/sqm ]; then
+	if [ "$(uci -q get sqm.@queue[0].enabled || echo 0)" = "1" ]; then
+		[ "$mod_qdisc" -ge 1 ] && sqm_state=2 || sqm_state=1
+	else
+		sqm_state=0
+	fi
+fi
+
+# 6. Collect router self hostname and interface assets (persisted once at boot)
+router_host=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "czw")
+router_ips=$(ip -o addr show 2>/dev/null | awk '{sub(/\/.*/, "", $4); if (NR>1) printf ","; printf "\"%s\"", $4}')
+[ -z "$router_ips" ] && router_ips='"127.0.0.1","::1"'
+
+# 7. Persist static profile to /tmp for zero-cost runtime RPC retrieval
+mkdir -p /tmp
+printf '{"soc":"%s","cores":%d,"fw_version":"%s","fw_mask":"%s","nss_freq":"%s","sqm":%d,"modules":{"pppoe":%d,"vlan":%d,"bridge":%d,"qdisc":%d,"crypto":%d},"router":{"hostname":"%s","ips":[%s]}}\n' \
+	"$soc" "$cores" "$fw_ver" "$fw_mask" "$cur_freq" "$sqm_state" \
+	"$mod_pppoe" "$mod_vlan" "$mod_bridge" "$mod_qdisc" "$mod_crypto" \
+	"$router_host" "$router_ips" > "$PROFILE_JSON"
+cat > /tmp/nss_profile.env <<-EOF
+soc='$soc'
+cores=$cores
+fw_ver='$fw_ver'
+fw_mask='$fw_mask'
+nss_freq='$cur_freq'
+sqm_state=$sqm_state
+mod_pppoe=$mod_pppoe
+mod_vlan=$mod_vlan
+mod_bridge=$mod_bridge
+mod_qdisc=$mod_qdisc
+mod_crypto=$mod_crypto
+EOF
+
+# 4. State discovery & UCI reconciliation (only initialize if not already set by user)
+[ -f /etc/config/nss_dashboard ] || touch /etc/config/nss_dashboard
+
+if ! uci -q get nss_dashboard.general >/dev/null; then
+	uci -q batch <<-EOF
+		set nss_dashboard.general=nss_dashboard
+		set nss_dashboard.crypto=nss_dashboard
+		set nss_dashboard.clock=nss_dashboard
+		set nss_dashboard.security=nss_dashboard
+	EOF
+
+	# Probe NSS driver state
+	if [ -d /sys/module/qca_nss_drv ] || [ -d /sys/kernel/debug/qca-ppe-nss ]; then
+		uci -q set nss_dashboard.general.enabled='1'
+	else
+		uci -q set nss_dashboard.general.enabled='0'
+	fi
+
+	# Probe EIP-197 crypto state
+	if [ -d /sys/module/qca_nss_crypto ] || [ -f /lib/firmware/ifpp.bin ]; then
+		[ -d /sys/module/qca_nss_crypto ] && uci -q set nss_dashboard.crypto.enabled='1' || uci -q set nss_dashboard.crypto.enabled='0'
+	else
+		uci -q set nss_dashboard.crypto.enabled='0'
+	fi
+
+	uci -q set nss_dashboard.clock.frequency="$cur_freq"
+
+	# Security auto-block defaults to on
+	uci -q set nss_dashboard.security.auto_block='1'
+
+	uci -q commit nss_dashboard
+fi
+
+exit 0

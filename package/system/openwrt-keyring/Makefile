@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwrt-keyring
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=$(PROJECT_GIT)/keyring.git
@@ -34,12 +34,14 @@ ifneq ($(CONFIG_USE_APK),)
 define Package/openwrt-keyring/install
 	$(INSTALL_DIR) $(1)/etc/apk/keys/
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/apk/openwrt-snapshots.pem $(1)/etc/apk/keys/
+	$(INSTALL_DATA) ./files/apk/immortalwrt-snapshots.pem $(1)/etc/apk/keys/
 endef
 else
 define Package/openwrt-keyring/install
 	$(INSTALL_DIR) $(1)/etc/opkg/keys/
 	# Public usign key for unattended snapshot builds
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/usign/b5043e70f9a75cde $(1)/etc/opkg/keys/
+	$(INSTALL_DATA) ./files/usign/8ead5420c4005b0d $(1)/etc/opkg/keys/
 endef
 endif
 

@@ -10,9 +10,16 @@
 # version-string shapes: NSS.FW.12.5-210-HK.R (12.x line) and
 # NSS.HK.11.4.0.5-6-R (11.4 line, the mesh-capable firmware).
 nss_fw_version() {
+	if [ -s /tmp/.nss_fw_version ]; then
+		cat /tmp/.nss_fw_version
+		return
+	fi
 	local blob=/lib/firmware/qca-nss0.bin
 	[ -e "$blob" ] || blob=/lib/firmware/qca-nss0-retail.bin
-	grep -aom1 'NSS\.[A-Z][A-Z]*\.[0-9][0-9A-Za-z.-]*' "$blob" 2>/dev/null
+	local ver
+	ver=$(grep -aom1 'NSS\.[A-Z][A-Z]*\.[0-9][0-9A-Za-z.-]*' "$blob" 2>/dev/null)
+	[ -n "$ver" ] && echo "$ver" > /tmp/.nss_fw_version
+	echo "$ver"
 }
 
 # 802.11s mesh state. Sets NSS_MESH_CFG=1 when any wireless vif is

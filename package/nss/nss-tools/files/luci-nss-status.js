@@ -122,16 +122,29 @@ function renderStatus(d) {
 }
 
 return view.extend({
-	load: getStatus,
+	load: function() {
+		// Non-blocking view routing: return immediately to render layout without freeze
+		return Promise.resolve(null);
+	},
 
 	render: function(data) {
-		var container = E('div', {}, renderStatus(data));
+		var spinner = E('p', { 'class': 'spinning' }, [ _('Loading NSS offload status…') ]);
+		var container = E('div', {}, data ? renderStatus(data) : spinner);
 
-		poll.add(function() {
+		var update = function() {
 			return getStatus().then(function(d) {
 				dom.content(container, renderStatus(d));
+			}).catch(function(err) {
+				dom.content(container, E('div', { 'class': 'alert-message warning' }, [
+					_('Unable to load NSS status: '), err.message
+				]));
 			});
-		}, 10);
+		};
+
+		if (!data)
+			update();
+
+		poll.add(update, 5);
 
 		return E('div', {}, [
 			E('h2', {}, _('NSS Offload')),

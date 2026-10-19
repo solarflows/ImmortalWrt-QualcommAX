@@ -82,7 +82,7 @@ jobs:
         run: |
           git remote add upstream-openwrt https://github.com/openwrt/openwrt.git 2>/dev/null || \
             git remote set-url upstream-openwrt https://github.com/openwrt/openwrt.git
-          git fetch upstream-openwrt master --depth=300
+          git fetch --no-tags upstream-openwrt master
 
       - name: Check for upstream changes & Keyring
         id: check
@@ -159,7 +159,7 @@ jobs:
           echo "Merging upstream OpenWrt master (${UPSTREAM_HEAD}) into nss-edma-rolling..."
           git config merge.ours.driver true
           MERGE_MSG=$(printf "chore(sync): rolling merge OpenWrt master into nss-edma-rolling\n\nProtected paths preserved:\n- target/linux/qualcommax\n- package/kernel/mac80211\n- package/nss")
-          if ! git merge -X ours --no-edit upstream-openwrt/master -m "$MERGE_MSG"; then
+          if ! git merge -X ours --allow-unrelated-histories --no-edit upstream-openwrt/master -m "$MERGE_MSG"; then
             echo "::error::Merge failed unexpectedly! Aborting."
             git merge --abort || true
             exit 1

@@ -158,12 +158,8 @@ jobs:
           # 2. 启用 merge=ours 合并驱动并执行自动合并
           echo "Merging upstream OpenWrt master (${UPSTREAM_HEAD}) into nss-edma-rolling..."
           git config merge.ours.driver true
-          if ! git merge -X ours --no-edit upstream-openwrt/master -m "chore(sync): rolling merge OpenWrt master into nss-edma-rolling
-
-Protected paths preserved:
-- target/linux/qualcommax
-- package/kernel/mac80211
-- package/nss"; then
+          MERGE_MSG=$(printf "chore(sync): rolling merge OpenWrt master into nss-edma-rolling\n\nProtected paths preserved:\n- target/linux/qualcommax\n- package/kernel/mac80211\n- package/nss")
+          if ! git merge -X ours --no-edit upstream-openwrt/master -m "$MERGE_MSG"; then
             echo "::error::Merge failed unexpectedly! Aborting."
             git merge --abort || true
             exit 1

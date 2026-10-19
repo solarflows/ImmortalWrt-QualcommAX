@@ -165,19 +165,25 @@ jobs:
             exit 1
           fi
 
-          # 3. 第二道物理防线：针对可能引入的新增文件强制还原基线并断言 0 差异
+          # 3. 第二道物理防线：彻底清除上游合并引入的新增文件，将受保护目录物理重置为基底分支
           echo "Applying secondary protection layer to hardware offload paths..."
-          git checkout origin/nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss
-          git clean -fd target/linux/qualcommax package/kernel/mac80211 package/nss
-          PROTECTED_DIFF=$(git diff origin/nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss)
-          if [ -n "$PROTECTED_DIFF" ]; then
-            echo "::error::Protected path assertion failed: differences detected against nss-edma-julius!"
-            exit 1
-          fi
-          if ! git diff --quiet --cached || ! git diff --quiet; then
-            git add target/linux/qualcommax package/kernel/mac80211 package/nss
+          git rm -rf --quiet target/linux/qualcommax package/kernel/mac80211 package/nss 2>/dev/null || true
+          git checkout nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss
+
+          # 提交修正以收敛合并
+          git add target/linux/qualcommax package/kernel/mac80211 package/nss
+          if ! git diff --quiet --cached; then
             git commit --amend --no-edit || true
           fi
+
+          # 断言受保护路径与本地真理源 nss-edma-julius 绝对 100% 零差异
+          PROTECTED_DIFF=$(git diff nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss)
+          if [ -n "$PROTECTED_DIFF" ]; then
+            echo "::error::Protected path assertion failed: differences detected against nss-edma-julius!"
+            echo "$PROTECTED_DIFF" | head -n 30
+            exit 1
+          fi
+          echo "Protected hardware paths verified (zero diff against nss-edma-julius)."
 
           # 4. 注入更新后的快照公钥 (若有变更)
           if [ "$KEY_CHANGED" = "true" ]; then

@@ -1,28 +1,71 @@
-name: "Upstream Sync (Julius NSS-EDMA Rebase-Top)"
+# ════════════════════════════════════════════════════════════════════════
+# Upstream Sync & Rolling Canary Build
+# 双轨自动同步工作流:
+# 1. 以生产基底 nss-edma-julius 为起点派生并重置 nss-edma-rolling 分支
+# 2. 在路径级保护盾 (merge=ours) 下合并 OpenWrt 官方 master 通用演进
+# 3. 自动同步 ImmortalWrt 签名公钥
+# 4. 强制推送更新至 origin/nss-edma-rolling
+# 5. 调用 AutoWorkFlows 编译 Canary 固件, 自动发布为 Pre-release
+# ════════════════════════════════════════════════════════════════════════
+name: "Upstream Sync & Rolling Canary Build"
 
 on:
-  # schedule:
-  #   - cron: '0 4 * * *'  # 每日 UTC 4:00 (北京时间 12:00，已归档分支停用定时自动同步)
+  schedule:
+    - cron: '0 18 * * 0'  # 每周日 18:00 UTC (北京时间周一凌晨 02:00)
   workflow_dispatch:
     inputs:
       force_sync:
-        description: '强制执行同步与变基置顶'
+        description: '强制执行同步与合并 (即使上游无新增提交)'
+        type: boolean
+        required: false
+        default: false
+      trigger_build:
+        description: '同步后自动触发 Pre-release 固件编译验证'
+        type: boolean
+        required: false
+        default: true
+      target:
+        description: '构建目标平台 (ipq807x / ipq60xx / both)'
+        type: choice
+        required: false
+        default: 'ipq807x'
+        options:
+          - 'ipq807x'
+          - 'ipq60xx'
+          - 'both'
+      require_signing:
+        description: '要求有效签名密钥 (缺钥/坏钥时构建失败, 默认 false 允许试跑)'
         type: boolean
         required: false
         default: false
 
 permissions:
   contents: write
+  actions: write
   issues: write
 
 jobs:
-  sync_and_rebase:
-    name: Sync Julius Upstream & Rebase Top
+  sync_rolling:
+    name: Sync OpenWrt & Refresh Rolling Branch
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      has_update: ${{ steps.check.outputs.has_update }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      require_signing: ${{ steps.check.outputs.require_signing }}
 
     steps:
+      - name: Prepare Build Matrix
+        id: set-matrix
+        run: |
+          TARGET="${{ inputs.target || 'ipq807x' }}"
+          if [ "$TARGET" = "both" ]; then
+            echo 'matrix=[{"target":"ipq807x","tag_prefix":"ipq807x"},{"target":"ipq60xx","tag_prefix":"ipq60xx"}]' >> $GITHUB_OUTPUT
+          else
+            echo "matrix=[{\"target\":\"$TARGET\",\"tag_prefix\":\"$TARGET\"}]" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout Hub repository
         uses: actions/checkout@v4
         with:
@@ -33,24 +76,27 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config merge.ours.driver true
 
-      - name: Fetch Julius NSS-EDMA Upstream
+      - name: Fetch OpenWrt Official Master
         run: |
-          git remote add upstream https://github.com/JuliusBairaktaris/openwrt-nss-edma.git || \
-            git remote set-url upstream https://github.com/JuliusBairaktaris/openwrt-nss-edma.git
-          git fetch upstream nss-edma-rework --force
+          git remote add upstream-openwrt https://github.com/openwrt/openwrt.git 2>/dev/null || \
+            git remote set-url upstream-openwrt https://github.com/openwrt/openwrt.git
+          git fetch upstream-openwrt master --depth=300
 
-      - name: Check for upstream changes
+      - name: Check for upstream changes & Keyring
         id: check
         run: |
-          UPSTREAM_HEAD=$(git rev-parse upstream/nss-edma-rework)
-          BASE_SHA=$(cat .github/julius.sha 2>/dev/null | tr -d '[:space:]' || echo "")
-          echo "Upstream Head: ${UPSTREAM_HEAD}"
-          echo "Recorded Base: ${BASE_SHA}"
+          UPSTREAM_HEAD=$(git rev-parse upstream-openwrt/master)
+          BASE_SHA=$(cat .github/openwrt.sha 2>/dev/null | tr -d '[:space:]' || echo "")
+          echo "Upstream OpenWrt Head: ${UPSTREAM_HEAD}"
+          echo "Recorded Base SHA:     ${BASE_SHA}"
 
           echo "upstream_head=${UPSTREAM_HEAD}" >> "$GITHUB_OUTPUT"
           echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "require_signing=${{ inputs.require_signing || false }}" >> "$GITHUB_OUTPUT"
 
+          # 确保获取本地最新人工基底
           git fetch origin nss-edma-julius:nss-edma-julius --force
 
           # 同步并强校验 ImmortalWrt 官方快照签名公钥 (APK ECDSA + usign Ed25519)
@@ -95,27 +141,35 @@ jobs:
             echo "Update or key rotation detected. Sync required."
           else
             echo "has_update=false" >> "$GITHUB_OUTPUT"
-            echo "Already aligned with Julius upstream and ImmortalWrt keyring. Nothing to do."
+            echo "Already aligned with OpenWrt master and ImmortalWrt keyring. Nothing to do."
           fi
 
-      - name: Perform Linear Rebase & Keyring Sync
+      - name: Reset & Merge Protected Rolling Branch
         if: steps.check.outputs.has_update == 'true'
         run: |
           UPSTREAM_HEAD="${{ steps.check.outputs.upstream_head }}"
           BASE_SHA="${{ steps.check.outputs.base_sha }}"
           KEY_CHANGED="${{ steps.check.outputs.key_changed }}"
 
-          git checkout nss-edma-julius
+          # 1. 始终以最新人工真理源 nss-edma-julius 重置滚动分支
+          echo "Resetting nss-edma-rolling branch from origin/nss-edma-julius..."
+          git checkout -B nss-edma-rolling nss-edma-julius
 
-          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ] || [ "${{ inputs.force_sync }}" = "true" ]; then
-            echo "Rebasing our custom commits onto upstream/nss-edma-rework (${UPSTREAM_HEAD})..."
-            if ! git rebase --onto "upstream/nss-edma-rework" "$BASE_SHA" nss-edma-julius; then
-              echo "::error::Rebase conflict detected!"
-              git rebase --abort || true
-              exit 1
-            fi
+          # 2. 启用 merge=ours 合并驱动并执行自动合并
+          echo "Merging upstream OpenWrt master (${UPSTREAM_HEAD}) into nss-edma-rolling..."
+          git config merge.ours.driver true
+          if ! git merge -X ours --no-edit upstream-openwrt/master -m "chore(sync): rolling merge OpenWrt master into nss-edma-rolling
+
+Protected paths preserved:
+- target/linux/qualcommax
+- package/kernel/mac80211
+- package/nss"; then
+            echo "::error::Merge failed unexpectedly! Aborting."
+            git merge --abort || true
+            exit 1
           fi
 
+          # 3. 注入更新后的快照公钥 (若有变更)
           if [ "$KEY_CHANGED" = "true" ]; then
             mkdir -p package/system/openwrt-keyring/files/apk package/system/openwrt-keyring/files/usign
             [ -f /tmp/immortalwrt-snapshots.pem ] && cp /tmp/immortalwrt-snapshots.pem package/system/openwrt-keyring/files/apk/immortalwrt-snapshots.pem
@@ -124,14 +178,51 @@ jobs:
             git commit -m "chore(keyring): sync ImmortalWrt snapshot public keys" || true
           fi
 
-          echo "Pushing updated nss-edma-julius branch..."
-          git push --force-with-lease origin nss-edma-julius
+          # 4. 强制推送滚动分支至远端
+          echo "Pushing updated nss-edma-rolling branch..."
+          git push --force-with-lease origin nss-edma-rolling
 
+          # 5. 更新 main 分支的基准跟踪 SHA
           if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ]; then
             echo "Updating recorded baseline in main branch..."
             git checkout main
-            echo "$UPSTREAM_HEAD" > .github/julius.sha
-            git add .github/julius.sha
-            git commit -m "chore(sync): update Julius base tracking SHA to ${UPSTREAM_HEAD}" || true
+            echo "$UPSTREAM_HEAD" > .github/openwrt.sha
+            git add .github/openwrt.sha
+            git commit -m "chore(sync): update OpenWrt base tracking SHA to ${UPSTREAM_HEAD}" || true
             git push origin main
           fi
+
+  compile_canary:
+    name: Compile Canary Firmware / ${{ matrix.target }}
+    needs: sync_rolling
+    if: needs.sync_rolling.outputs.has_update == 'true' && (inputs.trigger_build != false)
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.sync_rolling.outputs.matrix) }}
+    uses: solarflows/AutoWorkFlows/.github/workflows/compile-firmware.yml@main
+    with:
+      matrix_target:                      ${{ matrix.target }}
+      matrix_repo:                        'solarflows/ImmortalWrt-QualcommAX'
+      matrix_ref:                         'nss-edma-rolling'
+      matrix_packages_branch:             'qualcommax'
+      standard_packages_branch:           'qualcommax'
+      matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'
+      matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'
+      matrix_passwall_tag:                'packages-${{ matrix.target }}'
+      matrix_firmware_release_tag_prefix: '${{ matrix.tag_prefix }}-canary'
+      defaults_repo:                      'solarflows/AutoWorkFlows'
+      defaults_ref:                       'main'
+      config_path:                        'configs'
+      version_prefix:                     'Canary-V'
+      release_type:                       'prerelease'
+      require_signing:                    ${{ needs.sync_rolling.outputs.require_signing == 'true' }}
+      collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
+      upload_artifacts:                   true
+      clean_cache:                        false
+      free_disk_space:                    false
+      publish_sdk_ib:                     false
+    secrets:
+      ACCESS_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+      APK_BUILD_KEY: ${{ secrets.APK_BUILD_KEY }}
+      USIGN_KEY:     ${{ secrets.USIGN_KEY }}

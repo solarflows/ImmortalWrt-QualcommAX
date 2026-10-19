@@ -18,13 +18,28 @@ on:
           - 'ipq60xx'
           - 'both'
       branch:
-        description: '源码分支 (nss-edma-julius / nss-edma-custom)'
+        description: '源码分支 (nss-edma-julius / nss-edma-rolling / nss-edma-custom)'
         required: false
         default: 'nss-edma-julius'
         type: choice
         options:
           - 'nss-edma-julius'
+          - 'nss-edma-rolling'
           - 'nss-edma-custom'
+      release_type:
+        description: 'Release 发布类型 (release 正式 | prerelease 预发布 | draft 草稿)'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - 'release'
+          - 'prerelease'
+          - 'draft'
+      require_signing:
+        description: '要求有效签名密钥 (缺钥/坏钥时构建失败, 阻止未签名产物发布)'
+        required: false
+        default: false
+        type: boolean
       version:
         description: '显式固件版本号 (如 V261011; 留空按版本前缀自动生成)'
         required: false
@@ -98,6 +113,8 @@ jobs:
       config_path:                        'configs'
       version:                            ${{ needs.plan.outputs.version }}
       version_prefix:                     'V'
+      release_type:                       ${{ inputs.release_type || 'release' }}
+      require_signing:                    ${{ inputs.require_signing || false }}
       collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
       upload_artifacts:                   ${{ inputs.upload_artifacts != false }}
       clean_cache:                        ${{ inputs.clean_cache || false }}

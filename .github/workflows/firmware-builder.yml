@@ -35,6 +35,11 @@ on:
           - 'release'
           - 'prerelease'
           - 'draft'
+      cache_variant:
+        description: 'cache 命名空间变体 (空 = 默认 immwrt-v2-*; 非空 = 隔离 save/purge 快照, restore 仍跨变体暖启动)'
+        required: false
+        default: ''
+        type: string
       require_signing:
         description: '要求有效签名密钥 (缺钥/坏钥时构建失败, 阻止未签名产物发布)'
         required: false
@@ -115,6 +120,7 @@ jobs:
       version_prefix:                     'V'
       release_type:                       ${{ inputs.release_type || 'release' }}
       require_signing:                    ${{ inputs.require_signing || false }}
+      cache_variant:                      ${{ inputs.cache_variant || '' }}
       collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
       upload_artifacts:                   ${{ inputs.upload_artifacts != false }}
       clean_cache:                        ${{ inputs.clean_cache || false }}

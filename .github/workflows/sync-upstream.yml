@@ -54,6 +54,8 @@ jobs:
       has_update: ${{ steps.check.outputs.has_update }}
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       require_signing: ${{ steps.check.outputs.require_signing }}
+      upstream_head: ${{ steps.check.outputs.upstream_head }}
+      base_sha: ${{ steps.check.outputs.base_sha }}
 
     steps:
       - name: Prepare Build Matrix
@@ -198,16 +200,6 @@ jobs:
           echo "Pushing updated nss-edma-rolling branch..."
           git push --force-with-lease origin nss-edma-rolling
 
-          # 5. 更新 main 分支的基准跟踪 SHA
-          if [ "$UPSTREAM_HEAD" != "$BASE_SHA" ]; then
-            echo "Updating recorded baseline in main branch..."
-            git checkout main
-            echo "$UPSTREAM_HEAD" > .github/openwrt.sha
-            git add .github/openwrt.sha
-            git commit -m "chore(sync): update OpenWrt base tracking SHA to ${UPSTREAM_HEAD}" || true
-            git push origin main
-          fi
-
   compile_canary:
     name: Compile Canary Firmware / ${{ matrix.target }}
     needs: sync_rolling
@@ -232,6 +224,7 @@ jobs:
       config_path:                        'configs'
       version_prefix:                     'Canary-V'
       release_type:                       'prerelease'
+      cache_variant:                      'canary'
       require_signing:                    ${{ needs.sync_rolling.outputs.require_signing == 'true' }}
       collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
       upload_artifacts:                   true
@@ -242,3 +235,29 @@ jobs:
       ACCESS_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
       APK_BUILD_KEY: ${{ secrets.APK_BUILD_KEY }}
       USIGN_KEY:     ${{ secrets.USIGN_KEY }}
+
+  finalize_sync:
+    name: Finalize Upstream Baseline Tracking
+    needs: [sync_rolling, compile_canary]
+    if: always() && !cancelled() && needs.sync_rolling.result == 'success' && needs.sync_rolling.outputs.has_update == 'true' && (needs.compile_canary.result == 'success' || inputs.trigger_build == false)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update recorded baseline in main branch
+        run: |
+          UPSTREAM_HEAD="${{ needs.sync_rolling.outputs.upstream_head }}"
+          BASE_SHA="${{ needs.sync_rolling.outputs.base_sha }}"
+          if [ -n "$UPSTREAM_HEAD" ] && [ "$UPSTREAM_HEAD" != "$BASE_SHA" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            echo "Updating recorded baseline in main branch: ${BASE_SHA} -> ${UPSTREAM_HEAD}"
+            echo "$UPSTREAM_HEAD" > .github/openwrt.sha
+            git add .github/openwrt.sha
+            git commit -m "chore(sync): update OpenWrt base tracking SHA to ${UPSTREAM_HEAD} [skip ci]" || true
+            git push origin main
+          fi

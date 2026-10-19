@@ -165,7 +165,21 @@ jobs:
             exit 1
           fi
 
-          # 3. 注入更新后的快照公钥 (若有变更)
+          # 3. 第二道物理防线：针对可能引入的新增文件强制还原基线并断言 0 差异
+          echo "Applying secondary protection layer to hardware offload paths..."
+          git checkout origin/nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss
+          git clean -fd target/linux/qualcommax package/kernel/mac80211 package/nss
+          PROTECTED_DIFF=$(git diff origin/nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss)
+          if [ -n "$PROTECTED_DIFF" ]; then
+            echo "::error::Protected path assertion failed: differences detected against nss-edma-julius!"
+            exit 1
+          fi
+          if ! git diff --quiet --cached || ! git diff --quiet; then
+            git add target/linux/qualcommax package/kernel/mac80211 package/nss
+            git commit --amend --no-edit || true
+          fi
+
+          # 4. 注入更新后的快照公钥 (若有变更)
           if [ "$KEY_CHANGED" = "true" ]; then
             mkdir -p package/system/openwrt-keyring/files/apk package/system/openwrt-keyring/files/usign
             [ -f /tmp/immortalwrt-snapshots.pem ] && cp /tmp/immortalwrt-snapshots.pem package/system/openwrt-keyring/files/apk/immortalwrt-snapshots.pem
@@ -205,7 +219,7 @@ jobs:
       standard_packages_branch:           'qualcommax'
       matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'
       matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'
-      matrix_passwall_tag:                'packages-${{ matrix.target }}'
+      matrix_passwall_tag:                'packages-${{ matrix.target }}-canary'
       matrix_firmware_release_tag_prefix: '${{ matrix.tag_prefix }}-canary'
       defaults_repo:                      'solarflows/AutoWorkFlows'
       defaults_ref:                       'main'

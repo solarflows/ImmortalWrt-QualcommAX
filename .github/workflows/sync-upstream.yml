@@ -5,7 +5,10 @@
 # 2. 在路径级保护盾 (merge=ours) 下合并 OpenWrt 官方 master 通用演进
 # 3. 自动同步 ImmortalWrt 签名公钥
 # 4. 强制推送更新至 origin/nss-edma-rolling
-# 5. 调用 AutoWorkFlows 编译 Canary 固件, 自动发布为 Pre-release
+# 5. 调用 AutoWorkFlows 编译 Canary 固件工件 (不直接发 Release)
+# 6. 本地质量门禁动态核验:
+#    - 检验通过: 组织工件与 Release Notes, 发布 Pre-release 并推进 openwrt.sha
+#    - 检验失败: 自动发 Issue 告警, 不阻断 CI, 不发 Release, SHA 绝不前进
 # ════════════════════════════════════════════════════════════════════════
 name: "Upstream Sync & Rolling Canary Build"
 
@@ -20,7 +23,7 @@ on:
         required: false
         default: false
       trigger_build:
-        description: '同步后自动触发 Pre-release 固件编译验证'
+        description: '同步后自动触发固件编译与质检'
         type: boolean
         required: false
         default: true
@@ -196,7 +199,7 @@ jobs:
             git commit -m "chore(keyring): sync ImmortalWrt snapshot public keys" || true
           fi
 
-          # 4. 强制推送滚动分支至远端
+          # 5. 强制推送滚动分支至远端
           echo "Pushing updated nss-edma-rolling branch..."
           git push --force-with-lease origin nss-edma-rolling
 
@@ -215,15 +218,12 @@ jobs:
       matrix_ref:                         'nss-edma-rolling'
       matrix_packages_branch:             'qualcommax'
       standard_packages_branch:           'qualcommax'
-      matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'
-      matrix_passwall_repo:               'solarflows/ImmortalWrt-QualcommAX'
-      matrix_passwall_tag:                'packages-${{ matrix.target }}-canary'
-      matrix_firmware_release_tag_prefix: '${{ matrix.tag_prefix }}-canary'
+      matrix_release_repo:                ''
+      matrix_passwall_repo:               ''
       defaults_repo:                      'solarflows/AutoWorkFlows'
       defaults_ref:                       'main'
       config_path:                        'configs'
       version_prefix:                     'Canary-V'
-      release_type:                       'prerelease'
       cache_variant:                      'canary'
       require_signing:                    ${{ needs.sync_rolling.outputs.require_signing == 'true' }}
       collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
@@ -236,10 +236,158 @@ jobs:
       APK_BUILD_KEY: ${{ secrets.APK_BUILD_KEY }}
       USIGN_KEY:     ${{ secrets.USIGN_KEY }}
 
+  verify_and_publish:
+    name: Verify & Publish Canary / ${{ matrix.target }}
+    needs: [sync_rolling, compile_canary]
+    if: always() && !cancelled() && needs.sync_rolling.result == 'success' && needs.sync_rolling.outputs.has_update == 'true' && needs.compile_canary.result == 'success'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.sync_rolling.outputs.matrix) }}
+    outputs:
+      healthy: ${{ steps.verify.outputs.healthy }}
+    steps:
+      - name: Checkout Hub repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Build Logs Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}-build-log
+          path: artifacts/build-log
+
+      - name: Download Build Info Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}-build-info
+          path: artifacts/build-info
+
+      - name: Download Firmware Release Tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}-release
+          path: artifacts/release-tar
+
+      - name: Download Passwall Packages
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: ${{ matrix.target }}-passwall
+          path: artifacts/passwall
+
+      - name: Run Dynamic Canary Quality Gate
+        id: verify
+        run: |
+          chmod +x .github/scripts/verify-canary-health.sh
+          set +e
+          .github/scripts/verify-canary-health.sh "${{ matrix.target }}" "artifacts" "/tmp/canary-health-report.md" "configs/${{ matrix.target }}"
+          VERIFY_RC=$?
+          set -e
+
+          cat /tmp/canary-health-report.md >> "$GITHUB_STEP_SUMMARY"
+
+          if [ $VERIFY_RC -eq 0 ]; then
+            echo "healthy=true" >> "$GITHUB_OUTPUT"
+            echo "HEALTHY=true" >> "$GITHUB_ENV"
+          else
+            echo "healthy=false" >> "$GITHUB_OUTPUT"
+            echo "HEALTHY=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Alert on Unhealthy Canary (Create/Update Issue)
+        if: env.HEALTHY != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPORT=$(cat /tmp/canary-health-report.md)
+          UPSTREAM_HEAD="${{ needs.sync_rolling.outputs.upstream_head }}"
+          ISSUE_TITLE="CI Alert: Canary Quality Gate Failed for ${{ matrix.target }} (${UPSTREAM_HEAD:0:8})"
+
+          EXISTING_ISSUE=$(gh issue list --repo "${{ github.repository }}" --label "rolling-alert" --state open --json number,title --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING_ISSUE" ]; then
+            gh issue comment "$EXISTING_ISSUE" --repo "${{ github.repository }}" --body "$REPORT"
+            echo "::notice::已在现有 Issue #${EXISTING_ISSUE} 追加健康度异常预警"
+          else
+            gh issue create --repo "${{ github.repository }}" \
+              --title "$ISSUE_TITLE" \
+              --body "$REPORT" \
+              --label "rolling-alert" 2>/dev/null || \
+            gh issue create --repo "${{ github.repository }}" \
+              --title "$ISSUE_TITLE" \
+              --body "$REPORT"
+            echo "::notice::已创建新的健康度异常预警 Issue"
+          fi
+          echo "::warning::Canary 固件质量门禁未通过，已记录告警并跳过发版（不阻断 CI 成功状态）"
+
+      - name: Publish Verified Canary Release
+        if: env.HEALTHY == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET="${{ matrix.target }}"
+          VERSION="V$(TZ='Asia/Shanghai' date +'%y%m%d')"
+          RELEASE_TAG="${TARGET}-canary-${VERSION}"
+          PASSWALL_TAG="packages-${TARGET}-canary"
+          REPO="${{ github.repository }}"
+
+          mkdir -p /tmp/release-staging
+          tar -xzf "artifacts/release-tar/${TARGET}-release.tar.gz" -C /tmp/release-staging
+
+          UPSTREAM_HEAD="${{ needs.sync_rolling.outputs.upstream_head }}"
+          BODY_FILE="/tmp/canary-release-notes.md"
+          cat << 'EOF' > "$BODY_FILE"
+          ## 🚀 ImmortalWrt QualcommAX Canary (Rolling Release)
+
+          EOF
+          echo "**构建目标**: \`${TARGET}\`  " >> "$BODY_FILE"
+          echo "**同步 OpenWrt 上游基准**: [${UPSTREAM_HEAD:0:8}](https://github.com/openwrt/openwrt/commit/${UPSTREAM_HEAD})  " >> "$BODY_FILE"
+          echo "**硬件防护状态**: 🟢 受物理保护盾（merge=ours）与动态自适应质量门禁守护  " >> "$BODY_FILE"
+          echo "" >> "$BODY_FILE"
+          if [ -f "artifacts/build-info/release-body.md" ]; then
+            cat "artifacts/build-info/release-body.md" >> "$BODY_FILE"
+          fi
+          echo "" >> "$BODY_FILE"
+          cat /tmp/canary-health-report.md >> "$BODY_FILE"
+
+          echo "📦 创建 / 更新 Canary 固件 Pre-release: ${RELEASE_TAG}"
+          if ! gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$REPO" \
+              --target "nss-edma-rolling" \
+              --prerelease \
+              --title "${TARGET} Canary Build ${RELEASE_TAG}" \
+              --notes-file "$BODY_FILE"
+          else
+            gh release edit "$RELEASE_TAG" --repo "$REPO" \
+              --prerelease \
+              --title "${TARGET} Canary Build ${RELEASE_TAG}" \
+              --notes-file "$BODY_FILE"
+          fi
+
+          # 逐文件上传固件资产
+          if [ -d "/tmp/release-staging/firmware" ]; then
+            find "/tmp/release-staging/firmware" -maxdepth 1 -type f -exec gh release upload "$RELEASE_TAG" {} --repo "$REPO" --clobber \;
+          fi
+
+          # 发布 Passwall Packages
+          if [ -d "/tmp/release-staging/passwall" ] && [ -n "$(ls -A /tmp/release-staging/passwall 2>/dev/null)" ]; then
+            echo "📦 发布 Canary Passwall 软件包: ${PASSWALL_TAG}"
+            if ! gh release view "$PASSWALL_TAG" --repo "$REPO" >/dev/null 2>&1; then
+              gh release create "$PASSWALL_TAG" --repo "$REPO" \
+                --prerelease --latest=false \
+                --title "Passwall Packages (${TARGET} Canary)" \
+                --notes "Automated rolling packages for ${TARGET}"
+            fi
+            find "/tmp/release-staging/passwall" -maxdepth 1 -type f -exec gh release upload "$PASSWALL_TAG" {} --repo "$REPO" --clobber \;
+          fi
+
   finalize_sync:
     name: Finalize Upstream Baseline Tracking
-    needs: [sync_rolling, compile_canary]
-    if: always() && !cancelled() && needs.sync_rolling.result == 'success' && needs.sync_rolling.outputs.has_update == 'true' && (needs.compile_canary.result == 'success' || inputs.trigger_build == false)
+    needs: [sync_rolling, compile_canary, verify_and_publish]
+    if: always() && !cancelled() && needs.sync_rolling.result == 'success' && (needs.verify_and_publish.outputs.healthy == 'true' || inputs.trigger_build == false)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

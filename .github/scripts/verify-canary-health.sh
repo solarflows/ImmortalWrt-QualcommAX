@@ -221,15 +221,27 @@ done
 
 echo "" >> "$REPORT_FILE"
 
+CONCLUSION_FILE="${REPORT_FILE%.*}-conclusion.md"
+
 if [ "${#ERRORS[@]}" -eq 0 ]; then
-  echo "**判定结论**: 🟢 **健康合格 (HEALTHY)** — 所有通用质量契约满足，可以发布 Pre-release。  " >> "$REPORT_FILE"
+  CONCLUSION="**判定结论**: 🟢 **健康合格 (HEALTHY)** — 所有通用质量契约满足，可以发布 Pre-release。"
+  echo "$CONCLUSION  " >> "$REPORT_FILE"
+  cat << EOF > "$CONCLUSION_FILE"
+### 🔍 固件质量门禁
+$CONCLUSION
+EOF
   echo "HEALTHY=true" >> "${GITHUB_OUTPUT:-/tmp/verify_output}"
   echo "════════════════════════════════════════════════════════════════"
   echo "✅ 动态门禁核验通过！固件健康可用。"
   echo "════════════════════════════════════════════════════════════════"
   exit 0
 else
-  echo "**判定结论**: 🔴 **存在质量退化 (UNHEALTHY)** — 检测到 ${#ERRORS[@]} 项阻塞性缺陷，阻断发版并建立预警。  " >> "$REPORT_FILE"
+  CONCLUSION="**判定结论**: 🔴 **存在质量退化 (UNHEALTHY)** — 检测到 ${#ERRORS[@]} 项阻塞性缺陷，阻断发版并建立预警。"
+  echo "$CONCLUSION  " >> "$REPORT_FILE"
+  cat << EOF > "$CONCLUSION_FILE"
+### 🔍 固件质量门禁
+$CONCLUSION
+EOF
   echo "HEALTHY=false" >> "${GITHUB_OUTPUT:-/tmp/verify_output}"
   echo "════════════════════════════════════════════════════════════════"
   echo "❌ 动态门禁核验失败！共捕获 ${#ERRORS[@]} 项异常。"

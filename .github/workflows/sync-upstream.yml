@@ -351,7 +351,12 @@ jobs:
             cat "artifacts/build-info/release-body.md" >> "$BODY_FILE"
           fi
           echo "" >> "$BODY_FILE"
-          cat /tmp/canary-health-report.md >> "$BODY_FILE"
+          if [ -f "/tmp/canary-health-conclusion.md" ]; then
+            cat "/tmp/canary-health-conclusion.md" >> "$BODY_FILE"
+          elif grep -q "^\*\*判定结论\*\*:" /tmp/canary-health-report.md 2>/dev/null; then
+            echo "### 🔍 固件质量门禁" >> "$BODY_FILE"
+            grep "^\*\*判定结论\*\*:" /tmp/canary-health-report.md >> "$BODY_FILE"
+          fi
 
           echo "📦 创建 / 更新 Canary 固件 Pre-release: ${RELEASE_TAG}"
           if ! gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then

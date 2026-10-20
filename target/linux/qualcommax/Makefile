@@ -17,6 +17,6 @@ DEFAULT_PACKAGES += \
 	kmod-ath11k-ahb \
 	wpad-openssl uboot-envtools \
 	e2fsprogs kmod-fs-ext4 losetup \
-	autocore
+	autocore ppe-help
 
 $(eval $(call BuildTarget))

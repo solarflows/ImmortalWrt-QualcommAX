@@ -12,6 +12,48 @@
 
 PROFILE_JSON="/tmp/nss_profile.json"
 
+sample_modules() {
+	local pppoe=0 vlan=0 bridge=0 qdisc=0 crypto=0
+
+	# 1. PPPoE
+	if [ -d /sys/module/qca_nss_pppoe ] || [ -d /sys/module/nss_connmgr_pppoe ]; then
+		pppoe=2
+	elif ls /lib/modules/*/qca-nss-pppoe.ko /lib/modules/*/nss-connmgr-pppoe.ko >/dev/null 2>&1; then
+		pppoe=1
+	fi
+
+	# 2. VLAN
+	if [ -d /sys/module/qca_nss_vlan ] || [ -d /sys/module/qca_nss_vlan_mgr ] || [ -d /sys/module/nss_vlan_mgr ]; then
+		vlan=2
+	elif ls /lib/modules/*/qca-nss-vlan.ko /lib/modules/*/qca-nss-vlan-mgr.ko /lib/modules/*/nss-vlan-mgr.ko >/dev/null 2>&1; then
+		vlan=1
+	fi
+
+	# 3. Bridge
+	if [ -d /sys/module/qca_nss_bridge_mgr ] || [ -d /sys/module/nss_bridge_mgr ]; then
+		bridge=2
+	elif ls /lib/modules/*/qca-nss-bridge-mgr.ko /lib/modules/*/nss-bridge-mgr.ko >/dev/null 2>&1; then
+		bridge=1
+	fi
+
+	# 4. Qdisc
+	if [ -d /sys/module/qca_nss_qdisc ]; then
+		qdisc=2
+	elif ls /lib/modules/*/qca-nss-qdisc.ko >/dev/null 2>&1; then
+		qdisc=1
+	fi
+
+	# 5. Crypto
+	if [ -d /sys/module/qca_nss_crypto ] || [ -d /sys/module/qca_nss_eip197 ] || [ -d /sys/module/eip197 ]; then
+		crypto=2
+	elif ls /lib/modules/*/qca-nss-crypto.ko /lib/modules/*/qca-nss-eip197.ko /lib/modules/*/eip197.ko >/dev/null 2>&1; then
+		crypto=1
+	fi
+
+	printf '{"pppoe":%d,"vlan":%d,"bridge":%d,"qdisc":%d,"crypto":%d}' \
+		"$pppoe" "$vlan" "$bridge" "$qdisc" "$crypto"
+}
+
 ensure_profile() {
 	if [ ! -s "$PROFILE_JSON" ]; then
 		/etc/uci-defaults/98-nss-dashboard-profile >/dev/null 2>&1
@@ -20,16 +62,18 @@ ensure_profile() {
 
 get_profile() {
 	ensure_profile
+	local modules_json
+	modules_json=$(sample_modules)
 	if [ -s "$PROFILE_JSON" ]; then
-		cat "$PROFILE_JSON"
+		sed "s/\"modules\":{[^}]*}/\"modules\":$modules_json/" "$PROFILE_JSON" 2>/dev/null || cat "$PROFILE_JSON"
 	else
-		echo '{"soc":"IPQ8074","cores":2,"fw_version":"NSS.FW.12.5-210-HK.R","fw_mask":"0x36","nss_freq":"1478.4 MHz","modules":{"pppoe":1,"vlan":0,"bridge":1,"qdisc":0,"crypto":0}}'
+		echo '{"soc":"IPQ8074","cores":2,"fw_version":"NSS.FW.12.5-210-HK.R","fw_mask":"0x36","nss_freq":"1478.4 MHz","modules":'"$modules_json"'}'
 	fi
 }
 
 get_metrics() {
 	# 1. NPU loads (dynamic regex match per core, robust across IPQ807x/IPQ60xx)
-	local core0_load=0 core1_load=0
+	local core0_load=0 core1_load="null"
 	if [ -r /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi ]; then
 		eval "$(awk '/^Core [0-9]+:/ { c=$2; sub(":","",c) } /%/ { gsub("%",""); print "core" c "_load=" $2 }' /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi 2>/dev/null)"
 	fi
@@ -114,17 +158,19 @@ get_metrics() {
 	local flow_off=$(uci -q get network.@device[0].flow_offloading || echo 0)
 	[ "$flow_off" = "1" ] && conflict=1
 
-	printf '{"heartbeat":%d,"core0_load":%s,"core1_load":%s,"cpu_temp":%s,"radios":[%s],"ecm_total":%d,"ecm_v4":%d,"ecm_v6":%d,"ecm_tcp":%d,"ecm_udp":%d,"ecm_other":%d,"wifi_offload":%d,"conflict_detected":%d}\n' \
-		"${heartbeat:-0}" "${core0_load:-0}" "${core1_load:-0}" "${cpu_temp:-0.0}" "${radios_json}" \
+	local modules_json
+	modules_json=$(sample_modules)
+
+	printf '{"heartbeat":%d,"core0_load":%s,"core1_load":%s,"cpu_temp":%s,"radios":[%s],"ecm_total":%d,"ecm_v4":%d,"ecm_v6":%d,"ecm_tcp":%d,"ecm_udp":%d,"ecm_other":%d,"wifi_offload":%d,"conflict_detected":%d,"modules":%s}\n' \
+		"${heartbeat:-0}" "${core0_load:-0}" "${core1_load:-null}" "${cpu_temp:-0.0}" "${radios_json}" \
 		"${ecm_total:-0}" "${ecm_v4:-0}" "${ecm_v6:-0}" "${ecm_tcp:-0}" "${ecm_udp:-0}" "${ecm_other:-0}" \
-		"$wifi_offload" "$conflict"
+		"$wifi_offload" "$conflict" "$modules_json"
 }
 
 get_status() {
 	ensure_profile
 
 	local soc="IPQ8074" cores=2 fw_ver="NSS.FW.12.5-210-HK.R" fw_mask="0x36" nss_freq="1478.4 MHz" sqm_state=0
-	local mod_pppoe=2 mod_vlan=1 mod_bridge=2 mod_qdisc=1 mod_crypto=0
 	if [ -f /tmp/nss_profile.env ]; then
 		. /tmp/nss_profile.env
 	elif [ -s "$PROFILE_JSON" ]; then
@@ -139,9 +185,8 @@ get_status() {
 	local metrics_json
 	metrics_json=$(get_metrics)
 
-	printf '{"soc":"%s","cores":%d,"fw_version":"%s","fw_mask":"%s","nss_freq":"%s","sqm":%d,"modules":{"pppoe":%d,"vlan":%d,"bridge":%d,"qdisc":%d,"crypto":%d},%s' \
+	printf '{"soc":"%s","cores":%d,"fw_version":"%s","fw_mask":"%s","nss_freq":"%s","sqm":%d,%s' \
 		"${soc:-IPQ8074}" "${cores:-2}" "${fw_ver:-12.5}" "${fw_mask:-0x36}" "${nss_freq:-1478.4 MHz}" "${sqm_state:-0}" \
-		"${mod_pppoe:-2}" "${mod_vlan:-1}" "${mod_bridge:-2}" "${mod_qdisc:-1}" "${mod_crypto:-0}" \
 		"${metrics_json#\{}"
 }
 

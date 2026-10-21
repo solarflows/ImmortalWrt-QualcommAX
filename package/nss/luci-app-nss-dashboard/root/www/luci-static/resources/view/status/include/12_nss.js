@@ -22,14 +22,25 @@ function ensureCss() {
 	}
 }
 
-function progressbar(value, max) {
+function progressbar(value, max, label) {
+	if (value === null || value === undefined) {
+		return E('div', {
+			'class': 'cbi-progressbar disabled',
+			'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
+			'title': label || _('待机 (无服务固件或未引导)')
+		}, [
+			E('span', { 'style': 'position:absolute; width:100%; text-align:center; font-size:10px; font-weight:500; line-height:13px; color:var(--text-color-medium);' }, [
+				label || _('休眠待机')
+			])
+		]);
+	}
 	var vn = parseFloat(value) || 0,
 	    mn = parseFloat(max) || 100,
 	    pc = Math.min(100, Math.max(0, Math.floor((100 / mn) * vn)));
 
 	return E('div', {
 		'class': 'cbi-progressbar',
-		'style': 'height:13px; min-width:120px; position:relative; overflow:hidden; margin:0;',
+		'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 		'title': '%s%%'.format(vn)
 	}, [
 		E('div', {
@@ -117,6 +128,7 @@ return baseclass.extend({
 				E('span', { 'style': 'font-size:11px; font-weight:600;' }, [ (d.core0_load || 0) + '%' ])
 			]);
 		} else {
+			var isCore1Active = (d.core1_load !== null && d.core1_load !== undefined);
 			coreLoadView = E('div', { 'style': 'display:flex; flex-direction:column; gap:4px; max-width:280px;' }, [
 				E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
 					E('span', { 'style': 'min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
@@ -125,8 +137,15 @@ return baseclass.extend({
 				]),
 				E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
 					E('span', { 'style': 'min-width:45px; font-size:11px;' }, [ 'Core 1:' ]),
-					E('div', { 'style': 'flex:1;' }, [ progressbar(d.core1_load || 0, 100) ]),
-					E('span', { 'style': 'font-size:11px; font-weight:600;' }, [ (d.core1_load || 0) + '%' ])
+					E('div', { 'style': 'flex:1;' }, [
+						isCore1Active ? progressbar(d.core1_load, 100) : progressbar(null, 100, _('休眠待机'))
+					]),
+					E('span', {
+						'style': 'font-size:11px; font-weight:600; color:' + (isCore1Active ? 'inherit' : 'var(--text-color-medium)') + ';',
+						'title': isCore1Active ? '' : _('NPU Core 1 物理待机 (无蜂窝/IPsec服务固件)')
+					}, [
+						isCore1Active ? ((d.core1_load || 0) + '%') : _('待机')
+					])
 				])
 			]);
 		}

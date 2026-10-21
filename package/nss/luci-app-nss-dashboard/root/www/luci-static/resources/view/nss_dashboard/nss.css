@@ -295,3 +295,46 @@
 	border-color: var(--primary-color-high, #1976d2);
 }
 
+/* 9. 禁用/待机态专用进度条 (Muted / Standby State for Disabled Coprocessor) */
+.cbi-progressbar.disabled {
+	background: var(--background-color-low, rgba(255, 255, 255, 0.05)) !important;
+	border: 1px dashed var(--border-color-medium, rgba(255, 255, 255, 0.2)) !important;
+	opacity: 0.8;
+}
+
+.cbi-progressbar.disabled > div {
+	display: none !important;
+}
+
+.cbi-progressbar.disabled > span {
+	color: var(--text-color-medium, #888) !important;
+	font-weight: 500 !important;
+	font-style: italic;
+	letter-spacing: 0.5px;
+}
+
+/* 10. 滚动容器与窄屏排版自适应 (Horizontal Scroll & Responsive Table Invariants) */
+[id$="-scroll-wrap"] {
+	overflow-x: auto !important;
+	width: 100% !important;
+	max-width: 100% !important;
+	min-width: 0 !important;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
+	display: block;
+}
+
+[id$="-scroll-wrap"]::-webkit-scrollbar {
+	height: 6px;
+}
+
+[id$="-scroll-wrap"]::-webkit-scrollbar-thumb {
+	background: var(--border-color-medium, rgba(255, 255, 255, 0.2));
+	border-radius: 3px;
+}
+
+[id$="-scroll-wrap"] .table {
+	min-width: 580px;
+	width: 100%;
+}
+

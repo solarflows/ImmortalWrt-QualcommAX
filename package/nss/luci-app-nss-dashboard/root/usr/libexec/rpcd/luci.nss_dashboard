@@ -18,35 +18,35 @@ sample_modules() {
 	# 1. PPPoE
 	if [ -d /sys/module/qca_nss_pppoe ] || [ -d /sys/module/nss_connmgr_pppoe ]; then
 		pppoe=2
-	elif ls /lib/modules/*/qca-nss-pppoe.ko /lib/modules/*/nss-connmgr-pppoe.ko >/dev/null 2>&1; then
+	elif [ -f /lib/modules/*/qca-nss-pppoe.ko ] || [ -f /lib/modules/*/nss-connmgr-pppoe.ko ]; then
 		pppoe=1
 	fi
 
 	# 2. VLAN
 	if [ -d /sys/module/qca_nss_vlan ] || [ -d /sys/module/qca_nss_vlan_mgr ] || [ -d /sys/module/nss_vlan_mgr ]; then
 		vlan=2
-	elif ls /lib/modules/*/qca-nss-vlan.ko /lib/modules/*/qca-nss-vlan-mgr.ko /lib/modules/*/nss-vlan-mgr.ko >/dev/null 2>&1; then
+	elif [ -f /lib/modules/*/qca-nss-vlan.ko ] || [ -f /lib/modules/*/qca-nss-vlan-mgr.ko ] || [ -f /lib/modules/*/nss-vlan-mgr.ko ]; then
 		vlan=1
 	fi
 
 	# 3. Bridge
 	if [ -d /sys/module/qca_nss_bridge_mgr ] || [ -d /sys/module/nss_bridge_mgr ]; then
 		bridge=2
-	elif ls /lib/modules/*/qca-nss-bridge-mgr.ko /lib/modules/*/nss-bridge-mgr.ko >/dev/null 2>&1; then
+	elif [ -f /lib/modules/*/qca-nss-bridge-mgr.ko ] || [ -f /lib/modules/*/nss-bridge-mgr.ko ]; then
 		bridge=1
 	fi
 
 	# 4. Qdisc
 	if [ -d /sys/module/qca_nss_qdisc ]; then
 		qdisc=2
-	elif ls /lib/modules/*/qca-nss-qdisc.ko >/dev/null 2>&1; then
+	elif [ -f /lib/modules/*/qca-nss-qdisc.ko ]; then
 		qdisc=1
 	fi
 
 	# 5. Crypto
 	if [ -d /sys/module/qca_nss_crypto ] || [ -d /sys/module/qca_nss_eip197 ] || [ -d /sys/module/eip197 ]; then
 		crypto=2
-	elif ls /lib/modules/*/qca-nss-crypto.ko /lib/modules/*/qca-nss-eip197.ko /lib/modules/*/eip197.ko >/dev/null 2>&1; then
+	elif [ -f /lib/modules/*/qca-nss-crypto.ko ] || [ -f /lib/modules/*/qca-nss-eip197.ko ] || [ -f /lib/modules/*/eip197.ko ]; then
 		crypto=1
 	fi
 

@@ -78,21 +78,27 @@ get_metrics() {
 		eval "$(awk '/^Core [0-9]+:/ { c=$2; sub(":","",c) } /%/ { gsub("%",""); print "core" c "_load=" $2 }' /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi 2>/dev/null)"
 	fi
 
-	# 2. Heartbeat packets/s (physically authentic non-blocking delta rate, zero sleep)
+	# 2. Heartbeat packets/s (physically authentic non-blocking delta rate, zero sleep, sub-second safe)
 	local heartbeat=0
 	if [ -r /sys/kernel/debug/qca-nss-drv/stats/n2h ]; then
 		local now_ts cur_pkts
 		now_ts=$(date +%s)
 		cur_pkts=$(awk '$1 == "n2h_rx_pkts" { s += $3 } END { print s + 0 }' /sys/kernel/debug/qca-nss-drv/stats/n2h 2>/dev/null || echo 0)
 		if [ -f /tmp/nss_heartbeat.tmp ]; then
-			local last_ts last_pkts
-			read -r last_ts last_pkts < /tmp/nss_heartbeat.tmp 2>/dev/null
+			local last_ts last_pkts last_rate
+			read -r last_ts last_pkts last_rate < /tmp/nss_heartbeat.tmp 2>/dev/null
 			local dt=$(( now_ts - ${last_ts:-0} ))
 			if [ "$dt" -gt 0 ] && [ "$cur_pkts" -ge "${last_pkts:-0}" ]; then
 				heartbeat=$(( (cur_pkts - last_pkts) / dt ))
+				echo "$now_ts $cur_pkts $heartbeat" > /tmp/nss_heartbeat.tmp 2>/dev/null
+			elif [ "$dt" -eq 0 ] && [ "${last_rate:-0}" -gt 0 ]; then
+				heartbeat="$last_rate"
+			else
+				echo "$now_ts $cur_pkts 0" > /tmp/nss_heartbeat.tmp 2>/dev/null
 			fi
+		else
+			echo "$now_ts $cur_pkts 0" > /tmp/nss_heartbeat.tmp 2>/dev/null
 		fi
-		echo "$now_ts $cur_pkts" > /tmp/nss_heartbeat.tmp 2>/dev/null
 	fi
 
 	# 3. CPU Temperature (Pure shell math, 0 fork)
@@ -158,11 +164,31 @@ get_metrics() {
 	local flow_off=$(uci -q get network.@device[0].flow_offloading || echo 0)
 	[ "$flow_off" = "1" ] && conflict=1
 
+	# 8. Host CPU raw ticks from /proc/stat & NSS hardware accelerated bytes
+	local cpu_ticks="[]"
+	if [ -r /proc/stat ]; then
+		local _cpu u n s id io irq sirq st
+		read -r _cpu u n s id io irq sirq st _ < /proc/stat 2>/dev/null
+		[ -n "$u" ] && cpu_ticks="[${u:-0},${n:-0},${s:-0},${id:-0},${io:-0},${irq:-0},${sirq:-0},${st:-0}]"
+	fi
+
+	local nss_bytes=0
+	if [ -r /sys/kernel/debug/qca-nss-drv/stats/ipv4 ]; then
+		nss_bytes=$(awk '$1 == "ipv4_tx_bytes" || $1 == "ipv6_tx_bytes" { s += $3 } END { printf "%.0f", s + 0 }' \
+			/sys/kernel/debug/qca-nss-drv/stats/ipv4 /sys/kernel/debug/qca-nss-drv/stats/ipv6 2>/dev/null || echo 0)
+	fi
+
+	local cur_freq=""
+	if [ -f /tmp/nss_profile.env ]; then
+		cur_freq=$(grep '^nss_freq=' /tmp/nss_profile.env 2>/dev/null | cut -d"'" -f2)
+	fi
+	[ -z "$cur_freq" ] && cur_freq=$(uci -q get nss_dashboard.clock.frequency || echo "1478.4 MHz")
+
 	local modules_json
 	modules_json=$(sample_modules)
 
-	printf '{"heartbeat":%d,"core0_load":%s,"core1_load":%s,"cpu_temp":%s,"radios":[%s],"ecm_total":%d,"ecm_v4":%d,"ecm_v6":%d,"ecm_tcp":%d,"ecm_udp":%d,"ecm_other":%d,"wifi_offload":%d,"conflict_detected":%d,"modules":%s}\n' \
-		"${heartbeat:-0}" "${core0_load:-0}" "${core1_load:-null}" "${cpu_temp:-0.0}" "${radios_json}" \
+	printf '{"heartbeat":%d,"nss_bytes":%s,"nss_freq":"%s","core0_load":%s,"core1_load":%s,"cpu_temp":%s,"cpu_ticks":%s,"radios":[%s],"ecm_total":%d,"ecm_v4":%d,"ecm_v6":%d,"ecm_tcp":%d,"ecm_udp":%d,"ecm_other":%d,"wifi_offload":%d,"conflict_detected":%d,"modules":%s}\n' \
+		"${heartbeat:-0}" "${nss_bytes:-0}" "${cur_freq:-1478.4 MHz}" "${core0_load:-0}" "${core1_load:-null}" "${cpu_temp:-0.0}" "${cpu_ticks}" "${radios_json}" \
 		"${ecm_total:-0}" "${ecm_v4:-0}" "${ecm_v6:-0}" "${ecm_tcp:-0}" "${ecm_udp:-0}" "${ecm_other:-0}" \
 		"$wifi_offload" "$conflict" "$modules_json"
 }
@@ -276,6 +302,8 @@ get_flows() {
 			if s1 then
 				local tot_p = tonumber(pk1) + tonumber(pk2)
 				if tot_p > 0 then
+					local mark = tonumber(line:match("mark=(%d+)")) or 0
+					local state = (proto == "tcp") and (line:match("%s+([%u_]+)%s+src=") or "") or ""
 					n = n + 1
 					items[n] = {
 						fam,
@@ -285,13 +313,28 @@ get_flows() {
 						d1,
 						tonumber(dp1),
 						tot_p,
-						tonumber(b1) + tonumber(b2)
+						tonumber(b1) + tonumber(b2),
+						mark,
+						state
 					}
 				end
 			end
 		end
 		f:close()
-		io.write(jc.stringify({installed=1, cols={"family","proto","src","sport","dst","dport","pkts","bytes"}, data=items}))
+
+		local router_ips = {}
+		local rip_pipe = io.popen("ip -o addr show 2>/dev/null")
+		if rip_pipe then
+			for rline in rip_pipe:lines() do
+				local ip = rline:match("%s+inet6?%s+([%da-fA-F:.]+)[/%s]")
+				if ip and ip ~= "127.0.0.1" and ip ~= "::1" then
+					table.insert(router_ips, ip)
+				end
+			end
+			rip_pipe:close()
+		end
+
+		io.write(jc.stringify({installed=1, cols={"family","proto","src","sport","dst","dport","pkts","bytes","mark","state"}, data=items, router={ips=router_ips}}))
 	' 2>/dev/null || printf '{"installed":1,"cols":[],"data":[]}\n'
 }
 
@@ -342,6 +385,7 @@ set_settings() {
 
 	if [ -n "$freq" ]; then
 		sed -i "s/^nss_freq=.*/nss_freq='$freq'/" /tmp/nss_profile.env 2>/dev/null
+		sed -i "s/\"nss_freq\":\"[^\"]*\"/\"nss_freq\":\"$freq\"/" "$PROFILE_JSON" 2>/dev/null
 		if [ -x /usr/bin/nss_freq ]; then
 			case "$freq" in
 				*748*) /usr/bin/nss_freq mid >/dev/null 2>&1 ;;

@@ -131,13 +131,6 @@ function isPrivateIp(ip) {
 	return false;
 }
 
-function helpTip(text) {
-	return E('span', {
-		'class': 'nss-help-tip',
-		'title': text
-	}, [ '?' ]);
-}
-
 var isResolvingHints = false;
 var lastHintProbeTime = 0;
 
@@ -152,7 +145,7 @@ var flowSortKey = 'pkts';
 var flowSortDir = -1; // -1 = desc, 1 = asc
 var auditSortKey = 'total';
 var auditSortDir = -1; // -1 = desc, 1 = asc
-var isPaused = false;
+var pollMode = getSessionData('nss_poll_mode') || 'auto'; // 'auto' | 'keep' | 'paused'
 var isTableHovered = false;
 var isPageVisible = !document.hidden;
 var isRefreshing = false;
@@ -161,7 +154,50 @@ var lastUserActionTime = Date.now();
 var isIdleBackoff = false;
 var IDLE_TIMEOUT_MS = 60000; // 60秒无操作进入挂机退避
 var POLL_NORMAL_INTERVAL = 4; // 活跃轮询 4s
-var POLL_IDLE_INTERVAL = 12; // 挂机退避 12s
+var POLL_IDLE_INTERVAL = 24; // 挂机退避拉长为 24s
+
+function cyclePollMode(onRefreshToggle) {
+	if (pollMode === 'auto') {
+		pollMode = 'keep';
+		isIdleBackoff = false;
+	} else if (pollMode === 'keep') {
+		pollMode = 'paused';
+	} else {
+		pollMode = 'auto';
+		isIdleBackoff = false;
+		lastUserActionTime = Date.now();
+	}
+	setSessionData('nss_poll_mode', pollMode);
+	if (onRefreshToggle) onRefreshToggle();
+}
+
+function makeScrollWrapAttrs(id, onRefreshToggle) {
+	return {
+		'id': id,
+		'style': 'overflow-x:auto; width:100%; -webkit-overflow-scrolling:touch;',
+		'mouseover': function(ev) {
+			if (ev.target.closest('thead')) {
+				if (isTableHovered) {
+					isTableHovered = false;
+					if (onRefreshToggle) onRefreshToggle();
+				}
+				return;
+			}
+			if (ev.target.closest('tbody')) {
+				if (!isTableHovered) {
+					isTableHovered = true;
+					if (onRefreshToggle) onRefreshToggle();
+				}
+			}
+		},
+		'mouseleave': function() {
+			if (isTableHovered) {
+				isTableHovered = false;
+				if (onRefreshToggle) onRefreshToggle();
+			}
+		}
+	};
+}
 
 
 
@@ -222,12 +258,12 @@ function traceFlowByIp(targetIp) {
 	// 2. 自动切换到底层全量明细或对应 IPv6 流视图
 	setTimeout(function() {
 		var subTabId = (targetIp.indexOf(':') !== -1) ? 'ipv6' : 'all';
-		var subTabLink = document.querySelector('#nss-subcard-mount .cbi-tabmenu [data-tab="' + subTabId + '"] a');
-		if (subTabLink) {
-			subTabLink.click();
+		var subLink = document.querySelector('#nss-subcard-mount .cbi-tabmenu [data-tab="' + subTabId + '"] a');
+		if (subLink) {
+			subLink.click();
 		} else {
-			subTabLink = document.querySelector('#nss-subcard-mount .cbi-tabmenu [data-tab="all"] a');
-			if (subTabLink) subTabLink.click();
+			subLink = document.querySelector('#nss-subcard-mount .cbi-tabmenu [data-tab="all"] a');
+			if (subLink) subLink.click();
 		}
 
 		// 3. 在渲染出的表格中高亮匹配的行并平滑滚动定位
@@ -258,98 +294,178 @@ function traceFlowByIp(targetIp) {
 	}, 200);
 }
 
-function renderTooltipIpSummary(clientObj) {
-	var ipv4List = clientObj.ipv4List || [];
-	var ipv6List = clientObj.ipv6List || [];
-
-	var v4Section = (ipv4List.length > 0)
-		? E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:4px; max-width:280px;' }, ipv4List.map(function(ip) {
-			var note = (ip === '127.0.0.1') ? ' (Loopback)' : (ip.indexOf('100.') === 0) ? ' (WAN)' : (ip === clientObj.ip ? ' (' + _('主/网关') + ')' : '');
-			return E('code', { 'style': 'font-size:11px;' }, [ ip + note ]);
-		}))
-		: (clientObj.ip && clientObj.ip.indexOf(':') === -1 ? E('code', {}, [ clientObj.ip ]) : _('无'));
-
-	var v6Section;
-	if (!ipv6List.length) {
-		v6Section = (clientObj.ip && clientObj.ip.indexOf(':') !== -1 ? E('code', {}, [ compressIPv6(clientObj.ip) ]) : _('无'));
-	} else {
-		v6Section = E('div', { 'style': 'display:flex; flex-direction:column; gap:2px; max-width:300px;' }, ipv6List.slice(0, 3).map(function(ip6) {
-			return E('code', { 'style': 'font-size:10px; word-break:break-all;' }, [ compressIPv6(ip6) ]);
-		}));
-		if (ipv6List.length > 3) {
-			v6Section.appendChild(E('span', { 'style': 'font-size:10px; color:var(--text-color-medium);' }, [ _('（共 %d 个地址，点击条目中的徽章可在行内展开）').format(ipv6List.length) ]));
-		}
-	}
-
-	return { v4: v4Section, v6: v6Section };
-}
-
 function renderItemExpandPanel(clientObj, onToggle) {
 	var ipv4List = clientObj.ipv4List || [];
 	var ipv6List = clientObj.ipv6List || [];
-	var allIpsText = [].concat(ipv4List, ipv6List.map(compressIPv6)).filter(Boolean).join('\n');
+	var allIps = [].concat(ipv4List, ipv6List.map(compressIPv6)).filter(Boolean);
+	var allIpsText = allIps.join('\n');
+
+	// 1. 顶部 Header 栏 (主机名、MAC、类型、操作按钮)
+	var macDisplay = clientObj.mac ? clientObj.mac.toUpperCase() : (clientObj.isDevice ? _('虚拟/本地总线') : _('未知 MAC'));
+	var headerBar = E('div', {
+		'style': 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border-color-medium, rgba(255,255,255,0.1)); padding-bottom: 8px;'
+	}, [
+		E('div', { 'style': 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [
+			E('strong', { 'style': 'font-size: 13px;' }, [ clientObj.hostName ]),
+			E('code', { 'style': 'font-size: 11px; padding: 1px 5px; background: var(--background-color-low, rgba(0,0,0,0.2)); border-radius: 3px;' }, [ macDisplay ]),
+			clientObj.isRouter ? E('span', { 'class': 'badge badge-info' }, [ _('路由器本机') ]) : ''
+		]),
+		E('div', { 'style': 'display: flex; gap: 6px; align-items: center;' }, [
+			E('button', {
+				'class': 'ip-action-btn',
+				'style': 'font-weight: 600; color: var(--primary-color-high);',
+				'title': _('复制该客户端拥有的全部 IP 地址'),
+				'click': function(ev) {
+					ev.stopPropagation();
+					copyTextToClipboard(allIpsText, this, _('全部已复制'));
+				}
+			}, [ '📋 ' + _('复制全部 IP') ]),
+			E('button', {
+				'class': 'ip-action-btn',
+				'title': _('收起此客户端的详细地址行'),
+				'click': function(ev) {
+					ev.stopPropagation();
+					if (onToggle) onToggle();
+				}
+			}, [ '▲ ' + _('收起') ])
+		])
+	]);
+
+	// 2. 指标徽章条 (自适应实时流表聚合与历史流量审计)
+	var metricsItems;
+	if (clientObj.totalBytes != null) {
+		var protoList = Object.keys(clientObj.protos || {}).sort().join(', ') || 'TCP/UDP';
+		metricsItems = [
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('硬件加速流量:') ]),
+				E('span', { 'style': 'font-weight: bold; color: var(--primary-color-high);' }, [
+					String.format('%1024.1mB', clientObj.totalBytes || 0) + ' (' + (clientObj.totalPkts || 0).toLocaleString() + ' ' + _('pkts') + ')'
+				])
+			]),
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('实时速率:') ]),
+				E('span', { 'style': 'font-weight: bold; color: var(--primary-color-high); font-variant-numeric: tabular-nums;' }, [
+					(clientObj.totalBps > 0) ? fmtRate(clientObj.totalBps) : '—'
+				])
+			]),
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('活跃加速流:') ]),
+				E('span', { 'style': 'font-weight: 600;' }, [ (clientObj.flowCount || 0) + ' ' + _('条并发连接') ])
+			]),
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('支持协议:') ]),
+				protoList
+			])
+		];
+	} else {
+		metricsItems = [
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('历史总流量:') ]),
+				E('span', { 'style': 'font-weight: bold; color: var(--primary-color-high);' }, [
+					String.format('%1024.1mB', clientObj.total || 0)
+				])
+			]),
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('下行 / 上行:') ]),
+				E('span', { 'style': 'font-weight: 600;' }, [
+					String.format('%1024.1mB', clientObj.rx || 0) + ' / ' + String.format('%1024.1mB', clientObj.tx || 0)
+				])
+			]),
+			E('span', {}, [
+				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('记录会话数:') ]),
+				E('span', { 'style': 'font-weight: 600;' }, [ (clientObj.conns || 0).toLocaleString() + ' ' + _('条') ])
+			])
+		];
+	}
+	var metricsBar = E('div', {
+		'style': 'display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 11px; padding: 4px 8px; background: var(--background-color-low, rgba(0,0,0,0.15)); border-radius: 3px;'
+	}, metricsItems);
+
+	// 3. IPv4 地址池区域
+	var v4Section = null;
+	if (ipv4List.length > 0) {
+		var v4Items = ipv4List.map(function(ip) {
+			var note = (ip === '127.0.0.1') ? ' (Loopback)' : (ip.indexOf('100.') === 0) ? ' (WAN)' : (ip === clientObj.ip ? ' (' + _('主IP') + ')' : '');
+			return E('div', {
+				'style': 'display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 6px; background: var(--background-color-low, rgba(0,0,0,0.1)); border-radius: 3px; min-width: 180px;'
+			}, [
+				E('code', { 'style': 'font-size: 11px;' }, [ ip + note ]),
+				E('div', { 'style': 'display: inline-flex; gap: 3px;' }, [
+					E('button', {
+						'class': 'ip-action-btn',
+						'title': _('复制此 IPv4 地址'),
+						'click': function(ev) {
+							ev.stopPropagation();
+							copyTextToClipboard(ip, this, 'OK');
+						}
+					}, [ '📋' ]),
+					E('button', {
+						'class': 'ip-action-btn',
+						'title': _('在流表中查寻此 IP 流量'),
+						'click': function(ev) {
+							ev.stopPropagation();
+							traceFlowByIp(ip);
+						}
+					}, [ '🎯' ])
+				])
+			]);
+		});
+		v4Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 4px;' }, [
+			E('div', { 'style': 'font-size: 11px; font-weight: 600; color: var(--text-color-medium);' }, [ _('IPv4 地址池 (%d 个):').format(ipv4List.length) ]),
+			E('div', { 'style': 'display: flex; flex-wrap: wrap; gap: 6px;' }, v4Items)
+		]);
+	}
+
+	// 4. IPv6 地址池区域
+	var v6Section = null;
+	if (ipv6List.length > 0) {
+		var v6Grid = E('div', { 'style': 'display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 6px;' });
+		ipv6List.forEach(function(ip6) {
+			var norm = compressIPv6(ip6);
+			var note = (norm === '::1') ? ' (Loopback)' : (ip6.indexOf('fe80:') === 0) ? ' (Link-Local)' : '';
+			v6Grid.appendChild(E('div', {
+				'style': 'display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 6px; background: var(--background-color-low, rgba(0,0,0,0.1)); border-radius: 3px;'
+			}, [
+				E('code', { 'style': 'font-size: 11px; word-break: break-all; white-space: nowrap;' }, [ norm + note ]),
+				E('div', { 'style': 'display: inline-flex; gap: 3px; flex-shrink: 0;' }, [
+					E('button', {
+						'class': 'ip-action-btn',
+						'title': _('复制此 IPv6 地址'),
+						'click': function(ev) {
+							ev.stopPropagation();
+							copyTextToClipboard(norm, this, 'OK');
+						}
+					}, [ '📋' ]),
+					E('button', {
+						'class': 'ip-action-btn',
+						'title': _('在流表中查寻此 IP 流量'),
+						'click': function(ev) {
+							ev.stopPropagation();
+							traceFlowByIp(norm);
+						}
+					}, [ '🎯' ])
+				])
+			]));
+		});
+		v6Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 4px;' }, [
+			E('div', { 'style': 'font-size: 11px; font-weight: 600; color: var(--text-color-medium);' }, [ _('IPv6 地址池 (%d 个):').format(ipv6List.length) ]),
+			v6Grid
+		]);
+	}
 
 	var panel = E('div', {
 		'class': 'client-expand-panel',
 		'style': 'padding: 10px 14px; border-radius: 4px; background: var(--background-color-medium, rgba(255,255,255,0.06)); border: 1px solid var(--border-color-medium, rgba(255,255,255,0.12)); display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;'
 	}, [
-		E('div', { 'style': 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border-color-medium, rgba(255,255,255,0.1)); padding-bottom: 6px;' }, [
-			E('div', { 'style': 'display: flex; align-items: center; gap: 8px;' }, [
-				E('strong', { 'style': 'font-size: 12px;' }, [ clientObj.hostName + (clientObj.mac ? (' (' + clientObj.mac.toUpperCase() + ')') : '') ]),
-				E('span', { 'class': 'badge badge-info', 'style': 'font-size: 10px;' }, [ _('IPv6 地址池 (%d 个)').format(ipv6List.length) ])
-			]),
-			E('div', { 'style': 'display: flex; gap: 6px;' }, [
-				E('button', {
-					'class': 'ip-action-btn',
-					'style': 'font-weight: 600; color: var(--primary-color-high);',
-					'title': _('复制该客户端拥有的全部 IP 地址'),
-					'click': function(ev) {
-						ev.stopPropagation();
-						copyTextToClipboard(allIpsText, this, _('全部已复制'));
-					}
-				}, [ '📋 ' + _('复制全部 IP') ]),
-				E('button', {
-					'class': 'ip-action-btn',
-					'title': _('收起此客户端的详细地址行'),
-					'click': function(ev) {
-						ev.stopPropagation();
-						if (onToggle) onToggle();
-					}
-				}, [ '▲ ' + _('收起') ])
-			])
-		])
-	]);
-
-	var ipGrid = E('div', { 'style': 'display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px;' });
-	ipv6List.forEach(function(ip6) {
-		var norm = compressIPv6(ip6);
-		var note = (norm === '::1') ? ' (Loopback)' : (ip6.indexOf('fe80:') === 0) ? ' (Link-Local)' : '';
-		ipGrid.appendChild(E('div', { 'style': 'display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; background: var(--background-color-low, rgba(0,0,0,0.1)); border-radius: 3px;' }, [
-			E('code', { 'style': 'font-size: 11px; word-break: break-all; white-space: nowrap;' }, [ norm + note ]),
-			E('div', { 'style': 'display: inline-flex; gap: 4px; flex-shrink: 0;' }, [
-				E('button', {
-					'class': 'ip-action-btn',
-					'title': _('复制此 IPv6 地址'),
-					'click': function(ev) {
-						ev.stopPropagation();
-						copyTextToClipboard(norm, this, 'OK');
-					}
-				}, [ '📋' ]),
-				E('button', {
-					'class': 'ip-action-btn',
-					'title': _('在流表中查寻此 IP 流量'),
-					'click': function(ev) {
-						ev.stopPropagation();
-						traceFlowByIp(norm);
-					}
-				}, [ '🎯' ])
-			])
-		]));
-	});
-	panel.appendChild(ipGrid);
+		headerBar,
+		metricsBar,
+		v4Section,
+		v6Section
+	].filter(Boolean));
 
 	return panel;
 }
+
 function ensureCss() {
 	var id = 'luci-app-nss-dashboard-css';
 	var el = document.getElementById(id);
@@ -358,21 +474,85 @@ function ensureCss() {
 			'id': id,
 			'rel': 'stylesheet',
 			'type': 'text/css',
-			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261017m'
+			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261024a'
 		}));
-	} else if (el.href.indexOf('?v=261017m') === -1) {
-		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261017l';
+	} else if (el.href.indexOf('?v=261024a') === -1) {
+		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261024a';
 	}
+}
+
+var prevCpuTicks = null;
+var lastCpuTicksKey = '';
+var cachedCpuLoad = { total: 0, usr: 0, sys: 0, sirq: 0 };
+
+function calcCpuLoad(cpuTicks) {
+	if (!Array.isArray(cpuTicks) || cpuTicks.length < 7) {
+		return cachedCpuLoad;
+	}
+	var key = cpuTicks.join(',');
+	if (key === lastCpuTicksKey) {
+		return cachedCpuLoad;
+	}
+	lastCpuTicksKey = key;
+
+	var totalLoad = 0, usrRate = 0, sysRate = 0, sirqRate = 0;
+	if (prevCpuTicks && prevCpuTicks.length >= 7) {
+		var du = cpuTicks[0] - prevCpuTicks[0];
+		var dn = cpuTicks[1] - prevCpuTicks[1];
+		var ds = cpuTicks[2] - prevCpuTicks[2];
+		var did = cpuTicks[3] - prevCpuTicks[3];
+		var dio = cpuTicks[4] - prevCpuTicks[4];
+		var dirq = cpuTicks[5] - prevCpuTicks[5];
+		var dsirq = cpuTicks[6] - prevCpuTicks[6];
+		var dst = (cpuTicks[7] || 0) - (prevCpuTicks[7] || 0);
+		var dtot = du + dn + ds + did + dio + dirq + dsirq + dst;
+		if (dtot > 0) {
+			totalLoad = Math.max(0, Math.min(100, ((dtot - did - dio) / dtot) * 100));
+			usrRate = Math.max(0, Math.min(100, ((du + dn) / dtot) * 100));
+			sysRate = Math.max(0, Math.min(100, (ds / dtot) * 100));
+			sirqRate = Math.max(0, Math.min(100, (dsirq / dtot) * 100));
+		}
+	}
+	prevCpuTicks = cpuTicks.slice();
+	cachedCpuLoad = { total: totalLoad, usr: usrRate, sys: sysRate, sirq: sirqRate };
+	return cachedCpuLoad;
+}
+
+var prevMetricsNssBytes = null;
+var prevMetricsNssTime = 0;
+var nssMetricsRateBps = 0;
+
+function sampleMetricsRate(nssBytes) {
+	var curBytes = parseFloat(nssBytes);
+	if (isNaN(curBytes) || curBytes <= 0) return nssMetricsRateBps;
+
+	var now = Date.now();
+	if (prevMetricsNssBytes !== null && prevMetricsNssTime > 0) {
+		var dt = (now - prevMetricsNssTime) / 1000;
+		if (dt >= 0.4) {
+			if (curBytes > prevMetricsNssBytes) {
+				nssMetricsRateBps = ((curBytes - prevMetricsNssBytes) * 8) / dt;
+			} else if (curBytes === prevMetricsNssBytes && dt >= 3.0) {
+				nssMetricsRateBps = 0;
+			}
+			prevMetricsNssBytes = curBytes;
+			prevMetricsNssTime = now;
+		}
+	} else {
+		prevMetricsNssBytes = curBytes;
+		prevMetricsNssTime = now;
+	}
+	return nssMetricsRateBps;
 }
 
 function progressbar(value, max, label) {
 	if (value === null || value === undefined) {
 		return E('div', {
-			'class': 'cbi-progressbar disabled',
-			'style': 'height:12px; min-width:80px; position:relative; overflow:hidden; margin:0;',
+			'class': 'cbi-progressbar disabled nss-bar',
+			'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 			'title': label || _('待机 (无服务固件或未引导)')
 		}, [
-			E('span', { 'style': 'position:absolute; width:100%; text-align:center; font-size:10px; font-weight:500; line-height:12px; color:var(--text-color-medium);' }, [
+			E('span', { 'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:500; line-height:13px; color:var(--text-color-medium);' }, [
 				label || _('休眠待机')
 			])
 		]);
@@ -382,17 +562,107 @@ function progressbar(value, max, label) {
 	    pc = Math.min(100, Math.max(0, Math.floor((100 / mn) * vn)));
 
 	return E('div', {
-		'class': 'cbi-progressbar',
-		'style': 'height:12px; min-width:80px; position:relative; overflow:hidden; margin:0;',
+		'class': 'cbi-progressbar nss-bar',
+		'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 		'title': '%s%%'.format(vn)
 	}, [
 		E('div', {
 			'style': 'width:%.2f%%; height:100%; transition:width 0.3s ease;'.format(pc),
 			'class': (vn > 80) ? 'cbi-progressbar-danger' : (vn > 50) ? 'cbi-progressbar-warn' : ''
 		}),
-		E('span', { 'style': 'position:absolute; width:100%; text-align:center; font-size:10px; font-weight:bold; line-height:12px;' }, [
-			'%s%%'.format(vn)
-		])
+		label ? E('span', { 'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:bold; line-height:13px; white-space:nowrap;' }, [
+			label
+		]) : ''
+	]);
+}
+
+function hostCpuProgressbar(total, usr, sys, sirq) {
+	var vn = parseFloat(total) || 0;
+	var u = Math.max(0, parseFloat(usr) || 0);
+	var s = Math.max(0, parseFloat(sys) || 0);
+	var si = Math.max(0, parseFloat(sirq) || 0);
+	var label = 'usr: ' + u.toFixed(0) + '% • sys: ' + s.toFixed(0) + '% • sirq: ' + si.toFixed(0) + '%';
+
+	return E('div', {
+		'class': 'cbi-progressbar nss-bar nss-stacked',
+		'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0; display:flex; background:var(--background-color-medium, rgba(255,255,255,0.08));',
+		'title': 'CPU: ' + vn.toFixed(1) + '% (usr: ' + u.toFixed(1) + '% sys: ' + s.toFixed(1) + '% sirq: ' + si.toFixed(1) + '%)'
+	}, [
+		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
+		E('span', {
+			'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:600; line-height:13px; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.8);'
+		}, [ label ])
+	]);
+}
+
+function miniCpuStackedBlock(cpu) {
+	var vn = parseFloat(cpu.total) || 0;
+	var u = Math.max(0, parseFloat(cpu.usr) || 0);
+	var s = Math.max(0, parseFloat(cpu.sys) || 0);
+	var si = Math.max(0, parseFloat(cpu.sirq) || 0);
+	var labelText = 'u:' + u.toFixed(0) + '% s:' + s.toFixed(0) + '% i:' + si.toFixed(0) + '%';
+
+	var barEl = E('div', {
+		'class': 'cbi-progressbar nss-bar nss-stacked',
+		'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; display:flex; border-radius:2px; border:none; background:var(--background-color-low, rgba(255,255,255,0.08));'
+	}, [
+		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
+		E('span', {
+			'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:700; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.95);'
+		}, [ labelText ])
+	]);
+
+	return E('div', {
+		'class': 'fit-unit fit-unit-bar',
+		'title': 'CPU 总占用: ' + vn.toFixed(1) + '% (usr 用户态: ' + u.toFixed(1) + '% • sys 内核态: ' + s.toFixed(1) + '% • sirq 软中断: ' + si.toFixed(1) + '%)'
+	}, [
+		E('span', { 'class': 'fit-bar-label' }, [ 'CPU' ]),
+		barEl
+	]);
+}
+
+function miniBarBlock(label, value, isCpu, disabledText, titleText) {
+	var barEl;
+	if (value === null || value === undefined) {
+		barEl = E('div', {
+			'class': 'cbi-progressbar disabled nss-bar',
+			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:2px; border:none;'
+		}, [
+			E('span', {
+				'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:500; color:var(--text-color-medium);'
+			}, [ disabledText || _('待机') ])
+		]);
+	} else {
+		var vn = parseFloat(value) || 0;
+		var pc = Math.min(100, Math.max(0, vn));
+		var fillStyle = 'width:' + pc.toFixed(1) + '%; height:100%; transition:width 0.3s ease;';
+		if (isCpu && vn <= 50) {
+			fillStyle += ' background:var(--primary-color-medium, #1976d2);';
+		}
+		barEl = E('div', {
+			'class': 'cbi-progressbar nss-bar',
+			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:2px; border:none;'
+		}, [
+			E('div', {
+				'style': fillStyle,
+				'class': (vn > 80) ? 'cbi-progressbar-danger' : (vn > 50) ? 'cbi-progressbar-warn' : ''
+			}),
+			E('span', {
+				'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:700; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.95);'
+			}, [ (vn % 1 === 0 ? vn.toFixed(0) : vn.toFixed(1)) + '%' ])
+		]);
+	}
+
+	return E('div', {
+		'class': 'fit-unit fit-unit-bar',
+		'title': titleText || (label + ': ' + (value != null ? (value + '%') : (disabledText || _('待机'))))
+	}, [
+		E('span', { 'class': 'fit-bar-label' }, [ label ]),
+		barEl
 	]);
 }
 
@@ -417,28 +687,29 @@ function tempBadge(label, temp) {
 	var cls = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
 
 	return E('span', {
-		'class': 'badge ' + cls
+		'class': 'badge ' + cls + ' badge-tile-112',
+		'title': label + ': ' + t.toFixed(1) + '°C'
 	}, [
 		E('strong', {}, [ label + ':' ]),
 		t.toFixed(1) + '°C'
 	]);
 }
 
-function moduleChip(name, state) {
+function moduleChip(name, state, customLabel, customTitle) {
 	var cls, label;
 	if (state === 2) {
 		cls = 'badge-success';
-		label = _('运行中');
+		label = customLabel || _('运行中');
 	} else if (state === 1) {
 		cls = 'badge-info';
-		label = _('就绪待命');
+		label = customLabel || _('就绪待命');
 	} else {
 		cls = 'badge-neutral';
-		label = _('未安装');
+		label = customLabel || _('未安装');
 	}
 	return E('span', {
-		'class': 'badge ' + cls,
-		'title': name + ': ' + label
+		'class': 'badge ' + cls + ' badge-tile-112',
+		'title': customTitle || (name + ': ' + label)
 	}, [
 		(state === 2) ? E('span', { 'class': 'badge-dot' }) : '',
 		E('strong', {}, [ name + ':' ]),
@@ -446,92 +717,217 @@ function moduleChip(name, state) {
 	]);
 }
 
-// ── 1. 顶置常驻微型遥测总线状态栏 (最上方，全局吸顶，永不重新卸载) ──
+// ── 1. 顶置常驻遥测总线状态栏 (路子 A：三仓等高对称分栏，响应式铺满无死黑) ──
 function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
+	d = d || {};
+	p = p || {};
 	var t = parseFloat(d.cpu_temp) || 0;
 	var tempClass = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
 	var soc = p.soc || d.soc || 'IPQ8074';
 	var cores = p.cores || d.cores || 2;
-	var freqStr = (p.nss_freq || d.nss_freq || '1478.4 MHz').replace(' MHz', 'M');
+	var isDualNpu = (cores !== 1);
+	var freqFull = d.nss_freq || p.nss_freq || '1478.4 MHz';
 	var totalConns = (d.ecm_total != null) ? d.ecm_total : 0;
+
+	var cpuLoad = calcCpuLoad(d.cpu_ticks);
+	var activeRateBps = (nssMetricsRateBps > 0) ? nssMetricsRateBps : (nssGlobalRateBps || 0);
+	var throughputStr = fmtRate(activeRateBps);
 
 	var header = document.querySelector('header');
 	var navHeight = header ? header.offsetHeight : 40;
 
 	var refreshBadge;
-	if (isPaused) {
+	if (pollMode === 'paused') {
 		refreshBadge = E('span', {
-			'class': 'badge badge-warning',
-			'style': 'cursor:pointer;',
-			'title': _('当前已手动暂停轮询。点击恢复实时更新'),
+			'class': 'badge badge-warning fit-unit',
+			'style': 'cursor:pointer; height:24px;',
+			'title': _('当前档位：已手动暂停轮询。点击切换至「4s 实时更新 (自适应)」'),
 			'click': function(ev) {
 				ev.stopPropagation();
-				isPaused = false;
-				if (onRefreshToggle) onRefreshToggle();
+				cyclePollMode(onRefreshToggle);
 			}
 		}, [ '⏸ ' + _('已暂停') ]);
 	} else if (isTableHovered) {
 		refreshBadge = E('span', {
-			'class': 'badge badge-warning',
-			'style': 'cursor:pointer;',
-			'title': _('鼠标正在表格内浏览，已自动挂起刷新以防打断；移出表格自动恢复，或点击锁定暂停'),
+			'class': 'badge badge-warning fit-unit',
+			'style': 'cursor:pointer; height:24px;',
+			'title': _('鼠标正在表格内浏览，已自动挂起刷新以防打断；移出表格自动恢复，或点击切换轮询档位'),
 			'click': function(ev) {
 				ev.stopPropagation();
-				isPaused = true;
-				if (onRefreshToggle) onRefreshToggle();
+				cyclePollMode(onRefreshToggle);
 			}
 		}, [ '⏸ ' + _('移入挂起') ]);
-	} else if (!isPageVisible) {
+	} else if (pollMode === 'keep') {
 		refreshBadge = E('span', {
-			'class': 'badge badge-neutral'
-		}, [ _('后台休眠') ]);
-	} else if (isIdleBackoff) {
-			refreshBadge = E('span', {
-				'class': 'badge badge-neutral',
-				'style': 'cursor:pointer;',
-				'title': _('已处于挂机省电模式（12s 轮询）。移动鼠标或按键立即唤醒恢复 4s 实时模式'),
-				'click': function(ev) {
-					ev.stopPropagation();
-					isPaused = true;
-					if (onRefreshToggle) onRefreshToggle();
-				}
-			}, [
-				_('⏱️ 挂机省电 (12s)')
-			]);
-		} else {
-		refreshBadge = E('span', {
-			'class': 'badge badge-success',
-			'style': 'cursor:pointer;',
-			'title': _('4s 实时更新中。移入下方表格自动挂起，或点击手动暂停'),
+			'class': 'badge badge-info fit-unit',
+			'style': 'cursor:pointer; height:24px;',
+			'title': _('当前档位：保持 4s 更新（常亮盯盘模式，禁用空闲退避与失焦降频）。点击切换至「暂停轮询」'),
 			'click': function(ev) {
 				ev.stopPropagation();
-				isPaused = true;
-				if (onRefreshToggle) onRefreshToggle();
+				cyclePollMode(onRefreshToggle);
 			}
 		}, [
 			E('span', { 'class': 'badge-dot' }),
-			_('实时轮询中')
+			_('保持 4s 更新')
+		]);
+	} else if (!isPageVisible) {
+		refreshBadge = E('span', {
+			'class': 'badge badge-neutral fit-unit',
+			'style': 'height:24px;'
+		}, [ _('后台休眠') ]);
+	} else if (isIdleBackoff) {
+		refreshBadge = E('span', {
+			'class': 'badge badge-neutral fit-unit',
+			'style': 'cursor:pointer; height:24px;',
+			'title': _('当前处于挂机省电模式（24s 轮询）。移动鼠标立即唤醒，或点击切换至「保持 4s 更新 (不休眠)」'),
+			'click': function(ev) {
+				ev.stopPropagation();
+				cyclePollMode(onRefreshToggle);
+			}
+		}, [ _('⏱️ 挂机省电') ]);
+	} else {
+		refreshBadge = E('span', {
+			'class': 'badge badge-neutral fit-unit',
+			'style': 'cursor:pointer; height:24px;',
+			'title': _('当前档位：4s 实时更新（自适应省电）。点击切换至「保持 4s 更新 (不休眠)」'),
+			'click': function(ev) {
+				ev.stopPropagation();
+				cyclePollMode(onRefreshToggle);
+			}
+		}, [
+			E('span', { 'class': 'badge-dot', 'style': 'background:var(--success-color-high, #00ac59);' }),
+			_('4s 实时更新')
 		]);
 	}
 
-	var btnAttrs = {
-		'class': 'cbi-button cbi-button-neutral',
+	var refreshIconSvg = E('svg', {
+		'viewBox': '0 0 24 24',
+		'width': '11',
+		'height': '11',
+		'fill': 'none',
+		'stroke': 'currentColor',
+		'stroke-width': '2.5',
+		'stroke-linecap': 'round',
+		'stroke-linejoin': 'round',
+		'class': isRefreshing ? 'nss-icon-spin' : ''
+	}, [
+		E('path', { 'd': 'M23 4v6h-6' }),
+		E('path', { 'd': 'M1 20v-6h6' }),
+		E('path', { 'd': 'M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15' })
+	]);
+
+	var forceRefreshBtn = E('button', {
+		'class': 'btn cbi-button cbi-button-action fit-unit',
 		'id': 'btn-force-refresh',
-		'style': 'padding:2px 8px; font-size:11px; height:24px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin:0; white-space:nowrap;',
+		'style': 'gap:4px; height:24px;',
+		'disabled': isRefreshing ? 'disabled' : null,
 		'title': _('跳过轮询等待，立即抓取最新遥测与当前子卡数据'),
 		'click': function(ev) {
 			ev.preventDefault();
 			ev.stopPropagation();
 			if (onForceRefresh) onForceRefresh();
 		}
-	};
-	if (isRefreshing) {
-		btnAttrs['disabled'] = 'disabled';
-	}
-
-	var forceRefreshBtn = E('button', btnAttrs, [
-		isRefreshing ? E('span', { 'class': 'nss-icon-spin' }, [ '🔄' ]) : '🔄',
+	}, [
+		refreshIconSvg,
 		isRefreshing ? _('刷新中…') : _('强制刷新')
+	]);
+
+	// ── 仓 1: 核心算力 (Computing) ──
+	var bayCompute = E('div', { 'class': 'bay-card bay-divider-right' }, [
+		E('div', { 'class': 'bay-title-bar' }, [
+			E('span', { 'class': 'th-hint', 'title': _('高通 SoC 硬件架构、工作主频、CPU 三态负载、芯片结温与 NPU 负载') }, [
+				'⚡ ' + _('核心算力')
+			]),
+			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
+				isDualNpu ? _('双核硬件加速') : _('单核硬件加速')
+			])
+		]),
+		E('div', { 'class': 'bay-grid-content' }, [
+			E('span', {
+				'class': 'badge badge-neutral fit-unit',
+				'title': _('高通网络子系统 (NSS) 硬件加速协处理器架构规格')
+			}, [ E('strong', {}, [ 'SoC:' ]), soc + ' ×' + cores ]),
+			E('span', {
+				'class': 'badge badge-neutral fit-unit',
+				'title': _('NSS 锁相环时钟频率')
+			}, [ E('strong', {}, [ _('主频:') ]), freqFull ]),
+			miniCpuStackedBlock(cpuLoad),
+			E('span', {
+				'class': 'badge ' + tempClass + ' fit-unit',
+				'title': _('路由器 SoC 物理结温，来自内核热敏传感器实时监测')
+			}, [ E('strong', {}, [ _('结温:') ]), t.toFixed(1) + '°C' ]),
+			miniBarBlock('C0', d.core0_load || 0, false, null, 'NPU Core 0: ' + (d.core0_load || 0) + '%'),
+			isDualNpu
+				? ((d.core1_load !== null && d.core1_load !== undefined)
+					? miniBarBlock('C1', d.core1_load, false, null, 'NPU Core 1: ' + d.core1_load + '%')
+					: miniBarBlock('C1', null, false, _('待机'), _('NPU Core 1 物理待机 (无蜂窝/IPsec服务固件)')))
+				: miniBarBlock('C1', null, false, _('单核'), _('当前 SoC 为单核 NPU 架构'))
+		])
+	]);
+
+	// ── 仓 2: 硬件遥测 (Telemetry) ──
+	var bayTelemetry = E('div', { 'class': 'bay-card bay-divider-right' }, [
+		E('div', { 'class': 'bay-title-bar' }, [
+			E('span', { 'class': 'th-hint', 'title': _('硬件线速吞吐速率、微码心跳、ECM 并发流数、双栈分布、直通状态与安全协同防御') }, [
+				'📊 ' + _('硬件遥测')
+			]),
+			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
+				_('ECM 硬件直通中')
+			])
+		]),
+		E('div', { 'class': 'bay-grid-content' }, [
+			E('span', {
+				'class': 'badge badge-info fit-unit',
+				'title': _('当前经由 NSS 硬件卸载转发的实时线速吞吐速率')
+			}, [ E('strong', {}, [ _('吞吐:') ]), throughputStr ]),
+			E('span', {
+				'class': 'badge badge-info fit-unit',
+				'title': _('NSS 协处理器微码与 Linux 驱动之间的高频心跳计数 (pkts/s)')
+			}, [ E('span', { 'class': 'badge-dot' }), E('strong', {}, [ _('心跳:') ]), (d.heartbeat || 0).toLocaleString() + ' pkts/s' ]),
+			E('span', {
+				'class': 'badge badge-info fit-unit',
+				'title': _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流总数')
+			}, [ E('span', { 'class': 'badge-dot' }), E('strong', {}, [ 'ECM:' ]), totalConns.toLocaleString() + ' ' + _('流') ]),
+			E('span', {
+				'class': 'badge badge-neutral fit-unit',
+				'title': 'IPv4: ' + (d.ecm_v4 || 0) + ' • IPv6: ' + (d.ecm_v6 || 0)
+			}, [ E('strong', {}, [ 'v4/v6:' ]), (d.ecm_v4 || 0) + ' / ' + (d.ecm_v6 || 0) ]),
+			E('span', {
+				'class': 'badge badge-success fit-unit',
+				'title': _('数据包由 NSS 硬件层线速路由与桥接，完全绕过 Linux 内核协议栈与 CPU 软中断')
+			}, [ E('span', { 'class': 'badge-dot' }), _('直通加速生效') ]),
+			E('span', {
+				'class': 'badge ' + ((d.conflict_detected === 1) ? 'badge-danger' : 'badge-neutral') + ' fit-unit',
+				'title': _('检测并阻断内核软分流 (flow_offloading) 等可能破坏 NSS ECM 硬件加速的冲突配置')
+			}, [ (d.conflict_detected === 1) ? ('⚠️ ' + _('已阻断冲突项')) : ('🛡️ ' + _('冲突阻断生效')) ])
+		])
+	]);
+
+	// ── 仓 3: 运行控制与流表概要 (Control) ──
+	var bayControl = E('div', { 'class': 'bay-card control-bay' }, [
+		E('div', { 'class': 'bay-title-bar' }, [
+			E('span', { 'class': 'th-hint', 'title': _('调度周期控制、强制刷新与全网并发流汇总') }, [
+				'🎛️ ' + _('运行控制')
+			]),
+			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
+				p.fw_version ? ('FW ' + (p.fw_version || '').replace(/^NSS\.(FW\.)?/, '')) : ''
+			])
+		]),
+		E('div', { 'class': 'control-panel-fixed' }, [
+			E('div', { 'class': 'control-summary-row' }, [
+				E('span', { 'style': 'color:var(--text-color-medium);' }, [ _('当前并发流:') ]),
+				E('strong', { 'style': 'color:var(--text-color-high); font-variant-numeric:tabular-nums;' }, [
+					totalConns.toLocaleString() + ' ' + _('条活跃流')
+				])
+			]),
+			E('div', { 'style': 'display:grid; grid-template-columns:1fr 1fr; gap:6px;' }, [
+				refreshBadge,
+				forceRefreshBtn
+			]),
+			E('div', { 'style': 'font-size:10px; color:var(--text-color-medium); text-align:center;' }, [
+				_('移入表格自动挂起 · 移出自动恢复')
+			])
+		])
 	]);
 
 	return E('div', {
@@ -539,51 +935,10 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 		'class': 'cbi-section',
 		'style': 'top:' + navHeight + 'px;'
 	}, [
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('高通网络子系统 (NSS) 硬件加速协处理器，内置独立双核与硬件转发管线') }, [ _('协处理器规格') ]),
-			E('div', { 'style': 'display:flex; align-items:center; gap:4px;' }, [
-				badge('badge-info', soc + ' ×' + cores),
-				badge('badge-neutral', freqStr)
-			])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('NSS 协处理器微码与 Linux 驱动之间的高频心跳计数 (pkts/s)。持续大于 0 说明微码与驱动交互正常') }, [ _('物理心跳速率') ]),
-			E('div', {}, [
-				badge('badge-success', (d.heartbeat || 0).toLocaleString() + ' pkts/s', true)
-			])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('当前经由高通增强连接管理器 (ECM) 卸载到 NSS 硬件层线速转发的活跃流总数与 v4/v6 分布') }, [ _('ECM 加速流数') ]),
-			E('div', { 'style': 'display:flex; align-items:center; gap:4px;' }, [
-				badge('badge-info', totalConns.toLocaleString() + ' ' + _('流')),
-				badge('badge-neutral', 'v4:' + (d.ecm_v4 || 0) + ' / v6:' + (d.ecm_v6 || 0))
-			])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('数据包由 NSS 硬件层线速路由与桥接，完全绕过 Linux 内核协议栈与 CPU 软中断') }, [ _('硬件加速状态') ]),
-			E('div', {}, [
-				badge('badge-success', _('硬件直通加速中'), true)
-			])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('路由器 SoC 物理结温，来自内核热敏传感器实时监测') }, [ _('芯片结温') ]),
-			E('div', {}, [
-				badge(tempClass, t.toFixed(1) + '°C')
-			])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('检测并阻断内核软分流 (flow_offloading) 等可能破坏 NSS ECM 硬件加速的冲突配置') }, [ _('安全协同防御') ]),
-			E('div', {}, [
-				badge((d.conflict_detected === 1) ? 'badge-warning' : 'badge-success', (d.conflict_detected === 1) ? _('已阻断冲突项') : _('阻断墙已生效'))
-			])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label', 'title': _('三级自适应状态机：4s 活跃轮询、60s 无操作进入 12s 挂机省电模式、切走标签页物理休眠（0 消耗）') }, [ _('轮询调度') ]),
-			E('div', {}, [ refreshBadge ])
-		]),
-		E('div', { 'class': 'telemetry-item' }, [
-			E('span', { 'class': 'telemetry-label' }, [ _('即时同步') ]),
-			E('div', {}, [ forceRefreshBtn ])
+		E('div', { 'class': 'three-bay-fixed' }, [
+			bayCompute,
+			bayTelemetry,
+			bayControl
 		])
 	]);
 }
@@ -612,48 +967,177 @@ function renderConflictBanner(d) {
 function renderStatusCard(d, p) {
 	var mods = (d && d.modules) ? d.modules : ((p && p.modules) ? p.modules : {});
 	var totalConns = (d.ecm_total != null) ? d.ecm_total : 0;
+	var isDualNpu = (p.cores !== 1 && d.cores !== 1);
+	var npuLabel = isDualNpu ? 'NPU ×2' : 'NPU ×1';
+	var freqVal = d.nss_freq || p.nss_freq || '1478.4 MHz';
 
-	var sqmVal = (p && p.sqm != null) ? p.sqm : (d.sqm != null ? d.sqm : -1);
-	var sqmView;
-	if (sqmVal === 2) {
-		sqmView = badge('badge-success', [ E('span', { 'class': 'badge-dot' }), _('NSS 硬件队列加速 (CAKE/FQ_CODEL)') ]);
-	} else if (sqmVal === 1) {
-		sqmView = badge('badge-info', _('主机软件队列整形运行中'));
-	} else if (sqmVal === 0) {
-		sqmView = badge('badge-neutral', _('未启用 (已配置备用)'));
-	} else {
-		sqmView = badge('badge-neutral', _('未安装 sqm-scripts'));
+	// 1. 协处理器与微码规格 (统一 3列 × 2行 112px 等宽卡片网格，突出 NPU 频率)
+	var rawFw = p.fw_version || d.fw_version || '12.5';
+	var fwMask = p.fw_mask || d.fw_mask || '0x36';
+	var fwShort = rawFw.replace(/^NSS\.(FW\.)?/, '');
+	var fwDisplay = 'FW ' + fwShort + (fwMask && fwMask !== '0x0' ? ' [' + fwMask + ']' : '');
+	var heartbeatNum = (d.heartbeat != null ? Number(d.heartbeat).toLocaleString() : '0');
+
+	var specView = E('div', { 'class': 'nss-grid-3x112' }, [
+		E('span', {
+			'class': 'badge badge-neutral badge-tile-112',
+			'title': _('高通网络子系统 (NSS) SoC 芯片型号')
+		}, [ E('strong', {}, [ 'SoC:' ]), p.soc || d.soc || 'IPQ8074' ]),
+		E('span', {
+			'class': 'badge badge-info badge-tile-112',
+			'title': _('独立硬件网络协处理器核心拓扑')
+		}, [ E('strong', {}, [ _('架构:') ]), npuLabel ]),
+		E('span', {
+			'class': 'badge badge-success badge-tile-112',
+			'title': _('当前 NSS NPU 锁相环工作主频')
+		}, [ E('span', { 'class': 'badge-dot' }), E('strong', {}, [ _('主频:') ]), freqVal ]),
+		E('span', {
+			'class': 'badge badge-neutral badge-tile-112',
+			'title': _('NSS 硬件加速微码版本: ') + rawFw
+		}, [ E('strong', {}, [ 'FW:' ]), fwShort ]),
+		E('span', {
+			'class': 'badge badge-neutral badge-tile-112',
+			'title': _('微码特性掩码 (fw_mask)')
+		}, [ E('strong', {}, [ _('掩码:') ]), fwMask ]),
+		E('span', {
+			'class': 'badge badge-success badge-tile-112',
+			'title': _('NPU 微码与内核驱动每秒高频心跳包采样 (pkts/s)')
+		}, [ E('strong', {}, [ _('心跳:') ]), heartbeatNum + '/s' ])
+	]);
+
+	// 2. 核心计算负载 (总宽锁死 348px，与 3×112px 网格右边缘严丝合缝对齐)
+	var computeLoadElements = [];
+	if (Array.isArray(d.cpu_ticks) && d.cpu_ticks.length >= 7) {
+		var cpu = calcCpuLoad(d.cpu_ticks);
+		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
+			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'CPU:' ]),
+			E('div', { 'style': 'flex:1;' }, [
+				hostCpuProgressbar(cpu.total, cpu.usr, cpu.sys, cpu.sirq)
+			]),
+			E('span', { 'class': 'nss-num-cell', 'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;' }, [ cpu.total.toFixed(0) + '%' ])
+		]));
 	}
 
-	var coreLoadView;
-	if (p.cores === 1) {
-		coreLoadView = E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-			E('span', { 'style': 'min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
-			E('div', { 'style': 'flex:1; max-width:240px;' }, [ progressbar(d.core0_load || 0, 100) ]),
-			E('span', { 'style': 'font-size:11px; font-weight:600;' }, [ (d.core0_load || 0) + '%' ])
-		]);
+	if (!isDualNpu) {
+		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
+			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
+			E('div', { 'style': 'flex:1;' }, [ progressbar(d.core0_load || 0, 100) ]),
+			E('span', { 'class': 'nss-num-cell', 'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;' }, [ (d.core0_load || 0) + '%' ])
+		]));
 	} else {
 		var isCore1Active = (d.core1_load !== null && d.core1_load !== undefined);
-		coreLoadView = E('div', { 'style': 'display:flex; flex-direction:column; gap:4px; max-width:280px;' }, [
-			E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-				E('span', { 'style': 'min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
-				E('div', { 'style': 'flex:1;' }, [ progressbar(d.core0_load || 0, 100) ]),
-				E('span', { 'style': 'font-size:11px; font-weight:600;' }, [ (d.core0_load || 0) + '%' ])
+		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
+			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
+			E('div', { 'style': 'flex:1;' }, [ progressbar(d.core0_load || 0, 100) ]),
+			E('span', { 'class': 'nss-num-cell', 'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;' }, [ (d.core0_load || 0) + '%' ])
+		]));
+		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
+			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'Core 1:' ]),
+			E('div', { 'style': 'flex:1;' }, [
+				isCore1Active ? progressbar(d.core1_load, 100) : progressbar(null, 100, _('休眠待机'))
 			]),
-			E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-				E('span', { 'style': 'min-width:45px; font-size:11px;' }, [ 'Core 1:' ]),
-				E('div', { 'style': 'flex:1;' }, [
-					isCore1Active ? progressbar(d.core1_load, 100) : progressbar(null, 100, _('休眠待机'))
-				]),
-				E('span', {
-					'style': 'font-size:11px; font-weight:600; color:' + (isCore1Active ? 'inherit' : 'var(--text-color-medium)') + ';',
-					'title': isCore1Active ? '' : _('NPU Core 1 物理待机 (无蜂窝/IPsec服务固件)')
-				}, [
-					isCore1Active ? ((d.core1_load || 0) + '%') : _('待机')
+			E('span', {
+				'class': 'nss-num-cell',
+				'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right; color:' + (isCore1Active ? 'inherit' : 'var(--text-color-medium)') + ';',
+				'title': isCore1Active ? '' : _('NPU Core 1 物理待机 (无蜂窝/IPsec服务固件)')
+			}, [
+				isCore1Active ? ((d.core1_load || 0) + '%') : _('待机')
+			])
+		]));
+	}
+
+	var computeLoadView = E('div', { 'class': 'nss-load-box-348' }, computeLoadElements);
+
+	// 3. 模块状态 (7 大加速引擎徽章，严格统一 3×112px 等宽网格)
+	var wifiChip = (d.wifi_offload === 1)
+		? moduleChip('Wi-Fi', 2, _('已加速'), _('ath11k wifili 硬件加速已就绪 (802.11s Mesh 支持)'))
+		: moduleChip('Wi-Fi', 0, _('主机模式'), _('无线数据流未经 NSS 卸载'));
+
+	var sqmVal = (p && p.sqm != null) ? p.sqm : (d.sqm != null ? d.sqm : -1);
+	var sqmChip;
+	if (sqmVal === 2) {
+		sqmChip = moduleChip('SQM', 2, _('硬件队列'), _('NSS 硬件队列加速运行中 (CAKE/FQ-CoDel 硬件调度)'));
+	} else if (sqmVal === 1) {
+		sqmChip = moduleChip('SQM', 1, _('主机队列'), _('主机软件队列整形运行中'));
+	} else if (sqmVal === 0) {
+		sqmChip = moduleChip('SQM', 0, _('未启用'), _('未启用 (已配置备用)'));
+	} else {
+		sqmChip = moduleChip('SQM', 0, _('未安装'), _('未安装 sqm-scripts'));
+	}
+
+	var modulesView = E('div', { 'class': 'nss-grid-3x112' }, [
+		moduleChip('Bridge', mods.bridge),
+		moduleChip('PPPoE', mods.pppoe),
+		wifiChip,
+		sqmChip,
+		moduleChip('VLAN', mods.vlan),
+		moduleChip('Qdisc', mods.qdisc),
+		moduleChip('EIP-197', mods.crypto)
+	]);
+
+	var section1 = E('div', { 'class': 'cbi-section' }, [
+		E('h3', { 'class': 'cbi-section-title' }, [
+			E('span', {}, [ _('核心算力与驱动模块') ]),
+			E('span', {
+				'class': 'badge badge-info',
+				'title': _('当前 NSS 锁相环运行主频')
+			}, [ npuLabel + ' @ ' + freqVal ]),
+			E('span', {
+				'class': 'badge badge-success',
+				'title': rawFw + (fwMask ? ' (fw_mask: ' + fwMask + ')' : '')
+			}, [ fwDisplay ])
+		]),
+		E('div', { 'class': 'cbi-section-node' }, [
+			E('table', { 'class': 'table' }, [
+				E('tbody', {}, [
+					E('tr', { 'class': 'tr' }, [
+						E('td', { 'class': 'td left nss-status-label', 'title': _('高通独立网络子系统架构规格、NPU 频率与微码版本') }, [
+							E('span', { 'class': 'th-hint' }, [ _('协处理器') ])
+						]),
+						E('td', { 'class': 'td left' }, [ specView ])
+					]),
+					E('tr', { 'class': 'tr' }, [
+						E('td', { 'class': 'td left nss-status-label', 'title': _('Linux 主机通用处理器 (usr/sys/sirq) 与 NSS 协处理器独立算力负载') }, [
+							E('span', { 'class': 'th-hint' }, [ _('核心负载') ])
+						]),
+						E('td', { 'class': 'td left' }, [ computeLoadView ])
+					]),
+					E('tr', { 'class': 'tr' }, [
+						E('td', { 'class': 'td left nss-status-label', 'title': _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)') }, [
+							E('span', { 'class': 'th-hint' }, [ _('模块状态') ])
+						]),
+						E('td', { 'class': 'td left' }, [ modulesView ])
+					])
 				])
 			])
-		]);
-	}
+		])
+	]);
+
+	// 4. 流表与环境温度 (每行 3 个 112px 等宽卡片网格)
+	var ecmTotalChip = E('span', {
+		'class': 'badge badge-info badge-tile-112',
+		'title': _('当前经由高通增强连接管理器 (ECM) 卸载的硬件并发流总数')
+	}, [
+		E('span', { 'class': 'badge-dot' }),
+		E('strong', {}, [ 'ECM:' ]),
+		totalConns.toLocaleString() + ' ' + _('流')
+	]);
+
+	var ecmDistChip = E('span', {
+		'class': 'badge badge-neutral badge-tile-112',
+		'title': 'IPv4: ' + (d.ecm_v4 || 0) + ' • IPv6: ' + (d.ecm_v6 || 0)
+	}, [
+		E('strong', {}, [ 'v4/v6:' ]),
+		(d.ecm_v4 || 0) + '/' + (d.ecm_v6 || 0)
+	]);
+
+	var flowChips = [
+		E('span', { 'class': 'badge badge-info badge-tile-112' }, [ E('strong', {}, [ 'IPv4:' ]), (d.ecm_v4 || 0) ]),
+		E('span', { 'class': 'badge badge-info badge-tile-112' }, [ E('strong', {}, [ 'IPv6:' ]), (d.ecm_v6 || 0) ]),
+		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'TCP:' ]), (d.ecm_tcp || 0) ]),
+		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'UDP:' ]), (d.ecm_udp || 0) ]),
+		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'Other:' ]), (d.ecm_other || 0) ])
+	];
 
 	var tempElements = [];
 	if (d.cpu_temp && parseFloat(d.cpu_temp) > 0)
@@ -665,99 +1149,42 @@ function renderStatusCard(d, p) {
 			tempElements.push(tempBadge(radios[i].id, radios[i].temp));
 	}
 	if (!tempElements.length)
-		tempElements.push(badge('badge-neutral', _('未检测到物理温度')));
-
-	var rawFw = p.fw_version || d.fw_version || '12.5';
-	var fwMask = p.fw_mask || d.fw_mask || '0x36';
-	var fwDisplay = 'FW ' + rawFw.replace(/^NSS\.(FW\.)?/, '') + (fwMask && fwMask !== '0x0' ? ' [' + fwMask + ']' : '');
-
-	var section1 = E('div', { 'class': 'cbi-section' }, [
-		E('h3', { 'class': 'cbi-section-title' }, [
-			E('span', {}, [ _('核心算力与驱动模块') ]),
-			E('span', {
-				'class': 'badge badge-success',
-				'title': rawFw + (fwMask ? ' (fw_mask: ' + fwMask + ')' : '')
-			}, [ fwDisplay ])
-		]),
-		E('div', { 'class': 'cbi-section-node' }, [
-			E('table', { 'class': 'table' }, [
-				E('tbody', {}, [
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('高通独立网络子系统架构规格与工作主频') }, [ _('协处理器架构') ]),
-						E('td', { 'class': 'td left' }, [
-							badge('badge-info', 'Qualcomm ' + (p.soc || 'IPQ8074')),
-							E('span', { 'style': 'margin-left:4px;' }, [
-								badge('badge-neutral', ((p.cores === 1) ? _('单核 NPU') : _('双核 NPU')) + ' @ ' + (p.nss_freq || '1478.4 MHz'))
-							])
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('高通独立协处理器双核算力占用率，用于处理包分类、路由决策与 QoS 流量整形，独立于 Linux 主 CPU') }, [ _('NPU 硬件负载') ]),
-						E('td', { 'class': 'td left' }, [ coreLoadView ])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('NSS 固件微码与宿主驱动每秒交互的数据包基准，持续大于 0 代表硬件管线健康存活') }, [ _('物理心跳采样') ]),
-						E('td', { 'class': 'td left' }, [
-							badge('badge-success', (d.heartbeat || 0).toLocaleString() + ' pkts/s', true)
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('展示各网络协议子模块是否成功卸载至 NSS：Bridge(桥接)、PPPoE(拨号)、VLAN(虚网)、Qdisc(队列)、EIP-197(硬件矢量加解密)') }, [ _('驱动加速组件') ]),
-						E('td', { 'class': 'td left' }, [
-							E('div', { 'style': 'display:flex; gap:6px; flex-wrap:wrap; align-items:center;' }, [
-								moduleChip('Bridge', mods.bridge),
-								moduleChip('PPPoE', mods.pppoe),
-								moduleChip('VLAN', mods.vlan),
-								moduleChip('Qdisc', mods.qdisc),
-								moduleChip('EIP-197', mods.crypto)
-							])
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('NSS 硬件队列加速表示 Cake / FQ_CoDel 调度器在协处理器内部硬件级执行，完全避免跑满带宽时的主机高延迟与丢包') }, [ _('SQM 流量整形') ]),
-						E('td', { 'class': 'td left' }, [ sqmView ])
-					])
-				])
-			])
-		])
-	]);
+		tempElements.push(badge('badge-neutral badge-tile-112', _('未检测到温度')));
 
 	var section2 = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
-			E('span', {}, [ _('流表引擎与数据通道') ]),
+			E('span', {}, [ _('流表引擎与环境遥测') ]),
 			badge('badge-info', totalConns.toLocaleString() + ' ' + _('活动流'))
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [
 			E('table', { 'class': 'table' }, [
 				E('tbody', {}, [
 					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('高通增强连接管理器 (Enhanced Connection Manager)，负责监听内核会话并将其下推至 NSS 硬件线速转发') }, [ _('ECM 硬件加速状态') ]),
+						E('td', { 'class': 'td left nss-status-label', 'title': _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流数与 v4/v6 概况') }, [
+							E('span', { 'class': 'th-hint' }, [ _('流表状态') ])
+						]),
 						E('td', { 'class': 'td left' }, [
-							badge('badge-success', 'Active (' + _('全硬件卸载中') + ')', true)
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('当前经由 NSS 硬件卸载的 IPv4 / IPv6 及 TCP / UDP 活跃连接流统计') }, [ _('协议加速流分布') ]),
-						E('td', { 'class': 'td left' }, [
-							E('div', { 'style': 'display:flex; gap:6px; flex-wrap:wrap; align-items:center;' }, [
-								badge('badge-info', 'IPv4: ' + (d.ecm_v4 || 0)),
-								badge('badge-info', 'IPv6: ' + (d.ecm_v6 || 0)),
-								badge('badge-neutral', 'TCP: ' + (d.ecm_tcp || 0)),
-								badge('badge-neutral', 'UDP: ' + (d.ecm_udp || 0)),
-								badge('badge-neutral', 'Other: ' + (d.ecm_other || 0))
+							E('div', { 'class': 'nss-grid-3x112' }, [
+								ecmTotalChip,
+								ecmDistChip,
+								badge('badge-success badge-tile-112', _('硬件直通中'), true)
 							])
 						])
 					]),
 					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('ath11k 无线驱动与 NSS 直连数据路径 (wifili Direct Path)，无线流量无需通过 Host 协议栈中转，硬件线速桥接或路由') }, [ _('无线数据通道') ]),
+						E('td', { 'class': 'td left nss-status-label', 'title': _('当前经由 NSS 硬件卸载的 IPv4 / IPv6 及 TCP / UDP 活跃连接流详细分布') }, [
+							E('span', { 'class': 'th-hint' }, [ _('协议分布') ])
+						]),
 						E('td', { 'class': 'td left' }, [
-							badge('badge-success', 'ath11k wifili ' + _('硬件直通 (802.11s Mesh 就绪)'), true)
+							E('div', { 'class': 'nss-grid-3x112' }, flowChips)
 						])
 					]),
 					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:30%; font-weight:600; cursor:help;', 'title': _('路由器 SoC 物理结温与 Wi-Fi 射频芯片温度实时监控') }, [ _('硬件温度监控') ]),
+						E('td', { 'class': 'td left nss-status-label', 'title': _('路由器 SoC 物理结温与 Wi-Fi 射频芯片温度实时监控') }, [
+							E('span', { 'class': 'th-hint' }, [ _('硬件结温') ])
+						]),
 						E('td', { 'class': 'td left' }, [
-							E('div', { 'style': 'display:flex; gap:6px; flex-wrap:wrap; align-items:center;' }, tempElements)
+							E('div', { 'class': 'nss-grid-3x112' }, tempElements)
 						])
 					])
 				])
@@ -769,7 +1196,7 @@ function renderStatusCard(d, p) {
 }
 
 // ── 4. 子卡 B：控制与防御 (Controls) ──
-function renderControlCard(s, d) {
+function renderControlCard(s, d, p, onSaved) {
 	var isDualNpu = (d.cores !== 1);
 	var npuLabel = isDualNpu ? 'NPU ×2' : 'NPU ×1';
 
@@ -789,7 +1216,7 @@ function renderControlCard(s, d) {
 
 	var selectFreq = E('select', {
 		'class': 'cbi-input-select',
-		'style': 'padding:4px 8px; font-size:13px;'
+		'style': 'padding:4px 8px; font-size:13px; width:240px;'
 	}, [
 		E('option', { 'value': '748.8 MHz', 'selected': (s.frequency && s.frequency.indexOf('748') !== -1) ? '' : null }, [ _('稳健节能 (748.8 MHz)') ]),
 		E('option', { 'value': '1056.0 MHz', 'selected': (s.frequency && s.frequency.indexOf('1056') !== -1) ? '' : null }, [ _('IPQ60xx 默认 (1056.0 MHz)') ]),
@@ -876,6 +1303,13 @@ function renderControlCard(s, d) {
 			]);
 
 			callSetSettings(enabled, crypto, freq, auto_block).then(function() {
+				s.enabled = enabled;
+				s.crypto = crypto;
+				s.frequency = freq;
+				s.auto_block = auto_block;
+				if (d) d.nss_freq = freq;
+				if (p) p.nss_freq = freq;
+				if (onSaved) onSaved();
 				ui.addNotification(null, E('p', {}, [ _('NSS 硬件控制配置已成功保存并应用。') ]), 'info');
 				ui.hideModal();
 			}).catch(function(err) {
@@ -947,19 +1381,19 @@ function renderPortsCard(d, onRefreshToggle) {
 		var speedCls = isUp ? 'badge-success' : 'badge-neutral';
 
 		return E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td', 'data-title': 'Port' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
-			E('td', { 'class': 'td', 'data-title': 'Speed' }, [
-				badge(speedCls, speedText)
+			E('td', { 'class': 'td', 'style': 'width:80px;' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
+			E('td', { 'class': 'td', 'style': 'width:86px;' }, [
+				E('span', { 'class': 'badge ' + speedCls + ' badge-tile-64' }, [ speedText ])
 			]),
-			E('td', { 'class': 'td', 'data-title': 'HW %' }, [
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:165px;' }, [
 				E('div', { 'style': 'display:flex; align-items:center; gap:6px;' }, [
-					progressbar(hwRatio, 100),
-					E('span', { 'style': 'font-size:11px; font-weight:bold;' }, [ hwRatio + '%' ])
+					E('div', { 'style': 'width:100px; flex-shrink:0;' }, [ progressbar(hwRatio, 100) ]),
+					E('span', { 'style': 'font-size:11px; font-weight:bold; width:40px; text-align:right;' }, [ hwRatio + '%' ])
 				])
 			]),
-			E('td', { 'class': 'td', 'data-title': 'HW Pkts' }, [ offloaded.toLocaleString() + ' pkts' ]),
-			E('td', { 'class': 'td', 'data-title': 'Host Pkts' }, [ hostPkts.toLocaleString() + ' pkts' ]),
-			E('td', { 'class': 'td', 'data-title': 'RX / TX' }, [
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:140px;' }, [ offloaded.toLocaleString() + ' pkts' ]),
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:140px;' }, [ hostPkts.toLocaleString() + ' pkts' ]),
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:155px;' }, [
 				String.format('%1024.1mB', (p.rx_bytes || 0)) + ' / ' + String.format('%1024.1mB', (p.tx_bytes || 0))
 			])
 		]);
@@ -981,31 +1415,16 @@ function renderPortsCard(d, onRefreshToggle) {
 			badge('badge-success', _('硬件线速卸载监测'))
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [
-			E('div', {
-				'id': 'ports-scroll-wrap',
-				'style': 'overflow-x:auto; width:100%; -webkit-overflow-scrolling:touch;',
-				'mouseenter': function() {
-					if (!isTableHovered) {
-						isTableHovered = true;
-						if (onRefreshToggle) onRefreshToggle();
-					}
-				},
-				'mouseleave': function() {
-					if (isTableHovered) {
-						isTableHovered = false;
-						if (onRefreshToggle) onRefreshToggle();
-					}
-				}
-			}, [
-				E('table', { 'class': 'table' }, [
+			E('div', makeScrollWrapAttrs('ports-scroll-wrap', onRefreshToggle), [
+				E('table', { 'class': 'table nss-fixed-table' }, [
 					E('thead', {}, [
 						E('tr', { 'class': 'tr table-titles' }, [
-							E('th', { 'class': 'th' }, [ 'Port' ]),
-							E('th', { 'class': 'th' }, [ 'Speed' ]),
-							E('th', { 'class': 'th' }, [ 'HW %' ]),
-							E('th', { 'class': 'th' }, [ 'HW Pkts' ]),
-							E('th', { 'class': 'th' }, [ 'Host Pkts' ]),
-							E('th', { 'class': 'th' }, [ 'RX / TX' ])
+							E('th', { 'class': 'th', 'style': 'width:80px;' }, [ 'Port' ]),
+							E('th', { 'class': 'th', 'style': 'width:86px;' }, [ 'Speed' ]),
+							E('th', { 'class': 'th', 'style': 'width:165px;' }, [ 'HW %' ]),
+							E('th', { 'class': 'th', 'style': 'width:140px;' }, [ 'HW Pkts' ]),
+							E('th', { 'class': 'th', 'style': 'width:140px;' }, [ 'Host Pkts' ]),
+							E('th', { 'class': 'th', 'style': 'width:155px;' }, [ 'RX / TX' ])
 						])
 					]),
 					E('tbody', {}, rows)
@@ -1047,26 +1466,123 @@ function formatEndpoint(ip, port) {
 }
 
 var CLIENT_COLS = [
-	{ key: 'client',     title: _('终端设备 (Client)'), hint: _('局域网在线设备，依据 MAC/ARP/DHCP 自动识别。支持点击「▼ +N IPv6」跨列展开全部 IPv6 地址与流表反查穿透'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.ip || ''); } },
-	{ key: 'flowCount',  title: _('并发流 (Conns)'),    hint: _('该终端当前活跃的双向 TCP/UDP 会话总数'), num: true,  get: function(c) { return c.flowCount || 0; } },
-	{ key: 'totalPkts',  title: _('报文数 (Pkts)'),     hint: _('该终端所有活跃流的累计硬件转发数据包总数'), num: true,  get: function(c) { return c.totalPkts || 0; } },
-	{ key: 'totalBytes', title: _('数据量 (Bytes)'),    hint: _('该终端所有活跃流的累计硬件转发网络流量'), num: true,  get: function(c) { return c.totalBytes || 0; } },
-	{ key: 'proto',      title: _('承载协议 (Proto)'),  hint: _('该终端当前使用的传输层协议分布 (TCP/UDP)'), num: false, get: function(c) { return Object.keys(c.protos).sort().join(','); } }
+	{ key: 'client',     width: '210px', title: _('终端设备'), hint: _('局域网在线设备，依据 MAC/ARP/DHCP 自动识别。支持点击展开全部 IPv6 地址与流表反查穿透'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.ip || ''); } },
+	{ key: 'rate',       width: '108px', title: _('实时速率'), hint: _('客户端 V8 两帧差分计算的该终端实时双向吞吐速率'), num: true,  get: function(c) { return c.totalBps || 0; } },
+	{ key: 'flowCount',  width: '92px',  title: _('并发流'),   hint: _('该终端当前活跃的双向 TCP/UDP 会话总数'), num: true,  get: function(c) { return c.flowCount || 0; } },
+	{ key: 'totalPkts',  width: '115px', title: _('报文数'),   hint: _('该终端所有活跃流的累计硬件转发数据包总数'), num: true,  get: function(c) { return c.totalPkts || 0; } },
+	{ key: 'totalBytes', width: '96px',  title: _('数据量'),   hint: _('该终端所有活跃流的累计硬件转发网络流量'), num: true,  get: function(c) { return c.totalBytes || 0; } },
+	{ key: 'proto',      width: '110px', title: _('协议'),     hint: _('该终端当前使用的传输层协议分布 (TCP/UDP)'), num: false, get: function(c) { return Object.keys(c.protos).sort().join(','); } }
 ];
+
+var prevFlowsCache = {};
+var prevFlowsTime = 0;
+var nssGlobalRateBps = 0;
+
+var DSCP_NAMES = {
+	0: 'CS0', 1: 'LE', 8: 'CS1', 10: 'AF11', 12: 'AF12', 14: 'AF13',
+	16: 'CS2', 18: 'AF21', 20: 'AF22', 22: 'AF23', 24: 'CS3', 26: 'AF31',
+	28: 'AF32', 30: 'AF33', 32: 'CS4', 34: 'AF41', 36: 'AF42', 38: 'AF43',
+	40: 'CS5', 44: 'VA', 46: 'EF', 48: 'CS6', 56: 'CS7'
+};
+
+var SVG_ICONS = {
+	voip: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M7 1v7H4l5 7V8h3L7 1z"/></svg>',
+	media: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M4 2.5v11l9-5.5-9-5.5z"/></svg>',
+	biz: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M5 2V1h6v1h3v4H2V2h3zm1 0h4V2H6v0zM2 7h12v7H2V7zm5 2v2h2V9H7z"/></svg>',
+	ctrl: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M8 1L2 3.5v5c0 3.7 2.6 7.1 6 7.5 3.4-.4 6-3.8 6-7.5v-5L8 1z"/></svg>',
+	scavenger: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M8 13l-4-4h2.5V3h3v6H12l-4 4z"/></svg>',
+	tag: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M1 1h6l8 8-6 6L1 7V1zm3 2a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/></svg>'
+};
+
+function fmtRate(bps) {
+	if (bps >= 1e9) return (bps / 1e9).toFixed(1) + ' Gbps';
+	if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mbps';
+	if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' Kbps';
+	return bps.toFixed(0) + ' bps';
+}
+
+function fmtPps(pps) {
+	if (!pps || pps <= 0) return '';
+	if (pps >= 1000) return (pps / 1000).toFixed(1) + 'k pps';
+	if (pps >= 1) return pps.toFixed(0) + ' pps';
+	return '<1 pps';
+}
+
+function getDscpMeta(mark) {
+	if (!mark || mark === 0) {
+		return { dscp: 0, name: 'CS0', label: '— #CS0', cls: 'badge-neutral', icon: '', category: _('尽力而为') };
+	}
+	var d = (mark & 0x80) ? (mark & 0x7f) : (mark <= 63 ? mark : 0);
+	var name = DSCP_NAMES[d] || ('0x' + d.toString(16).toUpperCase());
+
+	var cls = 'badge-neutral';
+	var icon = SVG_ICONS.tag;
+	var category = _('非标标记');
+
+	if (d === 46 || d === 44) {
+		cls = 'badge-danger';
+		icon = SVG_ICONS.voip;
+		category = _('VoIP 实时语音');
+	} else if (d === 34 || d === 36 || d === 38 || d === 26 || d === 28 || d === 30 || d === 32 || d === 40) {
+		cls = 'badge-warning';
+		icon = SVG_ICONS.media;
+		category = _('流媒体视频');
+	} else if (d === 18 || d === 20 || d === 22 || d === 10 || d === 12 || d === 14 || d === 16 || d === 24) {
+		cls = 'badge-info';
+		icon = SVG_ICONS.biz;
+		category = _('关键事务交互');
+	} else if (d === 48 || d === 56) {
+		cls = 'badge-success';
+		icon = SVG_ICONS.ctrl;
+		category = _('网络协议控制');
+	} else if (d === 1 || d === 8) {
+		cls = 'badge-neutral';
+		icon = SVG_ICONS.scavenger;
+		category = _('低优清道夫');
+	} else if (d === 0) {
+		return { dscp: 0, name: 'CS0', label: '— #CS0', cls: 'badge-neutral', icon: '', category: _('尽力而为') };
+	}
+
+	return {
+		dscp: d,
+		name: name,
+		label: '#' + name,
+		cls: cls,
+		icon: icon,
+		category: category
+	};
+}
+
+var TCP_STATE_MAP = {
+	'ESTABLISHED': { text: 'ESTAB', cls: 'badge-success', title: _('连接稳态: ESTABLISHED (硬件全速线速转发中)') },
+	'SYN_SENT':    { text: 'SYN-S', cls: 'badge-warning', title: _('连接握手: SYN_SENT (客户端主动握手，等待 ACK)') },
+	'SYN_RECV':    { text: 'SYN-R', cls: 'badge-warning', title: _('连接握手: SYN_RECV (服务端收到 SYN，已回应)') },
+	'FIN_WAIT':    { text: 'FIN-W', cls: 'badge-neutral', title: _('连接释放: FIN_WAIT (等待对端释放确认)') },
+	'TIME_WAIT':   { text: 'TIM-W', cls: 'badge-neutral', title: _('等待超时: TIME_WAIT (已关闭，防旧分节干扰)') },
+	'CLOSE':       { text: 'CLOSE', cls: 'badge-neutral', title: _('连接已关: CLOSE (已断开，套接字已销毁)') },
+	'CLOSE_WAIT':  { text: 'CLS-W', cls: 'badge-neutral', title: _('等待关闭: CLOSE_WAIT (等待本地应用关闭套接字)') },
+	'LAST_ACK':    { text: 'L-ACK', cls: 'badge-neutral', title: _('最后确认: LAST_ACK (等待最后的断开确认)') }
+};
 
 var FLOW_COLS = [
-	{ key: 'proto', title: _('协议 (Proto)'),  hint: _('传输层网络协议 (TCP/UDP)'), num: false, get: function(f) { return (f.proto || 'TCP').toUpperCase(); } },
-	{ key: 'src',   title: _('源地址 (Src)'),   hint: _('会话发起端 IP 地址与端口号'), num: false, get: function(f) { return (f.src || ''); } },
-	{ key: 'dst',   title: _('目的地址 (Dst)'), hint: _('会话对端/目标服务 IP 地址与端口号'), num: false, get: function(f) { return (f.dst || ''); } },
-	{ key: 'pkts',  title: _('报文数 (Pkts)'),  hint: _('该连接双向累计传输的数据包总数 (包含 NSS 硬件计数)'), num: true,  get: function(f) { return parseInt(f.pkts) || 0; } },
-	{ key: 'bytes', title: _('数据量 (Bytes)'), hint: _('该连接双向累计传输的数据字节总数 (包含 NSS 硬件计数)'), num: true,  get: function(f) { return parseInt(f.bytes) || 0; } }
+	{ key: 'proto', width: '98px',  title: _('协议'),     hint: _('传输层网络协议类型 (TCP/UDP/ICMP)'), num: false, get: function(f) { return (f.proto || 'TCP').toUpperCase(); } },
+	{ key: 'src',   width: '185px', title: _('源地址'),   hint: _('会话发起端 IP 地址与端口号'), num: false, get: function(f) { return (f.src || ''); } },
+	{ key: 'dst',   width: '185px', title: _('目的地址'), hint: _('会话对端/目标服务 IP 地址与端口号'), num: false, get: function(f) { return (f.dst || ''); } },
+	{ key: 'dscp',  width: '58px',  title: 'DSCP',        hint: _('IETF DiffServ 业务分级标牌与服务质量标识'), num: false, get: function(f) { return (f.dscpMeta ? f.dscpMeta.name : ''); } },
+	{ key: 'rate',  width: '132px', title: _('实时速率'), hint: _('客户端 V8 两帧差分计算的实时双向吞吐速率'), num: true,  get: function(f) { return f.bps || 0; } },
+	{ key: 'pkts',  width: '86px',  title: _('报文数'),   hint: _('该连接双向累计传输的数据包总数 (包含 NSS 硬件计数)'), num: true,  get: function(f) { return parseInt(f.pkts) || 0; } },
+	{ key: 'bytes', width: '74px',  title: _('数据量'),   hint: _('该连接双向累计传输的数据字节总数 (包含 NSS 硬件计数)'), num: true,  get: function(f) { return parseInt(f.bytes) || 0; } }
 ];
 
+// 幂等流表处理：同一份 RPC 响应对象仅计算一次速率差分并缓存于 d._processed，彻底根除切 Tab/排序/展开时速率归零 Bug
 function processFlowsData(d, hostHints) {
+	d = d || {};
+	if (d._processed) {
+		return d._processed;
+	}
+
 	var hostnames = d.hostnames || {};
 	var isInstalled = (d.installed !== 0);
-	var rawFlows = d.flows || d.data || [];
-
 	var clientMap = {};
 	var totalPkts = 0;
 	var totalBytes = 0;
@@ -1084,10 +1600,14 @@ function processFlowsData(d, hostHints) {
 		(devEntry.ip6addrs || []).forEach(function(ip) { ipToDevice[normIp(ip)] = dev; });
 	});
 
-	// ── 路由器本机多网络接口与 IP 地址统一全栈归集 (优先复用会话级静态画像) ──
 	var routerInfo = d.router || (staticProfile && staticProfile.router) || getSessionData('nss_router_device') || {};
 	var routerHostname = (routerInfo.hostname || window.location.hostname || 'czw').replace(/\.lan$/i, '');
 	var routerIps = Array.isArray(routerInfo.ips) ? routerInfo.ips.slice() : [];
+	if (d.router && Array.isArray(d.router.ips)) {
+		d.router.ips.forEach(function(rip) {
+			if (routerIps.indexOf(rip) === -1) routerIps.push(rip);
+		});
+	}
 	['127.0.0.1', '::1', 'localhost'].forEach(function(lip) {
 		if (routerIps.indexOf(lip) === -1) routerIps.push(lip);
 	});
@@ -1154,75 +1674,61 @@ function processFlowsData(d, hostHints) {
 	});
 
 	var normalizedFlows = [];
-	if (Array.isArray(d.data)) {
-		var tupleList = d.data;
-		for (var ti = 0; ti < tupleList.length; ti++) {
-			var t = tupleList[ti];
-			var fam = (t[0] === 6) ? 'ipv6' : 'ipv4';
-			var pStr = String(t[1] || 'TCP').toUpperCase();
-			var rSrc = String(t[2] || '');
-			var sp = t[3] || '';
-			var rDst = String(t[4] || '');
-			var dp = t[5] || '';
-			var pCount = parseInt(t[6]) || 0;
-			var bCount = parseInt(t[7]) || 0;
+	var tupleList = Array.isArray(d.data) ? d.data : [];
+	for (var ti = 0; ti < tupleList.length; ti++) {
+		var t = tupleList[ti];
+		var fam = (t[0] === 6) ? 'ipv6' : 'ipv4';
+		var pStr = String(t[1] || 'TCP').toUpperCase();
+		var rSrc = String(t[2] || '');
+		var sp = t[3] || '';
+		var rDst = String(t[4] || '');
+		var dp = t[5] || '';
+		var pCount = parseInt(t[6]) || 0;
+		var bCount = parseInt(t[7]) || 0;
+		var mark = parseInt(t[8]) || 0;
+		var state = String(t[9] || '');
 
-			normalizedFlows.push({
-				key: pStr + '_' + rSrc + ':' + sp + '_' + rDst + ':' + dp,
-				proto: pStr,
-				family: fam,
-				srcRaw: rSrc,
-				sport: sp,
-				src: formatEndpoint(rSrc, sp),
-				dstRaw: rDst,
-				dport: dp,
-				dst: formatEndpoint(rDst, dp),
-				pkts: pCount,
-				bytes: bCount
-			});
-		}
-	} else {
-		var rawFlows = d.flows || d.data || [];
-		normalizedFlows = rawFlows.map(function(f) {
-			var rawSrc = f.src || '';
-			var rawDst = f.dst || '';
-			var sport = f.sport || '';
-			var dport = f.dport || '';
-
-			var srcDisp = formatEndpoint(rawSrc, sport);
-			var dstDisp = formatEndpoint(rawDst, dport);
-
-			var pkts = (f.orig_pkts != null || f.repl_pkts != null)
-				? ((parseInt(f.orig_pkts) || 0) + (parseInt(f.repl_pkts) || 0))
-				: (parseInt(f.pkts) || 0);
-
-			var bytes = (f.orig_bytes != null || f.repl_bytes != null)
-				? ((parseInt(f.orig_bytes) || 0) + (parseInt(f.repl_bytes) || 0))
-				: (parseInt(f.bytes) || 0);
-
-			var protoStr = String(f.proto || 'TCP').toUpperCase();
-			var flowKey = protoStr + '_' + rawSrc + ':' + sport + '_' + rawDst + ':' + dport;
-
-			return {
-				key: flowKey,
-				proto: protoStr,
-				family: f.family || ((rawSrc.indexOf('.') !== -1) ? 'ipv4' : 'ipv6'),
-				srcRaw: rawSrc,
-				sport: sport,
-				src: srcDisp,
-				dstRaw: rawDst,
-				dport: dport,
-				dst: dstDisp,
-				pkts: pkts,
-				bytes: bytes
-			};
+		normalizedFlows.push({
+			key: pStr + '_' + rSrc + ':' + sp + '_' + rDst + ':' + dp,
+			proto: pStr,
+			family: fam,
+			srcRaw: rSrc,
+			sport: sp,
+			src: formatEndpoint(rSrc, sp),
+			dstRaw: rDst,
+			dport: dp,
+			dst: formatEndpoint(rDst, dp),
+			pkts: pCount,
+			bytes: bCount,
+			mark: mark,
+			state: state
 		});
 	}
 
+	var now = Date.now();
+	var dt = (prevFlowsTime > 0) ? (now - prevFlowsTime) / 1000 : 0;
+	var nextCache = {};
+
+	normalizedFlows.forEach(function(f) {
+		f.dscpMeta = getDscpMeta(f.mark);
+		var pf = prevFlowsCache[f.key];
+		f.bps = 0;
+		f.pps = 0;
+		if (pf && dt > 0.2) {
+			f.bps = Math.max(0, (f.bytes - pf.bytes) * 8 / dt);
+			f.pps = Math.max(0, (f.pkts - pf.pkts) / dt);
+		}
+		nextCache[f.key] = { bytes: f.bytes, pkts: f.pkts };
+	});
+	prevFlowsCache = nextCache;
+	prevFlowsTime = now;
+
 	var unknownPrivateIpFound = false;
+	var calcGlobalRate = 0;
 	normalizedFlows.forEach(function(f) {
 		totalPkts += f.pkts;
 		totalBytes += f.bytes;
+		calcGlobalRate += (f.bps || 0);
 
 		var rawSrc = f.srcRaw;
 		var dev = ipToDevice[rawSrc] || ipToDevice[normIp(rawSrc)];
@@ -1248,21 +1754,22 @@ function processFlowsData(d, hostHints) {
 				ipv6List: dev ? dev.ipv6 : (rawSrc.indexOf(':') !== -1 ? [rawSrc] : []),
 				totalPkts: 0,
 				totalBytes: 0,
+				totalBps: 0,
 				flowCount: 0,
 				protos: {}
 			};
 		}
 		clientMap[clientKey].totalPkts += f.pkts;
 		clientMap[clientKey].totalBytes += f.bytes;
+		clientMap[clientKey].totalBps += (f.bps || 0);
 		clientMap[clientKey].flowCount++;
 		clientMap[clientKey].protos[f.proto] = true;
 	});
+	nssGlobalRateBps = calcGlobalRate;
 
 	var clientsList = Object.keys(clientMap).map(function(k) { return clientMap[k]; });
 
-	// 反应式被动探活：仅当流表中出现未被识别的私网 IP 时，才静默触发一次轻量的主机映射重同步
 	if (unknownPrivateIpFound && !isResolvingHints) {
-		var now = Date.now();
 		if (now - lastHintProbeTime > 15000) {
 			lastHintProbeTime = now;
 			isResolvingHints = true;
@@ -1276,7 +1783,7 @@ function processFlowsData(d, hostHints) {
 		}
 	}
 
-	return {
+	d._processed = {
 		isInstalled: isInstalled,
 		rawFlows: normalizedFlows,
 		totalPkts: totalPkts,
@@ -1286,53 +1793,39 @@ function processFlowsData(d, hostHints) {
 		hostnames: hostnames,
 		ipToDevice: ipToDevice
 	};
+	return d._processed;
+}
+
+function renderClientRateContent(c) {
+	return (c.totalBps > 0)
+		? E('strong', { 'style': (c.totalBps > 1e6) ? 'color:var(--primary-color-high);' : '' }, [ fmtRate(c.totalBps) ])
+		: E('span', { 'style': 'color:var(--text-color-medium);' }, [ '—' ]);
 }
 
 function renderClientRow(c, onToggleExpand) {
-	var ipSummary = renderTooltipIpSummary(c);
-
-	var tooltipItems = [
-		_('客户端名称'), c.hostName,
-		_('MAC 地址'), c.mac ? E('code', {}, [ c.mac.toUpperCase() ]) : (c.isDevice ? _('虚拟/本地总线') : _('未知')),
-		_('硬件加速流量'), E('span', { 'style': 'font-weight:bold; color:var(--primary-color-high);' }, [
-			String.format('%1024.1mB', c.totalBytes) + ' (' + c.totalPkts.toLocaleString() + ' ' + _('pkts') + ')'
-		]),
-		_('活跃加速流'), E('span', { 'style': 'font-weight:600;' }, [
-			c.flowCount + ' ' + _('条并发连接')
-		]),
-		_('IPv4 地址'), ipSummary.v4,
-		_('IPv6 地址池'), ipSummary.v6
-	];
-
 	var isExpanded = !!expandedClientsMap[c.key];
 
-	var badgeChildren = [ (isExpanded ? '▲ ' : '▼ ') + '+' + c.v6Count + ' IPv6' ];
-	var expandBtn = (c.v6Count > 0) ? E('span', {
-		'class': 'badge badge-neutral ip-expand-toggle-btn',
-		'style': 'cursor:pointer; font-size:10px; padding:1px 5px; user-select:none;',
-		'title': isExpanded ? _('点击收起 IPv6 列表') : _('点击在行内展开全部 IPv6 地址并临时禁止 Hover 弹窗'),
+	var toggleBtnText = isExpanded
+		? ('▲ ' + _('收起'))
+		: ('▼ ' + _('详情') + (c.v6Count > 0 ? (' (+' + c.v6Count + ' IPv6)') : ''));
+
+	var expandBtn = E('span', {
+		'class': 'badge ' + (isExpanded ? 'badge-info' : 'badge-neutral') + ' ip-expand-toggle-btn',
+		'style': 'cursor:pointer; font-size:10px; padding:1px 6px; user-select:none;',
+		'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的完整硬件加速流量、MAC 与 IP 地址池详情'),
 		'click': function(ev) {
 			ev.stopPropagation();
 			expandedClientsMap[c.key] = !isExpanded;
 			if (onToggleExpand) onToggleExpand();
 		}
-	}, badgeChildren) : '';
+	}, [ toggleBtnText ]);
 
 	var cellTrigger = E('div', {
-		'class': 'client-trigger-box cbi-tooltip-container' + (isExpanded ? ' no-hover' : ''),
-		'style': 'display:flex; flex-direction:column; gap:2px; line-height:1.2; position:relative; cursor:default; width:100%;',
-		'mouseenter': function() {
-			if (this.classList.contains('no-hover')) return;
-			var pop = this.querySelector('.client-popover');
-			if (!pop) return;
-			var rect = this.getBoundingClientRect();
-			var spaceBelow = window.innerHeight - rect.bottom;
-			var spaceAbove = rect.top;
-			if (spaceBelow < 280 && spaceAbove > spaceBelow) {
-				pop.classList.add('popover-flip-up');
-			} else {
-				pop.classList.remove('popover-flip-up');
-			}
+		'class': 'client-trigger-box' + (isExpanded ? ' no-hover' : ''),
+		'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的完整硬件加速流量、MAC 与 IP 地址池详情'),
+		'click': function() {
+			expandedClientsMap[c.key] = !isExpanded;
+			if (onToggleExpand) onToggleExpand();
 		}
 	}, [
 		E('div', { 'style': 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
@@ -1341,9 +1834,6 @@ function renderClientRow(c, onToggleExpand) {
 		]),
 		E('div', { 'style': 'font-size:11px;' }, [
 			E('code', {}, [ c.ip ])
-		]),
-		E('span', { 'class': 'cbi-tooltip ifacebadge large client-popover' }, [
-			L.itemlist(E('span', { 'class': 'left', 'style': 'white-space:normal;' }), tooltipItems)
 		])
 	]);
 
@@ -1353,39 +1843,84 @@ function renderClientRow(c, onToggleExpand) {
 	});
 
 	return E('tr', { 'class': 'tr', 'data-key': c.key }, [
-		E('td', { 'class': 'td', 'data-title': _('终端设备 (Client)') }, [
-			cellTrigger
-		]),
-		E('td', { 'class': 'td', 'data-title': 'Conns', 'data-col': 'conns', 'style': 'white-space:nowrap;' }, [ c.flowCount + ' ' + _('条连接') ]),
-		E('td', { 'class': 'td', 'data-title': 'Pkts', 'data-col': 'pkts', 'style': 'white-space:nowrap;' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
-		E('td', { 'class': 'td', 'data-title': 'Bytes', 'data-col': 'bytes', 'style': 'white-space:nowrap;' }, [ String.format('%1024.1mB', c.totalBytes) ]),
-		E('td', { 'class': 'td', 'data-title': 'Proto', 'data-col': 'protos' }, [
+		E('td', { 'class': 'td', 'style': 'width:210px;' }, [ cellTrigger ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate', 'style': 'width:108px;' }, [ renderClientRateContent(c) ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'conns', 'style': 'width:92px;' }, [ c.flowCount + ' ' + _('条连接') ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts', 'style': 'width:115px;' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'bytes', 'style': 'width:96px;' }, [ String.format('%1024.1mB', c.totalBytes) ]),
+		E('td', { 'class': 'td', 'data-col': 'protos', 'style': 'width:110px;' }, [
 			E('div', { 'style': 'display:inline-flex; gap:4px; flex-wrap:wrap;' }, protoBadges)
 		])
 	]);
 }
 
+function renderFlowProtoContent(f) {
+	var protoName = (f.proto || 'TCP').toUpperCase();
+	var protoCls = (protoName === 'TCP') ? 'badge-info' : (protoName === 'UDP') ? 'badge-warning' : 'badge-neutral';
+	var protoBadge = E('span', {
+		'class': 'badge ' + protoCls + ' tcp-proto-badge',
+		'title': _('传输层协议: %s').format(protoName)
+	}, [ protoName ]);
+
+	var stateMeta = (protoName === 'TCP' && f.state && f.state !== '—')
+		? (TCP_STATE_MAP[f.state] || { text: f.state.slice(0, 5), cls: 'badge-neutral', title: _('连接状态: ') + f.state })
+		: null;
+	var stateBadge = stateMeta ? E('span', {
+		'class': 'badge ' + stateMeta.cls + ' tcp-badge-5char',
+		'title': stateMeta.title
+	}, [ stateMeta.text ]) : '';
+
+	return E('div', { 'style': 'display:inline-flex; align-items:center; gap:3px;' }, [ protoBadge, stateBadge ].filter(Boolean));
+}
+
+function renderFlowRateContent(f) {
+	var rateText = fmtRate(f.bps || 0);
+	var ppsText = fmtPps(f.pps);
+	return [
+		E('strong', { 'style': (f.bps > 1e6) ? 'color:var(--primary-color-high);' : '' }, [ rateText ]),
+		ppsText ? E('span', { 'style': 'font-size:10px; color:var(--text-color-medium); margin-left:4px;' }, [ '(' + ppsText + ')' ]) : ''
+	];
+}
+
 function renderFlowRow(f, hostnames, ipToDevice) {
 	var dev = ipToDevice[f.srcRaw] || ipToDevice[normIp(f.srcRaw)];
-	var srcName = dev ? (dev.name || dev.mac) : hostnames[f.srcRaw];
+	var srcFullName = dev ? (dev.name || dev.mac) : hostnames[f.srcRaw];
+	var srcShortName = srcFullName ? srcFullName.replace(/\s*\([^)]*\)$/, '') : '';
 	var dstDev = ipToDevice[f.dstRaw] || ipToDevice[normIp(f.dstRaw)];
-	var dstName = dstDev ? (dstDev.name || dstDev.mac) : hostnames[f.dstRaw];
-	var protoCls = (f.proto === 'TCP') ? 'badge-info' : (f.proto === 'UDP') ? 'badge-warning' : 'badge-neutral';
+	var dstFullName = dstDev ? (dstDev.name || dstDev.mac) : hostnames[f.dstRaw];
+	var dstShortName = dstFullName ? dstFullName.replace(/\s*\([^)]*\)$/, '') : '';
+
+	var dmeta = f.dscpMeta || getDscpMeta(f.mark);
+	var dscpEl = E('span', {
+		'class': 'badge ' + dmeta.cls,
+		'style': 'white-space:nowrap; display:inline-flex; align-items:center; font-size:10px; padding:1px 6px;',
+		'title': (dmeta.category ? (dmeta.category + ' • ') : '') + 'mark: ' + (f.mark || 0) + ' (DSCP ' + dmeta.dscp + ')'
+	});
+	if (dmeta.icon) dscpEl.innerHTML = dmeta.icon + dmeta.label;
+	else dscpEl.textContent = dmeta.label;
 
 	return E('tr', { 'class': 'tr', 'data-key': f.key }, [
-		E('td', { 'class': 'td', 'data-title': 'Proto', 'style': 'white-space:nowrap;' }, [
-			badge(protoCls, f.proto || 'TCP')
+		E('td', { 'class': 'td', 'data-col': 'proto', 'style': 'width:98px; padding-left:4px !important; padding-right:4px !important;' }, [ renderFlowProtoContent(f) ]),
+		E('td', {
+			'class': 'td',
+			'style': 'width:185px;',
+			'title': (srcFullName ? (srcFullName + ' • ') : '') + (f.src || '-')
+		}, [
+			srcShortName ? E('strong', { 'style': 'margin-right:5px;' }, [ srcShortName ]) : '',
+			E('code', { 'style': 'font-size:11px;' }, [ f.src || '-' ])
 		]),
-		E('td', { 'class': 'td', 'data-title': 'Src' }, [
-			srcName ? E('strong', { 'style': 'white-space:nowrap; margin-right:6px;' }, [ srcName ]) : '',
-			E('code', { 'style': 'font-size:11px; white-space:nowrap;' }, [ f.src || '-' ])
+		E('td', {
+			'class': 'td',
+			'style': 'width:185px;',
+			'title': (dstFullName ? (dstFullName + ' • ') : '') + (f.dst || '-')
+		}, [
+			dstShortName ? E('strong', { 'style': 'margin-right:5px;' }, [ dstShortName ]) : '',
+			E('code', { 'style': 'font-size:11px;' }, [ f.dst || '-' ])
 		]),
-		E('td', { 'class': 'td', 'data-title': 'Dst' }, [
-			dstName ? E('strong', { 'style': 'white-space:nowrap; margin-right:6px;' }, [ dstName ]) : '',
-			E('code', { 'style': 'font-size:11px; white-space:nowrap;' }, [ f.dst || '-' ])
-		]),
-		E('td', { 'class': 'td', 'data-title': 'Pkts', 'data-col': 'pkts', 'style': 'white-space:nowrap;' }, [ (f.pkts || 0).toLocaleString() + ' pkts' ]),
-		E('td', { 'class': 'td', 'data-title': 'Bytes', 'data-col': 'bytes', 'style': 'white-space:nowrap;' }, [ String.format('%1024.1mB', f.bytes || 0) ])
+		E('td', { 'class': 'td', 'data-col': 'dscp', 'style': 'width:58px;' }, [ dscpEl ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate', 'style': 'width:132px;' }, renderFlowRateContent(f)),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts', 'style': 'width:86px;' }, [ (f.pkts || 0).toLocaleString() + ' pkts' ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'bytes', 'style': 'width:74px;' }, [ String.format('%1024.1mB', f.bytes || 0) ])
 	]);
 }
 
@@ -1426,7 +1961,7 @@ function patchClientRows(tbody, clientsList, onToggleExpand) {
 	if (!clientsList.length) {
 		dom.content(tbody, [
 			E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-				E('td', { 'class': 'td', 'colspan': '5', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
+				E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 					_('当前暂无活跃的客户端硬件加速流')
 				])
 			])
@@ -1434,7 +1969,6 @@ function patchClientRows(tbody, clientsList, onToggleExpand) {
 		return;
 	}
 
-	// 彻底回收清理任何空状态占位行（杜绝占位残留缺陷）
 	tbody.querySelectorAll('tr:not([data-key]), tr[data-empty], .tr-empty-placeholder').forEach(function(ph) {
 		if (ph.parentNode === tbody) {
 			tbody.removeChild(ph);
@@ -1460,6 +1994,9 @@ function patchClientRows(tbody, clientsList, onToggleExpand) {
 			var bytesTd = row.querySelector('[data-col="bytes"]');
 			if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', c.totalBytes);
 
+			var rateTd = row.querySelector('[data-col="rate"]');
+			if (rateTd) dom.content(rateTd, [ renderClientRateContent(c) ]);
+
 			var protoDiv = row.querySelector('[data-col="protos"] > div');
 			if (protoDiv) {
 				var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
@@ -1469,60 +2006,45 @@ function patchClientRows(tbody, clientsList, onToggleExpand) {
 				dom.content(protoDiv, protoBadges);
 			}
 
-			var tooltipSpan = row.querySelector('.cbi-tooltip');
-			if (tooltipSpan) {
-				var ipSummary = renderTooltipIpSummary(c);
-				var tooltipItems = [
-					_('客户端名称'), c.hostName,
-					_('MAC 地址'), c.mac ? E('code', {}, [ c.mac.toUpperCase() ]) : (c.isDevice ? _('虚拟/本地总线') : _('未知')),
-					_('硬件加速流量'), E('span', { 'style': 'font-weight:bold; color:var(--primary-color-high);' }, [
-						String.format('%1024.1mB', c.totalBytes) + ' (' + c.totalPkts.toLocaleString() + ' ' + _('pkts') + ')'
-					]),
-					_('活跃加速流'), E('span', { 'style': 'font-weight:600;' }, [
-						c.flowCount + ' ' + _('条并发连接')
-					]),
-					_('IPv4 地址'), ipSummary.v4,
-					_('IPv6 地址池'), ipSummary.v6
-				];
-				dom.content(tooltipSpan, [ L.itemlist(E('span', { 'class': 'left', 'style': 'white-space:normal;' }), tooltipItems) ]);
+			var triggerBox = row.querySelector('.client-trigger-box');
+			if (triggerBox) {
+				var isExp = !!expandedClientsMap[c.key];
+				triggerBox.classList.toggle('no-hover', isExp);
+				var btn = triggerBox.querySelector('.ip-expand-toggle-btn');
+				if (btn) btn.textContent = isExp ? ('▲ ' + _('收起')) : ('▼ ' + _('详情') + (c.v6Count > 0 ? (' (+' + c.v6Count + ' IPv6)') : ''));
 			}
+		} else {
+			row = renderClientRow(c, onToggleExpand);
+		}
+		tbody.appendChild(row);
 
-				// 同步条目级状态
-				var triggerBox = row.querySelector('.client-trigger-box');
-				if (triggerBox) {
-					var isExp = !!expandedClientsMap[c.key];
-					if (isExp) {
-						triggerBox.classList.add('no-hover');
-					} else {
-						triggerBox.classList.remove('no-hover');
-					}
-					var btn = triggerBox.querySelector('.ip-expand-toggle-btn');
-					if (btn) btn.textContent = (isExp ? '▲ ' : '▼ ') + '+' + c.v6Count + ' IPv6';
-				}
-			} else {
-				row = renderClientRow(c, onToggleExpand);
-			}
-			tbody.appendChild(row);
-
-			// 跨列子行管理
-			var isExpRow = !!expandedClientsMap[c.key];
-			var detailRow = tbody.querySelector('tr[data-expand-for="' + c.key + '"]');
-			if (isExpRow && !detailRow) {
-				detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
-					E('td', { 'class': 'td', 'colspan': '5', 'style': 'padding: 6px 14px 10px 14px;' }, [
-						renderItemExpandPanel(c, function() {
-							expandedClientsMap[c.key] = false;
-							if (onToggleExpand) onToggleExpand();
-						})
-					])
+		var isExpRow = !!expandedClientsMap[c.key];
+		var detailRow = tbody.querySelector('tr[data-expand-for="' + c.key + '"]');
+		if (isExpRow && !detailRow) {
+			detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
+				E('td', { 'class': 'td', 'colspan': '6', 'style': 'padding: 6px 14px 10px 14px;' }, [
+					renderItemExpandPanel(c, function() {
+						expandedClientsMap[c.key] = false;
+						if (onToggleExpand) onToggleExpand();
+					})
+				])
+			]);
+			tbody.appendChild(detailRow);
+		} else if (isExpRow && detailRow) {
+			var detailTd = detailRow.querySelector('td');
+			if (detailTd) {
+				dom.content(detailTd, [
+					renderItemExpandPanel(c, function() {
+						expandedClientsMap[c.key] = false;
+						if (onToggleExpand) onToggleExpand();
+					})
 				]);
-				tbody.appendChild(detailRow);
-			} else if (isExpRow && detailRow) {
-				tbody.appendChild(detailRow);
-			} else if (!isExpRow && detailRow) {
-				detailRow.parentNode.removeChild(detailRow);
 			}
-		});
+			tbody.appendChild(detailRow);
+		} else if (!isExpRow && detailRow) {
+			detailRow.parentNode.removeChild(detailRow);
+		}
+	});
 
 	Object.keys(existingRows).forEach(function(k) {
 		if (existingRows[k].parentNode === tbody) {
@@ -1535,7 +2057,7 @@ function patchFlowRows(tbody, flowsToRender, hostnames, ipToDevice) {
 	if (!flowsToRender.length) {
 		dom.content(tbody, [
 			E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-				E('td', { 'class': 'td', 'colspan': '5', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
+				E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 					_('当前分类下暂无活跃硬件加速流')
 				])
 			])
@@ -1543,7 +2065,6 @@ function patchFlowRows(tbody, flowsToRender, hostnames, ipToDevice) {
 		return;
 	}
 
-	// 彻底回收清理任何空状态占位行（杜绝占位残留缺陷）
 	tbody.querySelectorAll('tr:not([data-key]), tr[data-empty], .tr-empty-placeholder').forEach(function(ph) {
 		if (ph.parentNode === tbody) {
 			tbody.removeChild(ph);
@@ -1559,11 +2080,18 @@ function patchFlowRows(tbody, flowsToRender, hostnames, ipToDevice) {
 		var row = existingRows[f.key];
 		if (row) {
 			delete existingRows[f.key];
+
+			var protoTd = row.querySelector('[data-col="proto"]');
+			if (protoTd) dom.content(protoTd, [ renderFlowProtoContent(f) ]);
+
 			var pktsTd = row.querySelector('[data-col="pkts"]');
 			if (pktsTd) pktsTd.textContent = (f.pkts || 0).toLocaleString() + ' pkts';
 
 			var bytesTd = row.querySelector('[data-col="bytes"]');
 			if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', f.bytes || 0);
+
+			var flowRateTd = row.querySelector('[data-col="rate"]');
+			if (flowRateTd) dom.content(flowRateTd, renderFlowRateContent(f));
 		} else {
 			row = renderFlowRow(f, hostnames, ipToDevice);
 		}
@@ -1588,22 +2116,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 	var hostnames = processed.hostnames;
 	var ipToDevice = processed.ipToDevice;
 
-	var scrollWrapAttrs = {
-		'id': 'flows-scroll-wrap',
-		'style': 'overflow-x:auto; width:100%; -webkit-overflow-scrolling:touch;',
-		'mouseenter': function() {
-			if (!isTableHovered) {
-				isTableHovered = true;
-				if (onRefreshToggle) onRefreshToggle();
-			}
-		},
-		'mouseleave': function() {
-			if (isTableHovered) {
-				isTableHovered = false;
-				if (onRefreshToggle) onRefreshToggle();
-			}
-		}
-	};
+	var scrollWrapAttrs = makeScrollWrapAttrs('flows-scroll-wrap', onRefreshToggle);
 
 	var filteredFlows = normalizedFlows;
 	if (flowSubTab === 'ipv4') {
@@ -1631,7 +2144,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		var arrow = isSorted ? (clientSortDir > 0 ? ' ▲' : ' ▼') : '';
 		return E('th', {
 			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'white-space:nowrap; cursor:pointer; user-select:none;',
+			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
 			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
 			'click': function() {
 				if (clientSortKey === col.key) {
@@ -1650,7 +2163,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		var arrow = isSorted ? (flowSortDir > 0 ? ' ▲' : ' ▼') : '';
 		return E('th', {
 			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'white-space:nowrap; cursor:pointer; user-select:none;',
+			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
 			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
 			'click': function() {
 				if (flowSortKey === col.key) {
@@ -1664,7 +2177,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		}, [ col.title + arrow ]);
 	});
 
-	var tabMenuItems = [
+	var subTabItems = [
 		{ id: 'clients', label: _('客户端聚合') },
 		{ id: 'all',     label: _('全量明细') },
 		{ id: 'ipv4',    label: _('IPv4 流') },
@@ -1676,7 +2189,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 			'data-tab': tab.id
 		}, [
 			E('a', {
-				'href': '#' + tab.id,
+				'href': '#',
 				'click': function(ev) {
 					ev.preventDefault();
 					if (flowSubTab === tab.id) return;
@@ -1686,6 +2199,11 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 			}, [ tab.label ])
 		]);
 	});
+
+	var subTabMenu = E('ul', {
+		'class': 'cbi-tabmenu',
+		'style': 'margin-bottom: 12px;'
+	}, subTabItems);
 
 	var tableBody;
 	if (!isInstalled) {
@@ -1709,13 +2227,13 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 			}, [ _('手动探活与重检 (Half-Open Probe)') ])
 		]);
 	} else if (flowSubTab === 'clients') {
-			var clientRows = [];
-			clientsList.forEach(function(c) {
-				var mainRow = renderClientRow(c, onSubTabSwitch);
-				clientRows.push(mainRow);
-				if (expandedClientsMap[c.key]) {
-					var detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
-						E('td', { 'class': 'td', 'colspan': '5', 'style': 'padding: 6px 14px 10px 14px;' }, [
+		var clientRows = [];
+		clientsList.forEach(function(c) {
+			var mainRow = renderClientRow(c, onSubTabSwitch);
+			clientRows.push(mainRow);
+			if (expandedClientsMap[c.key]) {
+				var detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
+					E('td', { 'class': 'td', 'colspan': '6', 'style': 'padding: 6px 14px 10px 14px;' }, [
 						renderItemExpandPanel(c, function() {
 							expandedClientsMap[c.key] = false;
 							if (onSubTabSwitch) onSubTabSwitch();
@@ -1729,7 +2247,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		if (!clientRows.length) {
 			clientRows = [
 				E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-					E('td', { 'class': 'td', 'colspan': '5', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
+					E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 						_('当前暂无活跃的客户端硬件加速流')
 					])
 				])
@@ -1737,7 +2255,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		}
 
 		tableBody = E('div', scrollWrapAttrs, [
-			E('table', { 'class': 'table' }, [
+			E('table', { 'class': 'table nss-fixed-table' }, [
 				E('thead', {}, [
 					E('tr', { 'class': 'tr table-titles' }, clientHeaders)
 				]),
@@ -1755,7 +2273,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		if (!flowRows.length) {
 			flowRows = [
 				E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-					E('td', { 'class': 'td', 'colspan': '5', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
+					E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
 						_('当前分类下暂无活跃硬件加速流')
 					])
 				])
@@ -1763,7 +2281,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		}
 
 		tableBody = E('div', scrollWrapAttrs, [
-			E('table', { 'class': 'table' }, [
+			E('table', { 'class': 'table nss-fixed-table' }, [
 				E('thead', {}, [
 					E('tr', { 'class': 'tr table-titles' }, flowHeaders)
 				]),
@@ -1798,13 +2316,46 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		])
 	]);
 
-	var secTable = E('div', { 'class': 'cbi-section' }, [
-		isInstalled ? E('ul', { 'class': 'cbi-tabmenu' }, tabMenuItems) : E('div'),
-		E('div', { 'class': 'cbi-section-node' }, [ tableBody ]),
-		E('div', { 'class': 'cbi-map-descr', 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:6px;' }, [
-			_('说明: 鼠标移入表格区域时自动挂起轮询以防打断浏览；移出表格或点击上方状态徽章可恢复实时刷新。')
+	var noticeBanner = E('div', { 'class': 'nss-notice-banner' }, [
+		E('div', {}, [
+			E('strong', {}, [ '💡 ' + _('实时调度说明：') ]),
+			_('鼠标移入下方表格任意区域自动挂起轮询刷新，移出表格自动恢复实时数据流；可点击常驻栏切换常亮或暂停档位。')
+		]),
+		E('div', { 'style': 'font-weight:600; color:var(--text-color-high); white-space:nowrap;' }, [
+			isInstalled ? (_('全网共 %d 条活跃加速流').format(rawFlows.length)) : ''
 		])
 	]);
+
+	var scrollProxyInner = E('div', { 'style': 'width: ' + (flowSubTab === 'clients' ? '740px' : '820px') + '; height: 1px;' });
+	var scrollProxy = E('div', { 'class': 'nss-scroll-proxy' }, [ scrollProxyInner ]);
+
+	var scrollSyncLock = false;
+	scrollProxy.addEventListener('scroll', function() {
+		if (scrollSyncLock) return;
+		scrollSyncLock = true;
+		var wrap = secTable.querySelector('#flows-scroll-wrap');
+		if (wrap) wrap.scrollLeft = scrollProxy.scrollLeft;
+		scrollSyncLock = false;
+	}, { passive: true });
+
+	var secTable = E('div', { 'class': 'cbi-section' }, [
+		isInstalled ? subTabMenu : E('div'),
+		isInstalled ? noticeBanner : E('div'),
+		isInstalled ? scrollProxy : E('div'),
+		E('div', { 'class': 'cbi-section-node' }, [ tableBody ])
+	]);
+
+	setTimeout(function() {
+		var wrap = secTable.querySelector('#flows-scroll-wrap');
+		if (wrap) {
+			wrap.addEventListener('scroll', function() {
+				if (scrollSyncLock) return;
+				scrollSyncLock = true;
+				scrollProxy.scrollLeft = wrap.scrollLeft;
+				scrollSyncLock = false;
+			}, { passive: true });
+		}
+	}, 0);
 
 	return E('div', {}, [ secSummary, secTable ]);
 }
@@ -1862,11 +2413,11 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 
 // ── 7. 子卡 E：流量档案与长期审计 (Traffic Audit) ──
 var AUDIT_COLS = [
-	{ key: 'client', title: _('终端设备 (Client)'), hint: _('局域网在线设备，点击「▼ +N IPv6」可展开完整 IPv6 地址池'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.mac || ''); } },
-	{ key: 'rx',     title: _('下行流量 (RX)'),     hint: _('该终端累计接收的网络下行数据量 (包含 NSS 硬件加速流量)'), num: true,  get: function(c) { return c.rx || 0; } },
-	{ key: 'tx',     title: _('上行流量 (TX)'),     hint: _('该终端累计发送的网络上行数据量 (包含 NSS 硬件加速流量)'), num: true,  get: function(c) { return c.tx || 0; } },
-	{ key: 'total',  title: _('总流量 (Total)'),    hint: _('该终端上行与下行双向累计网络吞吐总量'), num: true,  get: function(c) { return c.total || 0; } },
-	{ key: 'conns',  title: _('历史会话 (Conns)'),  hint: _('审计周期内该设备建立的 TCP/UDP 历史连接会话总数'), num: true,  get: function(c) { return c.conns || 0; } }
+	{ key: 'client', width: '220px', title: _('终端设备'), hint: _('局域网在线设备，点击「▼ +N IPv6」可展开完整 IPv6 地址池'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.mac || ''); } },
+	{ key: 'rx',     width: '150px', title: _('下行流量'), hint: _('该终端累计接收的网络下行数据量 (包含 NSS 硬件加速流量)'), num: true,  get: function(c) { return c.rx || 0; } },
+	{ key: 'tx',     width: '125px', title: _('上行流量'), hint: _('该终端累计发送的网络上行数据量 (包含 NSS 硬件加速流量)'), num: true,  get: function(c) { return c.tx || 0; } },
+	{ key: 'total',  width: '125px', title: _('总流量'),   hint: _('该终端上行与下行双向累计网络吞吐总量'), num: true,  get: function(c) { return c.total || 0; } },
+	{ key: 'conns',  width: '120px', title: _('历史会话'), hint: _('审计周期内该设备建立的 TCP/UDP 历史连接会话总数'), num: true,  get: function(c) { return c.conns || 0; } }
 ];
 
 var SVG_NS = 'http://www.w3.org/2000/svg';
@@ -2031,7 +2582,7 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 		var arrow = isSorted ? (auditSortDir > 0 ? ' ▲' : ' ▼') : '';
 		return E('th', {
 			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'white-space:nowrap; cursor:pointer; user-select:none;',
+			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
 			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
 			'click': function() {
 				if (auditSortKey === col.key) {
@@ -2050,44 +2601,28 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 	var rows = clientAuditList.map(function(c) {
 		var rxPct = grandTotal > 0 ? ((c.rx / grandTotal) * 100).toFixed(1) : '0.0';
 
-		var ipSummary = renderTooltipIpSummary(c);
-		var tooltipItems = [
-			_('客户端名称'), c.hostName,
-			_('MAC 地址'), E('code', {}, [ c.mac.toUpperCase() ]),
-			_('历史总流量'), E('span', { 'style': 'font-weight:bold; color:var(--primary-color-high);' }, [ String.format('%1024.1mB', c.total) ]),
-			_('下行 / 上行'), String.format('%1024.1mB', c.rx) + ' / ' + String.format('%1024.1mB', c.tx),
-			_('记录会话数'), c.conns.toLocaleString() + ' ' + _('条'),
-			_('IPv4 地址'), ipSummary.v4,
-			_('IPv6 地址池'), ipSummary.v6
-		];
-
 		var isExpanded = !!expandedClientsMap['audit_' + c.mac];
-		var expandBtn = (c.v6Count > 0) ? E('span', {
-			'class': 'badge badge-neutral ip-expand-toggle-btn',
-			'style': 'cursor:pointer; font-size:10px; padding:1px 5px; user-select:none;',
-			'title': isExpanded ? _('点击收起 IPv6 列表') : _('点击在行内展开全部 IPv6 地址并临时禁止 Hover 弹窗'),
+		var toggleBtnText = isExpanded
+			? ('▲ ' + _('收起'))
+			: ('▼ ' + _('详情') + (c.v6Count > 0 ? (' (+' + c.v6Count + ' IPv6)') : ''));
+
+		var expandBtn = E('span', {
+			'class': 'badge ' + (isExpanded ? 'badge-info' : 'badge-neutral') + ' ip-expand-toggle-btn',
+			'style': 'cursor:pointer; font-size:10px; padding:1px 6px; user-select:none;',
+			'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的历史流量与 IP 地址池详情'),
 			'click': function(ev) {
 				ev.stopPropagation();
 				expandedClientsMap['audit_' + c.mac] = !isExpanded;
 				if (onSortSwitch) onSortSwitch();
 			}
-		}, [ (isExpanded ? '▲ ' : '▼ ') + '+' + c.v6Count + ' IPv6' ]) : '';
+		}, [ toggleBtnText ]);
 
 		var cellTrigger = E('div', {
-			'class': 'client-trigger-box cbi-tooltip-container' + (isExpanded ? ' no-hover' : ''),
-			'style': 'display:flex; flex-direction:column; gap:2px; line-height:1.2; position:relative; cursor:default; width:100%;',
-			'mouseenter': function() {
-				if (this.classList.contains('no-hover')) return;
-				var pop = this.querySelector('.client-popover');
-				if (!pop) return;
-				var rect = this.getBoundingClientRect();
-				var spaceBelow = window.innerHeight - rect.bottom;
-				var spaceAbove = rect.top;
-				if (spaceBelow < 280 && spaceAbove > spaceBelow) {
-					pop.classList.add('popover-flip-up');
-				} else {
-					pop.classList.remove('popover-flip-up');
-				}
+			'class': 'client-trigger-box' + (isExpanded ? ' no-hover' : ''),
+			'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的历史流量与 IP 地址池详情'),
+			'click': function() {
+				expandedClientsMap['audit_' + c.mac] = !isExpanded;
+				if (onSortSwitch) onSortSwitch();
 			}
 		}, [
 			E('div', { 'style': 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
@@ -2096,40 +2631,35 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 			]),
 			E('div', { 'style': 'font-size:11px;' }, [
 				E('code', {}, [ c.ip !== '-' ? c.ip : c.mac.toUpperCase() ])
-			]),
-			E('span', { 'class': 'cbi-tooltip ifacebadge large client-popover' }, [
-				L.itemlist(E('span', { 'class': 'left', 'style': 'white-space:normal;' }), tooltipItems)
 			])
 		]);
 
-			var mainRow = E('tr', { 'class': 'tr', 'data-key': c.mac }, [
-			E('td', { 'class': 'td', 'data-title': _('终端设备 (Client)') }, [
-				cellTrigger
-			]),
-			E('td', { 'class': 'td', 'data-title': 'RX' }, [
+		var mainRow = E('tr', { 'class': 'tr', 'data-key': c.mac }, [
+			E('td', { 'class': 'td', 'style': 'width:220px;' }, [ cellTrigger ]),
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:150px;' }, [
 				E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-					E('span', { 'style': 'white-space:nowrap;' }, [ String.format('%1024.1mB', c.rx) ]),
+					E('span', {}, [ String.format('%1024.1mB', c.rx) ]),
 					E('span', { 'class': 'badge badge-neutral', 'style': 'font-size:10px;' }, [ rxPct + '%' ])
 				])
 			]),
-			E('td', { 'class': 'td', 'data-title': 'TX', 'style': 'white-space:nowrap;' }, [ String.format('%1024.1mB', c.tx) ]),
-			E('td', { 'class': 'td', 'data-title': 'Total', 'style': 'white-space:nowrap; font-weight:bold;' }, [ String.format('%1024.1mB', c.total) ]),
-			E('td', { 'class': 'td', 'data-title': 'Conns', 'style': 'white-space:nowrap;' }, [ c.conns.toLocaleString() ])
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px;' }, [ String.format('%1024.1mB', c.tx) ]),
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px; font-weight:bold;' }, [ String.format('%1024.1mB', c.total) ]),
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:120px;' }, [ c.conns.toLocaleString() ])
+		]);
+		if (isExpanded) {
+			var detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.mac }, [
+				E('td', { 'class': 'td', 'colspan': '5', 'style': 'padding: 6px 14px 10px 14px;' }, [
+					renderItemExpandPanel(c, function() {
+						expandedClientsMap['audit_' + c.mac] = false;
+						if (onSortSwitch) onSortSwitch();
+					})
+				])
 			]);
-			if (isExpanded) {
-				var detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.mac }, [
-					E('td', { 'class': 'td', 'colspan': '5', 'style': 'padding: 6px 14px 10px 14px;' }, [
-						renderItemExpandPanel(c, function() {
-							expandedClientsMap['audit_' + c.mac] = false;
-							if (onSortSwitch) onSortSwitch();
-						})
-					])
-				]);
-				return [ mainRow, detailRow ];
-			}
-			return [ mainRow ];
-		});
-		rows = [].concat.apply([], rows);
+			return [ mainRow, detailRow ];
+		}
+		return [ mainRow ];
+	});
+	rows = [].concat.apply([], rows);
 
 	if (!rows.length) {
 		rows = [
@@ -2151,15 +2681,15 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 				E('tbody', {}, [
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('审计周期总流量') ]),
-						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:bold;' }, [ String.format('%1024.1mB', grandTotal) ]),
+						E('td', { 'class': 'td left nss-num-cell', 'style': 'width:25%; font-weight:bold;' }, [ String.format('%1024.1mB', grandTotal) ]),
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('累计下行 / 累计上行') ]),
-						E('td', { 'class': 'td left', 'style': 'width:25%;' }, [
+						E('td', { 'class': 'td left nss-num-cell', 'style': 'width:25%;' }, [
 							String.format('%1024.1mB', totalRx) + ' / ' + String.format('%1024.1mB', totalTx)
 						])
 					]),
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('追踪会话总数') ]),
-						E('td', { 'class': 'td left', 'style': 'width:25%;' }, [ totalConns.toLocaleString() + ' ' + _('条会话') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'style': 'width:25%;' }, [ totalConns.toLocaleString() + ' ' + _('条会话') ]),
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('统计引擎') ]),
 						E('td', { 'class': 'td left', 'style': 'width:25%;' }, [
 							badge('badge-info', 'nlbwmon (tmpfs 内存级零磨损)')
@@ -2184,23 +2714,8 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 			E('span', {}, [ _('终端长期流量明细账单') ])
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [
-			E('div', {
-				'id': 'audit-scroll-wrap',
-				'style': 'overflow-x:auto; width:100%; -webkit-overflow-scrolling:touch;',
-				'mouseenter': function() {
-					if (!isTableHovered) {
-						isTableHovered = true;
-						if (onRefreshToggle) onRefreshToggle();
-					}
-				},
-				'mouseleave': function() {
-					if (isTableHovered) {
-						isTableHovered = false;
-						if (onRefreshToggle) onRefreshToggle();
-					}
-				}
-			}, [
-				E('table', { 'class': 'table' }, [
+			E('div', makeScrollWrapAttrs('audit-scroll-wrap', onRefreshToggle), [
+				E('table', { 'class': 'table nss-fixed-table' }, [
 					E('thead', {}, [
 						E('tr', { 'class': 'tr table-titles' }, auditHeaders)
 					]),
@@ -2209,7 +2724,7 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 			])
 		]),
 		E('div', { 'class': 'cbi-map-descr', 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:6px;' }, [
-			_('说明: 流量档案数据直接映射自 nlbwmon 内存驻留数据库 (-Z)，无闪存擦写开销；悬停设备单元格可查看对应终端的多网卡与地址池。')
+			_('说明: 流量档案数据直接映射自 nlbwmon 内存驻留数据库 (-Z)，无闪存擦写开销；点击设备单元格可展开对应终端的多网卡与地址池。')
 		])
 	]);
 
@@ -2237,6 +2752,8 @@ return view.extend({
 		var auditData     = null;
 		var hostHintsData = getSessionData('nss_host_hints');
 
+		sampleMetricsRate(metricsData.nss_bytes);
+
 		if (profileData.router) {
 			setSessionData('nss_router_device', profileData.router);
 		}
@@ -2246,7 +2763,6 @@ return view.extend({
 		}
 		var p = staticProfile || profileData;
 
-		// 检查 Hash 或路径参数以支持直接定位子卡
 		var hash = (window.location.hash || '').replace('#', '');
 		if (hash && ['status', 'control', 'ports', 'flows', 'audit'].indexOf(hash) !== -1) {
 			activeTab = hash;
@@ -2255,11 +2771,10 @@ return view.extend({
 			if (path.indexOf('/control') !== -1) activeTab = 'control';
 			else if (path.indexOf('/ports') !== -1) activeTab = 'ports';
 			else if (path.indexOf('/flows') !== -1) activeTab = 'flows';
-				else if (path.indexOf('/audit') !== -1) activeTab = 'audit';
+			else if (path.indexOf('/audit') !== -1) activeTab = 'audit';
 			else activeTab = 'status';
 		}
 
-		// 顶置常驻遥测总线状态栏容器
 		var stickyBarContainer = E('div');
 		var conflictContainer = E('div', {}, [ renderConflictBanner(metricsData) ]);
 
@@ -2288,19 +2803,63 @@ return view.extend({
 		}
 		renderSticky();
 
-		// 页面可见性监听 (失焦休眠，0 XHR)
-		document.addEventListener('visibilitychange', function() {
+		// 清理旧的全局监听器，杜绝 SPA 路由重入时的监听器累积泄漏
+		if (window._nssCleanupListeners) {
+			try { window._nssCleanupListeners(); } catch (e) {}
+		}
+
+		var onVisibilityChange = function() {
 			isPageVisible = !document.hidden;
 			renderSticky();
-			if (isPageVisible && !isPaused && !isTableHovered) {
+			if (isPageVisible && pollMode !== 'paused' && !isTableHovered) {
 				update();
 			}
+		};
+
+		var onWindowBlur = function() {
+			if (pollMode === 'auto' && !isIdleBackoff) {
+				isIdleBackoff = true;
+				renderSticky();
+			}
+		};
+
+		var onWindowFocus = function() {
+			lastUserActionTime = Date.now();
+			if (isIdleBackoff) {
+				isIdleBackoff = false;
+				renderSticky();
+				if (isPageVisible && pollMode !== 'paused' && !isTableHovered) {
+					forceUpdate();
+				}
+			}
+		};
+
+		var onUserActivity = function() {
+			lastUserActionTime = Date.now();
+			if (isIdleBackoff) {
+				isIdleBackoff = false;
+				renderSticky();
+			}
+		};
+
+		document.addEventListener('visibilitychange', onVisibilityChange);
+		window.addEventListener('blur', onWindowBlur);
+		window.addEventListener('focus', onWindowFocus);
+		['mousemove', 'keydown', 'click', 'scroll'].forEach(function(evtName) {
+			window.addEventListener(evtName, onUserActivity, { passive: true });
 		});
 
-		// 子卡内容挂载容器
+		window._nssCleanupListeners = function() {
+			document.removeEventListener('visibilitychange', onVisibilityChange);
+			window.removeEventListener('blur', onWindowBlur);
+			window.removeEventListener('focus', onWindowFocus);
+			['mousemove', 'keydown', 'click', 'scroll'].forEach(function(evtName) {
+				window.removeEventListener(evtName, onUserActivity);
+			});
+		};
+
 		var subCardContainer = E('div', { 'id': 'nss-subcard-mount' });
 
-		// 子选项卡渲染
 		var subTabsDef = [
 			{ id: 'status',  label: _('状态总览') },
 			{ id: 'control', label: _('控制防御') },
@@ -2333,6 +2892,7 @@ return view.extend({
 			});
 			dom.content(tabMenuContainer, items);
 		}
+
 		function refreshFlows(isIncremental) {
 			var curWrap = subCardContainer.querySelector('#flows-scroll-wrap');
 			var curScroll = curWrap ? curWrap.scrollLeft : 0;
@@ -2367,7 +2927,7 @@ return view.extend({
 			if (activeTab === 'status') {
 				dom.content(subCardContainer, renderStatusCard(metricsData, p));
 			} else if (activeTab === 'control') {
-				dom.content(subCardContainer, renderControlCard(settingsData, metricsData));
+				dom.content(subCardContainer, renderControlCard(settingsData, metricsData, p, renderSticky));
 			} else if (activeTab === 'ports') {
 				if (!portsData) {
 					dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取以太网物理端口数据…') ]));
@@ -2426,7 +2986,6 @@ return view.extend({
 		renderSubTabs();
 		renderActiveCard();
 
-		// ── 轮询任务调度 (常驻遥测栏持续运行，子卡按需按时拉取) ──
 		var forceUpdate = function() {
 			var tasks = [ callGetMetrics() ];
 			var flowBreaker = sessionStorage.getItem('nss_flows_installed');
@@ -2440,6 +2999,7 @@ return view.extend({
 			}
 			return Promise.all(tasks).then(function(res) {
 				metricsData = res[0] || {};
+				sampleMetricsRate(metricsData.nss_bytes);
 				renderSticky();
 				dom.content(conflictContainer, renderConflictBanner(metricsData));
 
@@ -2475,47 +3035,36 @@ return view.extend({
 					var newAuditWrap = subCardContainer.querySelector('#audit-scroll-wrap');
 					if (newAuditWrap && prevAuditScroll > 0) newAuditWrap.scrollLeft = prevAuditScroll;
 				}
-			}).catch(function(err) {
-				// 静默防抖，不打断用户浏览
-			});
+			}).catch(function() {});
 		};
 
-		// 全局用户活跃感应（鼠标移动、按键、点击、滚动）瞬时唤醒
-			var onUserActivity = function() {
-				lastUserActionTime = Date.now();
-				if (isIdleBackoff) {
-					isIdleBackoff = false;
-					renderSticky();
-				}
-			};
-			['mousemove', 'keydown', 'click', 'scroll'].forEach(function(evtName) {
-				window.addEventListener(evtName, onUserActivity, { passive: true });
-			});
+		var pollCounter = 0;
+		var update = function() {
+			if (!isPageVisible || pollMode === 'paused' || isTableHovered) {
+				renderSticky();
+				return Promise.resolve();
+			}
 
-			var pollCounter = 0;
-			var update = function() {
-				if (!isPageVisible || isPaused || isTableHovered) {
-					renderSticky();
-					return Promise.resolve();
-				}
-
-				// 自适应判断：是否已超时进入无操作挂机状态
+			if (pollMode === 'auto') {
 				var idleTime = Date.now() - lastUserActionTime;
 				if (idleTime > IDLE_TIMEOUT_MS && !isIdleBackoff) {
 					isIdleBackoff = true;
 					renderSticky();
 				}
+			} else if (pollMode === 'keep' && isIdleBackoff) {
+				isIdleBackoff = false;
+				renderSticky();
+			}
 
-				// 挂机退避控制：基准周期为 4s，挂机状态下每 3 次 tick (12s) 实际发起一次请求
-				pollCounter++;
-				if (isIdleBackoff && (pollCounter % 3 !== 0)) {
-					return Promise.resolve();
-				}
+			pollCounter++;
+			if (pollMode === 'auto' && isIdleBackoff && (pollCounter % 6 !== 0)) {
+				return Promise.resolve();
+			}
 
-				return forceUpdate();
-			};
+			return forceUpdate();
+		};
 
-			poll.add(update, POLL_NORMAL_INTERVAL);
+		poll.add(update, POLL_NORMAL_INTERVAL);
 
 		return E('div', { 'class': 'nss-dashboard-spa cbi-map' }, [
 			stickyBarContainer,

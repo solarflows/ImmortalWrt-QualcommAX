@@ -6,6 +6,8 @@
 
 PROFILE_JSON="/tmp/nss_profile.json"
 PROFILE_ENV="/tmp/nss_profile.env"
+MODULES_CACHE="/tmp/nss_modules.cache"
+MODULES_CACHE_TTL=30
 
 probe_soc() {
 	local compat=""
@@ -110,11 +112,26 @@ check_mod() {
 }
 
 probe_modules_state() {
+	# 模块加载状态不属于秒级遥测：30s TTL 缓存，避免每次 getMetrics 都对
+	# 未加载模块执行 /lib/modules glob（每个 check_mod 最多两次 ls，共 5 个模块）。
+	local now ts
+	now=$(date +%s)
+	if [ -s "$MODULES_CACHE" ]; then
+		. "$MODULES_CACHE" 2>/dev/null
+		if [ -n "$ts" ] && [ "$((now - ts))" -ge 0 ] 2>/dev/null && [ "$((now - ts))" -lt "$MODULES_CACHE_TTL" ] 2>/dev/null; then
+			return
+		fi
+	fi
+
 	mod_pppoe=$(check_mod "qca_nss_pppoe nss_connmgr_pppoe" "qca-nss-pppoe.ko nss-connmgr-pppoe.ko")
 	mod_vlan=$(check_mod "qca_nss_vlan qca_nss_vlan_mgr nss_vlan_mgr" "qca-nss-vlan.ko qca-nss-vlan-mgr.ko nss-vlan-mgr.ko")
 	mod_bridge=$(check_mod "qca_nss_bridge_mgr nss_bridge_mgr" "qca-nss-bridge-mgr.ko nss-bridge-mgr.ko")
 	mod_qdisc=$(check_mod "qca_nss_qdisc" "qca-nss-qdisc.ko")
 	mod_crypto=$(check_mod "qca_nss_crypto qca_nss_eip197 eip197" "qca-nss-crypto.ko qca-nss-eip197.ko eip197.ko")
+
+	printf 'ts=%s\nmod_pppoe=%s\nmod_vlan=%s\nmod_bridge=%s\nmod_qdisc=%s\nmod_crypto=%s\n' \
+		"$now" "$mod_pppoe" "$mod_vlan" "$mod_bridge" "$mod_qdisc" "$mod_crypto" \
+		> "$MODULES_CACHE.$$" 2>/dev/null && mv "$MODULES_CACHE.$$" "$MODULES_CACHE" 2>/dev/null
 }
 
 probe_sqm() {

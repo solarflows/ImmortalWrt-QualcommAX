@@ -1152,6 +1152,7 @@ var CLIENT_COLS = [
 var prevFlowsCache = {};
 var prevFlowsTime = 0;
 var nssGlobalRateBps = 0;
+var routerCtxCache = { hints: null, router: undefined, ipToDevice: null, routerDev: null };
 
 var DSCP_NAMES = {
 	0: 'CS0', 1: 'LE', 8: 'CS1', 10: 'AF11', 12: 'AF12', 14: 'AF13',
@@ -1244,91 +1245,105 @@ function processFlowsData(d, hostHints) {
 	var totalPkts = 0;
 	var totalBytes = 0;
 
-	var ipToDevice = {};
-	Object.keys(hostHints || {}).forEach(function(mac) {
-		var devEntry = hostHints[mac];
-		var dev = {
-			mac: mac,
-			name: (devEntry.name || '').replace(/\.lan$/i, ''),
-			ipv4: devEntry.ipaddrs ? [].concat(devEntry.ipaddrs) : [],
-			ipv6: devEntry.ip6addrs ? [].concat(devEntry.ip6addrs) : []
-		};
-		(devEntry.ipaddrs || []).forEach(function(ip) { ipToDevice[ip] = dev; });
-		(devEntry.ip6addrs || []).forEach(function(ip) { ipToDevice[normIp(ip)] = dev; });
-	});
+	// 路由器与设备映射只依赖 hostHints（与可选的 d.router），按引用缓存，
+	// 避免每个轮询周期重建约 80 行的对象图与排序
+	var ipToDevice, routerDev;
+	if (hostHints !== routerCtxCache.hints || d.router !== routerCtxCache.router || !routerCtxCache.ipToDevice) {
+		routerCtxCache.hints = hostHints;
+		routerCtxCache.router = d.router;
 
-	var routerInfo = d.router || (staticProfile && staticProfile.router) || getSessionData('nss_router_device') || {};
-	var routerHostname = (routerInfo.hostname || window.location.hostname || 'czw').replace(/\.lan$/i, '');
-	var routerIps = Array.isArray(routerInfo.ips) ? routerInfo.ips.slice() : [];
-	if (d.router && Array.isArray(d.router.ips)) {
-		d.router.ips.forEach(function(rip) {
-			if (routerIps.indexOf(rip) === -1) routerIps.push(rip);
+		ipToDevice = {};
+		Object.keys(hostHints || {}).forEach(function(mac) {
+			var devEntry = hostHints[mac];
+			var dev = {
+				mac: mac,
+				name: (devEntry.name || '').replace(/\.lan$/i, ''),
+				ipv4: devEntry.ipaddrs ? [].concat(devEntry.ipaddrs) : [],
+				ipv6: devEntry.ip6addrs ? [].concat(devEntry.ip6addrs) : []
+			};
+			(devEntry.ipaddrs || []).forEach(function(ip) { ipToDevice[ip] = dev; });
+			(devEntry.ip6addrs || []).forEach(function(ip) { ipToDevice[normIp(ip)] = dev; });
 		});
-	}
-	['127.0.0.1', '::1', 'localhost'].forEach(function(lip) {
-		if (routerIps.indexOf(lip) === -1) routerIps.push(lip);
-	});
 
-	var routerDev = null;
-	for (var ri = 0; ri < routerIps.length; ri++) {
-		var rip = routerIps[ri];
-		if (ipToDevice[rip] || ipToDevice[normIp(rip)]) {
-			routerDev = ipToDevice[rip] || ipToDevice[normIp(rip)];
-			break;
+		var routerInfo = d.router || (staticProfile && staticProfile.router) || getSessionData('nss_router_device') || {};
+		var routerHostname = (routerInfo.hostname || window.location.hostname || 'czw').replace(/\.lan$/i, '');
+		var routerIps = Array.isArray(routerInfo.ips) ? routerInfo.ips.slice() : [];
+		if (d.router && Array.isArray(d.router.ips)) {
+			d.router.ips.forEach(function(rip) {
+				if (routerIps.indexOf(rip) === -1) routerIps.push(rip);
+			});
 		}
-	}
-	if (!routerDev) {
-		Object.keys(ipToDevice).forEach(function(k) {
-			var candidate = ipToDevice[k];
-			if (candidate && candidate.name && candidate.name.toLowerCase() === routerHostname.toLowerCase()) {
-				routerDev = candidate;
-			}
+		['127.0.0.1', '::1', 'localhost'].forEach(function(lip) {
+			if (routerIps.indexOf(lip) === -1) routerIps.push(lip);
 		});
-	}
 
-	if (routerDev) {
-		routerDev.isRouter = true;
-		routerDev.name = routerHostname + ' (' + _('路由器本机') + ')';
-		if (!routerDev.ipv4) routerDev.ipv4 = [];
-		if (!routerDev.ipv6) routerDev.ipv6 = [];
-	} else {
-		routerDev = {
-			mac: '',
-			name: routerHostname + ' (' + _('路由器本机') + ')',
-			ipv4: [],
-			ipv6: [],
-			isRouter: true
-		};
-	}
-
-	routerIps.forEach(function(rip) {
-		if (!rip || rip === 'localhost') return;
-		if (rip.indexOf(':') !== -1) {
-			var nrip = normIp(rip);
-			if (routerDev.ipv6.indexOf(rip) === -1 && routerDev.ipv6.indexOf(nrip) === -1) {
-				routerDev.ipv6.push(rip);
+		routerDev = null;
+		for (var ri = 0; ri < routerIps.length; ri++) {
+			var rip = routerIps[ri];
+			if (ipToDevice[rip] || ipToDevice[normIp(rip)]) {
+				routerDev = ipToDevice[rip] || ipToDevice[normIp(rip)];
+				break;
 			}
-			ipToDevice[nrip] = routerDev;
-			ipToDevice[rip] = routerDev;
+		}
+		if (!routerDev) {
+			Object.keys(ipToDevice).forEach(function(k) {
+				var candidate = ipToDevice[k];
+				if (candidate && candidate.name && candidate.name.toLowerCase() === routerHostname.toLowerCase()) {
+					routerDev = candidate;
+				}
+			});
+		}
+
+		if (routerDev) {
+			routerDev.isRouter = true;
+			routerDev.name = routerHostname + ' (' + _('路由器本机') + ')';
+			if (!routerDev.ipv4) routerDev.ipv4 = [];
+			if (!routerDev.ipv6) routerDev.ipv6 = [];
 		} else {
-			if (routerDev.ipv4.indexOf(rip) === -1) {
-				routerDev.ipv4.push(rip);
-			}
-			ipToDevice[rip] = routerDev;
+			routerDev = {
+				mac: '',
+				name: routerHostname + ' (' + _('路由器本机') + ')',
+				ipv4: [],
+				ipv6: [],
+				isRouter: true
+			};
 		}
-	});
 
-	routerDev.ipv4.sort(function(a, b) {
-		function score(ip) {
-			if (ip.indexOf('192.168.') === 0) return 1;
-			if (ip.indexOf('10.') === 0 && ip.indexOf('100.') !== 0) return 2;
-			if (ip.indexOf('172.') === 0) return 3;
-			if (ip.indexOf('100.') === 0) return 4;
-			if (ip === '127.0.0.1') return 5;
-			return 6;
-		}
-		return score(a) - score(b);
-	});
+		routerIps.forEach(function(rip) {
+			if (!rip || rip === 'localhost') return;
+			if (rip.indexOf(':') !== -1) {
+				var nrip = normIp(rip);
+				if (routerDev.ipv6.indexOf(rip) === -1 && routerDev.ipv6.indexOf(nrip) === -1) {
+					routerDev.ipv6.push(rip);
+				}
+				ipToDevice[nrip] = routerDev;
+				ipToDevice[rip] = routerDev;
+			} else {
+				if (routerDev.ipv4.indexOf(rip) === -1) {
+					routerDev.ipv4.push(rip);
+				}
+				ipToDevice[rip] = routerDev;
+			}
+		});
+
+		routerDev.ipv4.sort(function(a, b) {
+			function score(ip) {
+				if (ip.indexOf('192.168.') === 0) return 1;
+				if (ip.indexOf('10.') === 0 && ip.indexOf('100.') !== 0) return 2;
+				if (ip.indexOf('172.') === 0) return 3;
+				if (ip.indexOf('100.') === 0) return 4;
+				if (ip === '127.0.0.1') return 5;
+				return 6;
+			}
+			return score(a) - score(b);
+		});
+
+		routerCtxCache.ipToDevice = ipToDevice;
+		routerCtxCache.routerDev = routerDev;
+	} else {
+		ipToDevice = routerCtxCache.ipToDevice;
+		routerDev = routerCtxCache.routerDev;
+	}
 
 	var normalizedFlows = [];
 	var tupleList = Array.isArray(d.data) ? d.data : [];
@@ -2275,7 +2290,7 @@ return view.extend({
 			window.addEventListener(evtName, onUserActivity, { passive: true });
 		});
 
-		window._nssCleanupListeners = function() {
+		var cleanupListeners = function() {
 			document.removeEventListener('visibilitychange', onVisibilityChange);
 			window.removeEventListener('blur', onWindowBlur);
 			window.removeEventListener('focus', onWindowFocus);
@@ -2283,6 +2298,7 @@ return view.extend({
 				window.removeEventListener(evtName, onUserActivity);
 			});
 		};
+		window._nssCleanupListeners = cleanupListeners;
 
 					var subCardContainer = E('div', { 'id': 'nss-subcard-mount' });
 
@@ -2473,7 +2489,21 @@ return view.extend({
 
 			var lastFetchTimestamp = 0;
 			var isFetchRunning = false;
+			// 轮询自卸载：render 返回与 LuCI 实际挂载 DOM 之间存在窗口期，此时 subCardContainer
+			// 尚未进文档，直接自杀会杀死轮询（即上次的 poll suicide 死锁）。
+			// 只有"见过挂载之后又脱离文档"才说明用户已导航离开，此时才卸载自身。
+			var everMounted = false;
 			var update = function() {
+				if (subCardContainer.isConnected) {
+					everMounted = true;
+				} else if (everMounted) {
+					if (poll && poll.remove) {
+						try { poll.remove(update); } catch (e) {}
+					}
+					cleanupListeners();
+					return Promise.resolve();
+				}
+
 				var now = Date.now();
 
 				if (!isPageVisible || pollMode === 'paused' || isTableHovered) {

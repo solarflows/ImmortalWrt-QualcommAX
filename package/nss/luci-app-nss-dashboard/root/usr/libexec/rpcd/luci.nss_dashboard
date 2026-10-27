@@ -12,19 +12,28 @@ ensure_profile() {
 
 get_profile() {
 	ensure_profile
-	if [ -s "$PROFILE_JSON" ]; then
-		cat "$PROFILE_JSON"
-	else
-		json_init
-		json_add_string "soc" "$(probe_soc)"
-		json_add_int "cores" "$(probe_npu_cores)"
-		json_add_string "fw_version" "$(probe_fw_version)"
-		json_add_string "fw_mask" "$(probe_fw_mask)"
-		json_add_string "nss_freq" "$(probe_nss_freq)"
-		json_add_int "sqm" "$(probe_sqm)"
-		add_modules_object
-		json_dump
-	fi
+
+	# getProfile 仅在视图 load() 调用一次（非轮询路径），此处现取而非回放开机档案：
+	# 开机时 uci-defaults 执行过早，LAN 地址尚未就绪、hostname 可能仍为 "(none)"，
+	# 而流表页的"路由器本机"归因依赖这里返回完整地址池。
+	# soc/fw/modules 等探测均有 /tmp 或 sysfs 缓存，整体代价为个位数 fork。
+	json_init
+	json_add_string "soc" "$(probe_soc)"
+	json_add_int "cores" "$(probe_npu_cores)"
+	json_add_string "fw_version" "$(probe_fw_version)"
+	json_add_string "fw_mask" "$(probe_fw_mask)"
+	json_add_string "nss_freq" "$(probe_nss_freq)"
+	json_add_int "sqm" "$(probe_sqm)"
+	add_modules_object
+	json_add_object "router"
+	json_add_string "hostname" "$(cat /proc/sys/kernel/hostname 2>/dev/null)"
+	json_add_array "ips"
+	for ip in $(ip -o addr show 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}'); do
+		json_add_string "" "$ip"
+	done
+	json_close_array
+	json_close_object
+	json_dump
 }
 
 get_metrics() {
@@ -165,19 +174,9 @@ get_flows() {
 		end
 		f:close()
 
-		local router_ips = {}
-		local rip_pipe = io.popen("ip -o addr show 2>/dev/null")
-		if rip_pipe then
-			for rline in rip_pipe:lines() do
-				local ip = rline:match("%s+inet6?%s+([%da-fA-F:.]+)[/%s]")
-				if ip and ip ~= "127.0.0.1" and ip ~= "::1" then
-					table.insert(router_ips, ip)
-				end
-			end
-			rip_pipe:close()
-		end
-
-		io.write(jc.stringify({installed=1, cols={"family","proto","src","sport","dst","dport","pkts","bytes","mark","state"}, data=items, router={ips=router_ips}}))
+		-- router 自识别交由前端完成：getProfile 的 router.ips 已覆盖此用途，
+		-- 此处不再 fork `ip -o addr show`（流表页激活时该调用每 4s 一次）
+		io.write(jc.stringify({installed=1, cols={"family","proto","src","sport","dst","dport","pkts","bytes","mark","state"}, data=items}))
 	' 2>/dev/null || printf '{"installed":1,"cols":[],"data":[]}\n'
 }
 

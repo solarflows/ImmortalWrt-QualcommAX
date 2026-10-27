@@ -491,11 +491,11 @@ git grep -n 'callGetStatus\|badge-tile-102'
 
 | 方法 | 参数 | 主要返回字段 | 消费方 |
 |---|---|---|---|
-| `luci.nss_dashboard.getProfile` | — | `soc` `cores` `fw_version` `fw_mask` `nss_freq` `sqm` `modules{}` `router{}` | main `load()` |
-| `getMetrics` | — | `nss_bytes` `cpu_ticks[8]` `core0_load` `core1_load` `cpu_temp` `radios[]` `heartbeat` `ecm_total` `ecm_v4/v6/tcp/udp/other` `conflict_detected` | main + `sampleMetricsRate` |
+| `luci.nss_dashboard.getProfile` | — | `soc` `cores` `fw_version` `fw_mask` `nss_freq` `sqm` `modules{}` `router{}`（**每次现取**：router 的 hostname/ips 为实时值，开机档案只作兜底） | main `load()` |
+| `getMetrics` | — | `nss_bytes` `cpu_ticks[8]` `core0_load` `core1_load` `cpu_temp` `radios[]` `heartbeat` `ecm_total` `ecm_v4/v6/tcp/udp/other` `conflict_detected` `modules{}`（30s 服务端缓存） | main + `sampleMetricsRate` |
 | `getStatus` | — | `getProfile` 字段 + `getMetrics` 字段的合并 | `12_nss.js` |
 | `getPorts` | — | `ports[]`：`ifnum` `netdev` `started` `carrier` `speed` `tx/rx_bytes` `tx/rx_host_pkts` `tx/rx_total` `tx/rx_offloaded` `tx/rx_offload_pct` | `fetchPortStats` → 端口页 |
-| `getFlows` | — | `installed` `data[]`（10 元组）`hostnames{}` | `processFlowsData` |
+| `getFlows` | — | `installed` `data[]`（10 元组）；**不再返回 `router`**（路由器地址池改由 getProfile 提供，消除每 4s 的 `ip` fork） | `processFlowsData` |
 | `getAudit` | — | `installed` `audit.columns[]` `audit.data[][]` | `renderAuditCard` |
 | `getSettings` / `setSettings` | 4 个标量 | `enabled` `crypto` `frequency` `auto_block` | 控制页 |
 | `network.device.status` | `name` | `up` `carrier` `speed` `statistics` | `fetchPortStats` |

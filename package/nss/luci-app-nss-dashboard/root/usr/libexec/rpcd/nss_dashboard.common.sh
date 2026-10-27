@@ -112,8 +112,8 @@ check_mod() {
 }
 
 probe_modules_state() {
-	# 模块加载状态不属于秒级遥测：30s TTL 缓存，避免每次 getMetrics 都对
-	# 未加载模块执行 /lib/modules glob（每个 check_mod 最多两次 ls，共 5 个模块）。
+	# 模块加载状态与冲突配置不属于秒级遥测：30s TTL 缓存，避免每次 getMetrics
+	# 都对未加载模块执行 /lib/modules glob，以及 fork uci 读 flow_offloading。
 	local now ts
 	now=$(date +%s)
 	if [ -s "$MODULES_CACHE" ]; then
@@ -129,8 +129,15 @@ probe_modules_state() {
 	mod_qdisc=$(check_mod "qca_nss_qdisc" "qca-nss-qdisc.ko")
 	mod_crypto=$(check_mod "qca_nss_crypto qca_nss_eip197 eip197" "qca-nss-crypto.ko qca-nss-eip197.ko eip197.ko")
 
-	printf 'ts=%s\nmod_pppoe=%s\nmod_vlan=%s\nmod_bridge=%s\nmod_qdisc=%s\nmod_crypto=%s\n' \
-		"$now" "$mod_pppoe" "$mod_vlan" "$mod_bridge" "$mod_qdisc" "$mod_crypto" \
+	# 软件分载冲突检测：读全局段（LuCI「网络→接口→全局网络选项」的实际写入处）；
+	# 兼容旧版本误写入 @device[0] 的残留值
+	conflict=0
+	flow_off=$(uci -q get network.globals.flow_offloading 2>/dev/null)
+	[ -z "$flow_off" ] && flow_off=$(uci -q get network.@device[0].flow_offloading 2>/dev/null)
+	[ "$flow_off" = "1" ] && conflict=1
+
+	printf 'ts=%s\nmod_pppoe=%s\nmod_vlan=%s\nmod_bridge=%s\nmod_qdisc=%s\nmod_crypto=%s\nconflict=%s\n' \
+		"$now" "$mod_pppoe" "$mod_vlan" "$mod_bridge" "$mod_qdisc" "$mod_crypto" "$conflict" \
 		> "$MODULES_CACHE.$$" 2>/dev/null && mv "$MODULES_CACHE.$$" "$MODULES_CACHE" 2>/dev/null
 }
 
@@ -232,9 +239,9 @@ add_dynamic_metrics() {
 	local wifi_offload=0
 	[ -d /sys/kernel/debug/ath11k ] && wifi_offload=1
 
-	local conflict=0
-	local flow_off=$(uci -q get network.@device[0].flow_offloading 2>/dev/null || echo 0)
-	[ "$flow_off" = "1" ] && conflict=1
+	# 冲突标志随模块探测走 30s TTL 缓存（见 probe_modules_state），
+	# 此处只需确保已探测——add_modules_object 末尾的调用会命中缓存
+	probe_modules_state
 
 	json_add_int "heartbeat" "${heartbeat:-0}"
 	json_add_double "nss_bytes" "${nss_bytes:-0}"

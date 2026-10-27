@@ -6,6 +6,7 @@
 'require ui';
 'require view.nss_dashboard.lib.util as util';
 'require view.nss_dashboard.lib.chips as chips';
+'require view.nss_dashboard.lib.datatable as DataTable';
 
 var callGetProfile = rpc.declare({
 	object: 'luci.nss_dashboard',
@@ -997,68 +998,65 @@ function fetchPortStats(portsData) {
 	});
 }
 
+var PORT_COLS = [
+	{ key: 'port',     width: '80px',  title: 'Port' },
+	{ key: 'speed',    width: '86px',  title: 'Speed' },
+	{ key: 'hwRatio',  width: '165px', title: 'HW %' },
+	{ key: 'hwPkts',   width: '140px', title: 'HW Pkts' },
+	{ key: 'hostPkts', width: '140px', title: 'Host Pkts' },
+	{ key: 'rxTx',     width: '155px', title: 'RX / TX' }
+];
+
 function renderPortsCard(d, onRefreshToggle) {
 	var ports = d.ports || [];
 
-	var rows = ports.map(function(p) {
-		var hwRatio = parseFloat(p.tx_offload_pct || p.rx_offload_pct || 0);
-		var offloaded = (parseInt(p.tx_offloaded || 0) + parseInt(p.rx_offloaded || 0));
-		var hostPkts = (parseInt(p.tx_host_pkts || 0) + parseInt(p.rx_host_pkts || 0));
-		var isUp = (p.started === 1 && p.speed !== '未连接');
-		var speedText = p.speed || (isUp ? _('已连接') : _('未连接'));
-		var speedCls = isUp ? 'badge-success' : 'badge-neutral';
+	var table = DataTable.create({
+		wrapId: 'ports-scroll-wrap',
+		tableClass: 'table nss-fixed-table',
+		cols: PORT_COLS,
+		sortable: false,
+		onHoverChange: function(hovered) {
+			isTableHovered = hovered;
+			if (onRefreshToggle) onRefreshToggle();
+		},
+		emptyText: _('当前暂未探测到已挂载的 NSS 物理以太网接口 (Host Stack Mode)'),
+		getKey: function(p) { return p.netdev || ('eth' + p.ifnum); },
+		renderRow: function(p) {
+			var hwRatio = parseFloat(p.tx_offload_pct || p.rx_offload_pct || 0);
+			var offloaded = (parseInt(p.tx_offloaded || 0) + parseInt(p.rx_offloaded || 0));
+			var hostPkts = (parseInt(p.tx_host_pkts || 0) + parseInt(p.rx_host_pkts || 0));
+			var isUp = (p.started === 1 && p.speed !== '未连接');
+			var speedText = p.speed || (isUp ? _('已连接') : _('未连接'));
+			var speedCls = isUp ? 'badge-success' : 'badge-neutral';
 
-		return E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td', 'style': 'width:80px;' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
-			E('td', { 'class': 'td', 'style': 'width:86px;' }, [
-				E('span', { 'class': 'badge ' + speedCls + ' badge-tile-64' }, [ speedText ])
-			]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:165px;' }, [
-				E('div', { 'style': 'display:flex; align-items:center; gap:6px;' }, [
-					E('div', { 'style': 'width:100px; flex-shrink:0;' }, [ progressbar(hwRatio, 100) ]),
-					E('span', { 'style': 'font-size:11px; font-weight:bold; width:40px; text-align:right;' }, [ hwRatio + '%' ])
+			return E('tr', { 'class': 'tr', 'data-key': p.netdev || ('eth' + p.ifnum) }, [
+				E('td', { 'class': 'td' }, [ E('strong', {}, [ p.netdev || ('eth' + p.ifnum) ]) ]),
+				E('td', { 'class': 'td' }, [
+					E('span', { 'class': 'badge ' + speedCls + ' badge-tile-64' }, [ speedText ])
+				]),
+				E('td', { 'class': 'td nss-num-cell' }, [
+					E('div', { 'style': 'display:flex; align-items:center; gap:6px;' }, [
+						E('div', { 'style': 'width:100px; flex-shrink:0;' }, [ progressbar(hwRatio, 100) ]),
+						E('span', { 'style': 'font-size:11px; font-weight:bold; width:40px; text-align:right;' }, [ hwRatio + '%' ])
+					])
+				]),
+				E('td', { 'class': 'td nss-num-cell' }, [ offloaded.toLocaleString() + ' pkts' ]),
+				E('td', { 'class': 'td nss-num-cell' }, [ hostPkts.toLocaleString() + ' pkts' ]),
+				E('td', { 'class': 'td nss-num-cell' }, [
+					String.format('%1024.1mB', (p.rx_bytes || 0)) + ' / ' + String.format('%1024.1mB', (p.tx_bytes || 0))
 				])
-			]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:140px;' }, [ offloaded.toLocaleString() + ' pkts' ]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:140px;' }, [ hostPkts.toLocaleString() + ' pkts' ]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:155px;' }, [
-				String.format('%1024.1mB', (p.rx_bytes || 0)) + ' / ' + String.format('%1024.1mB', (p.tx_bytes || 0))
-			])
-		]);
+			]);
+		}
 	});
 
-	if (!rows.length) {
-		rows = [
-			E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
-					_('当前暂未探测到已挂载的 NSS 物理以太网接口 (Host Stack Mode)')
-				])
-			])
-		];
-	}
+	table.update(ports);
 
 	var moduleBox = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('以太网物理端口线速卸载矩阵') ]),
 			badge('badge-success', _('硬件线速卸载监测'))
 		]),
-		E('div', { 'class': 'cbi-section-node' }, [
-			E('div', makeScrollWrapAttrs('ports-scroll-wrap', onRefreshToggle), [
-				E('table', { 'class': 'table nss-fixed-table' }, [
-					E('thead', {}, [
-						E('tr', { 'class': 'tr table-titles' }, [
-							E('th', { 'class': 'th', 'style': 'width:80px;' }, [ 'Port' ]),
-							E('th', { 'class': 'th', 'style': 'width:86px;' }, [ 'Speed' ]),
-							E('th', { 'class': 'th', 'style': 'width:165px;' }, [ 'HW %' ]),
-							E('th', { 'class': 'th', 'style': 'width:140px;' }, [ 'HW Pkts' ]),
-							E('th', { 'class': 'th', 'style': 'width:140px;' }, [ 'Host Pkts' ]),
-							E('th', { 'class': 'th', 'style': 'width:155px;' }, [ 'RX / TX' ])
-						])
-					]),
-					E('tbody', {}, rows)
-				])
-			])
-		])
+		E('div', { 'class': 'cbi-section-node' }, [ table.node ])
 	]);
 
 	return E('div', {}, [
@@ -1072,81 +1070,6 @@ function renderPortsCard(d, onRefreshToggle) {
 // ── 6. 子卡 D：硬件流表与聚合 (Flows) ──
 var WELL_KNOWN_PORTS = util.WELL_KNOWN_PORTS;
 var formatEndpoint = util.formatEndpoint.bind(util);
-
-/* ── DataTable Core Primitives ── */
-function renderTableHeaders(cols, sortKey, sortDir, onSort) {
-	return cols.map(function(col) {
-		var isSorted = (sortKey === col.key);
-		var arrow = isSorted ? (sortDir > 0 ? ' ▲' : ' ▼') : '';
-		return E('th', {
-			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
-			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
-			'click': function() {
-				if (sortKey === col.key) {
-					onSort(col.key, -sortDir);
-				} else {
-					onSort(col.key, col.num ? -1 : 1);
-				}
-			}
-		}, [ col.title + arrow ]);
-	});
-}
-
-function sortTableItems(items, cols, sortKey, sortDir) {
-	var curCol = cols.find(function(c) { return c.key === sortKey; }) || cols[0];
-	return items.sort(function(a, b) {
-		var va = curCol.get ? curCol.get(a) : a[curCol.key];
-		var vb = curCol.get ? curCol.get(b) : b[curCol.key];
-		if (curCol.num) return ((va || 0) - (vb || 0)) * sortDir;
-		return String(va || '').localeCompare(String(vb || '')) * sortDir;
-	});
-}
-
-function patchTableRows(tbody, items, renderRow, patchRow, emptyText, colSpan) {
-	if (!items.length) {
-		dom.content(tbody, [
-			E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-				E('td', { 'class': 'td', 'colspan': String(colSpan || 6), 'style': 'text-align:center; color:var(--text-color-medium);' }, [ emptyText ])
-			])
-		]);
-		return;
-	}
-
-	tbody.querySelectorAll('tr[data-empty], .tr-empty-placeholder, tr.tr-empty-placeholder').forEach(function(ph) {
-		if (ph.parentNode === tbody) tbody.removeChild(ph);
-	});
-
-	var existing = {};
-	tbody.querySelectorAll('tr[data-key]').forEach(function(r) {
-		existing[r.getAttribute('data-key')] = r;
-	});
-
-	items.forEach(function(item) {
-		var row = existing[item.key];
-		if (row) {
-			delete existing[item.key];
-			if (patchRow) patchRow(row, item);
-		} else {
-			row = renderRow(item);
-		}
-		tbody.appendChild(row);
-
-		// 若该项存在展开中的详情子行，将其按正确从属顺序紧随主行挂载，防止被全表 diff 覆盖冲刷
-		var expandRow = tbody.querySelector('tr[data-expand-for="' + item.key + '"]');
-		if (expandRow) {
-			tbody.appendChild(expandRow);
-		}
-	});
-
-	Object.keys(existing).forEach(function(k) {
-		if (existing[k].parentNode === tbody) {
-			var expandRow = tbody.querySelector('tr[data-expand-for="' + k + '"]');
-			if (expandRow && expandRow.parentNode === tbody) expandRow.parentNode.removeChild(expandRow);
-			tbody.removeChild(existing[k]);
-		}
-	});
-}
 
 function renderClientCell(c, expandKey, onToggle) {
 	var isExpanded = !!expandedClientsMap[expandKey];
@@ -1192,24 +1115,6 @@ function renderExpandRow(c, colSpan, expandKey, onToggle) {
 }
 
 var flowColFilters = {};
-
-function renderTableFilters(cols, filterMap, onFilterChange) {
-	return E('tr', { 'class': 'tr' }, cols.map(function(col) {
-		return E('td', { 'class': 'td' }, [
-			E('input', {
-				'type': 'text',
-				'class': 'cbi-input-text',
-				'style': 'width:100%; min-width:3em;',
-				'placeholder': _('过滤…'),
-				'value': filterMap[col.key] || '',
-				'input': function(ev) {
-					filterMap[col.key] = ev.target.value.trim().toLowerCase();
-					onFilterChange();
-				}
-			})
-		]);
-	}));
-}
 
 function getFilteredFlows(normalizedFlows, subtab, hostnames) {
 	var list = normalizedFlows;
@@ -1610,12 +1515,12 @@ function renderClientRow(c, onToggleExpand) {
 			if (onToggleExpand) onToggleExpand();
 		}
 	}, [
-		E('td', { 'class': 'td', 'style': 'width:210px;' }, [ renderClientCell(c, c.key, onToggleExpand) ]),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate', 'style': 'width:108px;' }, [ renderClientRateContent(c) ]),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'conns', 'style': 'width:92px;' }, [ c.flowCount + ' ' + _('条连接') ]),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts', 'style': 'width:115px;' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'bytes', 'style': 'width:96px;' }, [ String.format('%1024.1mB', c.totalBytes) ]),
-		E('td', { 'class': 'td', 'data-col': 'protos', 'style': 'width:110px;' }, [
+		E('td', { 'class': 'td' }, [ renderClientCell(c, c.key, onToggleExpand) ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate' }, [ renderClientRateContent(c) ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'conns' }, [ c.flowCount + ' ' + _('条连接') ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'bytes' }, [ String.format('%1024.1mB', c.totalBytes) ]),
+		E('td', { 'class': 'td', 'data-col': 'protos' }, [
 			E('div', { 'style': 'display:inline-flex; gap:4px; flex-wrap:wrap;' }, protoBadges)
 		])
 	]);
@@ -1666,10 +1571,9 @@ function renderFlowRow(f, hostnames, ipToDevice) {
 	}, [ dscpLabel ]);
 
 	return E('tr', { 'class': 'tr', 'data-key': f.key }, [
-		E('td', { 'class': 'td', 'data-col': 'proto', 'style': 'width:98px; padding-left:4px !important; padding-right:4px !important;' }, [ renderFlowProtoContent(f) ]),
+		E('td', { 'class': 'td', 'data-col': 'proto', 'style': 'padding-left:4px !important; padding-right:4px !important;' }, [ renderFlowProtoContent(f) ]),
 		E('td', {
 			'class': 'td',
-			'style': 'width:185px;',
 			'title': (srcFullName ? (srcFullName + ' • ') : '') + (f.src || '-')
 		}, [
 			srcShortName ? E('strong', { 'style': 'margin-right:5px;' }, [ srcShortName ]) : '',
@@ -1677,16 +1581,15 @@ function renderFlowRow(f, hostnames, ipToDevice) {
 		]),
 		E('td', {
 			'class': 'td',
-			'style': 'width:185px;',
 			'title': (dstFullName ? (dstFullName + ' • ') : '') + (f.dst || '-')
 		}, [
 			dstShortName ? E('strong', { 'style': 'margin-right:5px;' }, [ dstShortName ]) : '',
 			E('code', { 'style': 'font-size:11px;' }, [ f.dst || '-' ])
 		]),
-		E('td', { 'class': 'td', 'data-col': 'dscp', 'style': 'width:58px;' }, [ dscpEl ]),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate', 'style': 'width:132px;' }, renderFlowRateContent(f)),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts', 'style': 'width:86px;' }, [ (f.pkts || 0).toLocaleString() + ' pkts' ]),
-		E('td', { 'class': 'td nss-num-cell', 'data-col': 'bytes', 'style': 'width:74px;' }, [ String.format('%1024.1mB', f.bytes || 0) ])
+		E('td', { 'class': 'td', 'data-col': 'dscp' }, [ dscpEl ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate' }, renderFlowRateContent(f)),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts' }, [ (f.pkts || 0).toLocaleString() + ' pkts' ]),
+		E('td', { 'class': 'td nss-num-cell', 'data-col': 'bytes' }, [ String.format('%1024.1mB', f.bytes || 0) ])
 	]);
 }
 
@@ -1723,85 +1626,57 @@ function renderTruncationBanner(isTruncated, showAll, totalCount, onToggle) {
 	return E('div');
 }
 
-function patchClientRows(tbody, clientsList, onToggleExpand) {
-	patchTableRows(tbody, clientsList, function(c) {
-		return renderClientRow(c, onToggleExpand);
-	}, function(row, c) {
-		var isExp = !!expandedClientsMap[c.key];
+function patchClientRow(row, c) {
+	var isExp = !!expandedClientsMap[c.key];
 
-		row.classList.toggle('expanded', isExp);
-		row.title = isExp ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池');
+	row.classList.toggle('expanded', isExp);
+	row.title = isExp ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池');
 
-		var connsTd = row.querySelector('[data-col="conns"]');
-		if (connsTd) connsTd.textContent = c.flowCount + ' ' + _('条连接');
+	var connsTd = row.querySelector('[data-col="conns"]');
+	if (connsTd) connsTd.textContent = c.flowCount + ' ' + _('条连接');
 
-		var pktsTd = row.querySelector('[data-col="pkts"]');
-		if (pktsTd) pktsTd.textContent = c.totalPkts.toLocaleString() + ' pkts';
+	var pktsTd = row.querySelector('[data-col="pkts"]');
+	if (pktsTd) pktsTd.textContent = c.totalPkts.toLocaleString() + ' pkts';
 
-		var bytesTd = row.querySelector('[data-col="bytes"]');
-		if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', c.totalBytes);
+	var bytesTd = row.querySelector('[data-col="bytes"]');
+	if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', c.totalBytes);
 
-		var rateTd = row.querySelector('[data-col="rate"]');
-		if (rateTd) dom.content(rateTd, [ renderClientRateContent(c) ]);
+	var rateTd = row.querySelector('[data-col="rate"]');
+	if (rateTd) dom.content(rateTd, [ renderClientRateContent(c) ]);
 
-		var protoDiv = row.querySelector('[data-col="protos"] > div');
-		if (protoDiv) {
-			var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
-				var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
-				return badge(protoCls, pr);
-			});
-			dom.content(protoDiv, protoBadges);
+	var protoDiv = row.querySelector('[data-col="protos"] > div');
+	if (protoDiv) {
+		var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
+			var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
+			return badge(protoCls, pr);
+		});
+		dom.content(protoDiv, protoBadges);
+	}
+
+	var triggerBox = row.querySelector('.client-trigger-box');
+	if (triggerBox) {
+		triggerBox.classList.toggle('no-hover', isExp);
+		var expandBadge = triggerBox.querySelector('.client-expand-badge');
+		if (expandBadge) {
+			expandBadge.className = 'badge ' + (isExp ? 'badge-info' : 'badge-neutral') + ' client-expand-badge';
+			var arrowSpan = expandBadge.querySelector('span');
+			if (arrowSpan) arrowSpan.textContent = isExp ? '▾' : '▸';
 		}
-
-		var triggerBox = row.querySelector('.client-trigger-box');
-		if (triggerBox) {
-			triggerBox.classList.toggle('no-hover', isExp);
-			var expandBadge = triggerBox.querySelector('.client-expand-badge');
-			if (expandBadge) {
-				expandBadge.className = 'badge ' + (isExp ? 'badge-info' : 'badge-neutral') + ' client-expand-badge';
-				var arrowSpan = expandBadge.querySelector('span');
-				if (arrowSpan) arrowSpan.textContent = isExp ? '▾' : '▸';
-			}
-		}
-	}, _('当前暂无活跃的客户端硬件加速流'), 6);
-
-	clientsList.forEach(function(c) {
-		var isExp = !!expandedClientsMap[c.key];
-		var detailRow = tbody.querySelector('tr[data-expand-for="' + c.key + '"]');
-		var mainRow = tbody.querySelector('tr[data-key="' + c.key + '"]');
-		if (isExp && !detailRow && mainRow) {
-			mainRow.insertAdjacentElement('afterend', renderExpandRow(c, 6, c.key, onToggleExpand));
-		} else if (isExp && detailRow && mainRow) {
-			var detailTd = detailRow.querySelector('td');
-			if (detailTd) {
-				dom.content(detailTd, [ renderItemExpandPanel(c, function() {
-					expandedClientsMap[c.key] = false;
-					if (onToggleExpand) onToggleExpand();
-				}) ]);
-			}
-			mainRow.insertAdjacentElement('afterend', detailRow);
-		} else if (!isExp && detailRow) {
-			detailRow.parentNode.removeChild(detailRow);
-		}
-	});
+	}
 }
 
-function patchFlowRows(tbody, flowsToRender, hostnames, ipToDevice) {
-	patchTableRows(tbody, flowsToRender, function(f) {
-		return renderFlowRow(f, hostnames, ipToDevice);
-	}, function(row, f) {
-		var protoTd = row.querySelector('[data-col="proto"]');
-		if (protoTd) dom.content(protoTd, [ renderFlowProtoContent(f) ]);
+function patchFlowRow(row, f) {
+	var protoTd = row.querySelector('[data-col="proto"]');
+	if (protoTd) dom.content(protoTd, [ renderFlowProtoContent(f) ]);
 
-		var pktsTd = row.querySelector('[data-col="pkts"]');
-		if (pktsTd) pktsTd.textContent = (f.pkts || 0).toLocaleString() + ' pkts';
+	var pktsTd = row.querySelector('[data-col="pkts"]');
+	if (pktsTd) pktsTd.textContent = (f.pkts || 0).toLocaleString() + ' pkts';
 
-		var bytesTd = row.querySelector('[data-col="bytes"]');
-		if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', f.bytes || 0);
+	var bytesTd = row.querySelector('[data-col="bytes"]');
+	if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', f.bytes || 0);
 
-		var flowRateTd = row.querySelector('[data-col="rate"]');
-		if (flowRateTd) dom.content(flowRateTd, renderFlowRateContent(f));
-	}, _('当前分类下暂无活跃硬件加速流'), 7);
+	var flowRateTd = row.querySelector('[data-col="rate"]');
+	if (flowRateTd) dom.content(flowRateTd, renderFlowRateContent(f));
 }
 
 function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeTrigger) {
@@ -1815,25 +1690,66 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 	var hostnames = processed.hostnames;
 	var ipToDevice = processed.ipToDevice;
 
-	var scrollWrapAttrs = makeScrollWrapAttrs('flows-scroll-wrap', onRefreshToggle);
-
 	var filteredFlows = getFilteredFlows(normalizedFlows, flowSubTab, hostnames);
-	var clientsListSorted = clientsList.slice();
-	sortTableItems(clientsListSorted, CLIENT_COLS, clientSortKey, clientSortDir);
-	sortTableItems(filteredFlows, FLOW_COLS, flowSortKey, flowSortDir);
 
-	var clientHeaders = renderTableHeaders(CLIENT_COLS, clientSortKey, clientSortDir, function(k, d) {
-		clientSortKey = k; clientSortDir = d;
-		if (onSubTabSwitch) onSubTabSwitch();
+	var clientTable = DataTable.create({
+		wrapId: 'flows-scroll-wrap',
+		tableClass: 'table nss-fixed-table',
+		cols: CLIENT_COLS,
+		sortKey: clientSortKey,
+		sortDir: clientSortDir,
+		onSort: function(k, d) {
+			clientSortKey = k; clientSortDir = d;
+			if (onSubTabSwitch) onSubTabSwitch();
+		},
+		onHoverChange: function(hovered) {
+			isTableHovered = hovered;
+			if (onRefreshToggle) onRefreshToggle();
+		},
+		emptyText: _('当前暂无活跃的客户端硬件加速流'),
+		getKey: function(c) { return c.key; },
+		renderRow: function(c) {
+			return renderClientRow(c, onSubTabSwitch);
+		},
+		patchRow: function(row, c) {
+			patchClientRow(row, c);
+		},
+		renderExpandRow: function(c) {
+			if (!expandedClientsMap[c.key]) return null;
+			return renderItemExpandPanel(c, function() {
+				expandedClientsMap[c.key] = false;
+				if (onSubTabSwitch) onSubTabSwitch();
+			});
+		}
 	});
 
-	var flowHeaders = renderTableHeaders(FLOW_COLS, flowSortKey, flowSortDir, function(k, d) {
-		flowSortKey = k; flowSortDir = d;
-		if (onSubTabSwitch) onSubTabSwitch();
-	});
-
-	var flowFilterRow = renderTableFilters(FLOW_COLS, flowColFilters, function() {
-		updateFlowsTable(secTable.parentNode || document, d, hostHints, onSubTabSwitch);
+	var flowTable = DataTable.create({
+		wrapId: 'flows-scroll-wrap',
+		tableClass: 'table nss-fixed-table',
+		cols: FLOW_COLS,
+		sortKey: flowSortKey,
+		sortDir: flowSortDir,
+		filter: true,
+		filterMap: flowColFilters,
+		onSort: function(k, d) {
+			flowSortKey = k; flowSortDir = d;
+			if (onSubTabSwitch) onSubTabSwitch();
+		},
+		onFilterChange: function() {
+			if (onSubTabSwitch) onSubTabSwitch();
+		},
+		onHoverChange: function(hovered) {
+			isTableHovered = hovered;
+			if (onRefreshToggle) onRefreshToggle();
+		},
+		emptyText: _('当前分类下暂无活跃硬件加速流'),
+		getKey: function(f) { return f.key; },
+		renderRow: function(f) {
+			return renderFlowRow(f, hostnames, ipToDevice);
+		},
+		patchRow: function(row, f) {
+			patchFlowRow(row, f);
+		}
 	});
 
 	var subTabItems = [
@@ -1886,53 +1802,18 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 			}, [ _('手动探活与重检 (Half-Open Probe)') ])
 		]);
 	} else if (flowSubTab === 'clients') {
-		var clientRows = [];
-		clientsListSorted.forEach(function(c) {
-			clientRows.push(renderClientRow(c, onSubTabSwitch));
-			if (expandedClientsMap[c.key]) {
-				clientRows.push(renderExpandRow(c, 6, c.key, onSubTabSwitch));
-			}
-		});
-
-		if (!clientRows.length) {
-			clientRows = [
-				E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-					E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
-						_('当前暂无活跃的客户端硬件加速流')
-					])
-				])
-			];
-		}
-
-		tableBody = E('div', scrollWrapAttrs, [
-			E('table', { 'class': 'table nss-fixed-table' }, [
-				E('thead', {}, [ E('tr', { 'class': 'tr table-titles' }, clientHeaders) ]),
-				E('tbody', { 'id': 'flows-tbody', 'data-subtab': 'clients' }, clientRows)
-			])
-		]);
+		clientTable.update(clientsList);
+		clientTable.tbody.setAttribute('id', 'flows-tbody');
+		clientTable.tbody.setAttribute('data-subtab', 'clients');
+		tableBody = clientTable.node;
 	} else {
 		var isTruncated = (!showAllFlows && filteredFlows.length > MAX_FLOWS_RENDER);
 		var flowsToRender = isTruncated ? filteredFlows.slice(0, MAX_FLOWS_RENDER) : filteredFlows;
-
-		var flowRows = flowsToRender.map(function(f) {
-			return renderFlowRow(f, hostnames, ipToDevice);
-		});
-
-		if (!flowRows.length) {
-			flowRows = [
-				E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-					E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
-						_('当前分类下暂无活跃硬件加速流')
-					])
-				])
-			];
-		}
-
-		tableBody = E('div', scrollWrapAttrs, [
-			E('table', { 'class': 'table nss-fixed-table' }, [
-				E('thead', {}, [ E('tr', { 'class': 'tr table-titles' }, flowHeaders), flowFilterRow ]),
-				E('tbody', { 'id': 'flows-tbody', 'data-subtab': flowSubTab }, flowRows)
-			]),
+		flowTable.update(flowsToRender);
+		flowTable.tbody.setAttribute('id', 'flows-tbody');
+		flowTable.tbody.setAttribute('data-subtab', flowSubTab);
+		tableBody = E('div', {}, [
+			flowTable.node,
 			E('div', { 'id': 'flows-truncation-bar' }, [
 				renderTruncationBanner(isTruncated, showAllFlows, filteredFlows.length, onSubTabSwitch)
 			])
@@ -1995,33 +1876,36 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 				])
 			])
 		]) : E('div'),
-		isInstalled ? subTabMenu : E('div'),
-		isInstalled ? noticeBanner : E('div'),
-		isInstalled ? scrollProxy : E('div'),
-		E('div', { 'class': 'cbi-section-node' }, [ tableBody ])
-	]);
+			isInstalled ? subTabMenu : E('div'),
+			isInstalled ? noticeBanner : E('div'),
+			isInstalled ? scrollProxy : E('div'),
+			E('div', { 'class': 'cbi-section-node' }, [ tableBody ])
+		]);
 
-	scrollProxy.addEventListener('scroll', function() {
-		if (scrollSyncLock) return;
-		scrollSyncLock = true;
-		var wrap = mainSection.querySelector('#flows-scroll-wrap');
-		if (wrap) wrap.scrollLeft = scrollProxy.scrollLeft;
-		scrollSyncLock = false;
-	}, { passive: true });
+		mainSection._clientTable = clientTable;
+		mainSection._flowTable = flowTable;
 
-	setTimeout(function() {
-		var wrap = mainSection.querySelector('#flows-scroll-wrap');
-		if (wrap) {
-			wrap.addEventListener('scroll', function() {
-				if (scrollSyncLock) return;
-				scrollSyncLock = true;
-				scrollProxy.scrollLeft = wrap.scrollLeft;
-				scrollSyncLock = false;
-			}, { passive: true });
-		}
-	}, 0);
+		scrollProxy.addEventListener('scroll', function() {
+			if (scrollSyncLock) return;
+			scrollSyncLock = true;
+			var wrap = mainSection.querySelector('#flows-scroll-wrap');
+			if (wrap) wrap.scrollLeft = scrollProxy.scrollLeft;
+			scrollSyncLock = false;
+		}, { passive: true });
 
-	return mainSection;
+		setTimeout(function() {
+			var wrap = mainSection.querySelector('#flows-scroll-wrap');
+			if (wrap) {
+				wrap.addEventListener('scroll', function() {
+					if (scrollSyncLock) return;
+					scrollSyncLock = true;
+					scrollProxy.scrollLeft = wrap.scrollLeft;
+					scrollSyncLock = false;
+				}, { passive: true });
+			}
+		}, 0);
+
+		return mainSection;
 }
 
 function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSwitch) {
@@ -2052,17 +1936,19 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 	var pktsBytesEl = subCardContainer.querySelector('#flows-total-pkts-bytes');
 	if (pktsBytesEl) pktsBytesEl.textContent = processed.totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', processed.totalBytes) + ')';
 
+	var mainSection = subCardContainer.querySelector('.cbi-section') || subCardContainer;
 	if (flowSubTab === 'clients') {
-		var clientsListSorted = processed.clientsList.slice();
-		sortTableItems(clientsListSorted, CLIENT_COLS, clientSortKey, clientSortDir);
-		patchClientRows(tbody, clientsListSorted, onSubTabSwitch);
+		if (mainSection._clientTable) {
+			mainSection._clientTable.update(processed.clientsList);
+		}
 	} else {
 		var filtered = getFilteredFlows(processed.normalizedFlows, flowSubTab, processed.hostnames);
-		sortTableItems(filtered, FLOW_COLS, flowSortKey, flowSortDir);
 		var isTruncated = (!showAllFlows && filtered.length > MAX_FLOWS_RENDER);
 		var flowsToRender = isTruncated ? filtered.slice(0, MAX_FLOWS_RENDER) : filtered;
 
-		patchFlowRows(tbody, flowsToRender, processed.hostnames, processed.ipToDevice);
+		if (mainSection._flowTable) {
+			mainSection._flowTable.update(flowsToRender);
+		}
 
 		var truncEl = subCardContainer.querySelector('#flows-truncation-bar');
 		if (truncEl) {
@@ -2070,6 +1956,7 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 		}
 	}
 }
+
 // ── 7. 子卡 E：流量档案与长期审计 (Traffic Audit) ──
 var AUDIT_COLS = [
 	{ key: 'client', width: '220px', title: _('终端设备'), hint: _('局域网在线设备，点击「▼ +N IPv6」可展开完整 IPv6 地址池'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.mac || ''); } },
@@ -2173,57 +2060,60 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 	});
 
 	var grandTotal = totalRx + totalTx;
-
-	sortTableItems(clientAuditList, AUDIT_COLS, auditSortKey, auditSortDir);
-	var auditHeaders = renderTableHeaders(AUDIT_COLS, auditSortKey, auditSortDir, function(k, d) {
-		auditSortKey = k; auditSortDir = d;
-		if (onSortSwitch) onSortSwitch();
-	});
-
 	var topClients = clientAuditList.slice(0, 5);
 
-	var rows = clientAuditList.map(function(c) {
-		var rxPct = grandTotal > 0 ? ((c.rx / grandTotal) * 100).toFixed(1) : '0.0';
-		var isExpanded = !!expandedClientsMap['audit_' + c.mac];
+	var auditTable = DataTable.create({
+		wrapId: 'audit-scroll-wrap',
+		tableClass: 'table nss-fixed-table',
+		cols: AUDIT_COLS,
+		sortKey: auditSortKey,
+		sortDir: auditSortDir,
+		onSort: function(k, d) {
+			auditSortKey = k; auditSortDir = d;
+			if (onSortSwitch) onSortSwitch();
+		},
+		onHoverChange: function(hovered) {
+			isTableHovered = hovered;
+			if (onRefreshToggle) onRefreshToggle();
+		},
+		emptyText: _('当前暂未采集到终端历史流量数据'),
+		getKey: function(c) { return c.key; },
+		renderRow: function(c) {
+			var rxPct = grandTotal > 0 ? ((c.rx / grandTotal) * 100).toFixed(1) : '0.0';
+			var isExpanded = !!expandedClientsMap['audit_' + c.mac];
 
-		var mainRow = E('tr', {
-			'class': 'tr client-main-row' + (isExpanded ? ' expanded' : ''),
-			'data-key': c.key,
-			'title': isExpanded ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池'),
-			'click': function(ev) {
-				if (ev.target.closest('button, a, input')) return;
-				expandedClientsMap['audit_' + c.mac] = !isExpanded;
+			return E('tr', {
+				'class': 'tr client-main-row' + (isExpanded ? ' expanded' : ''),
+				'data-key': c.key,
+				'title': isExpanded ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池'),
+				'click': function(ev) {
+					if (ev.target.closest('button, a, input')) return;
+					expandedClientsMap['audit_' + c.mac] = !isExpanded;
+					if (onSortSwitch) onSortSwitch();
+				}
+			}, [
+				E('td', { 'class': 'td' }, [ renderClientCell(c, 'audit_' + c.mac, onSortSwitch) ]),
+				E('td', { 'class': 'td nss-num-cell' }, [
+					String.format('%1024.1mB', c.rx),
+					E('span', { 'style': 'font-size:10px; color:var(--text-color-medium); margin-left:4px;' }, [ '(' + rxPct + '%)' ])
+				]),
+				E('td', { 'class': 'td nss-num-cell' }, [ String.format('%1024.1mB', c.tx) ]),
+				E('td', { 'class': 'td nss-num-cell' }, [
+					E('strong', { 'style': 'color:var(--primary-color-high);' }, [ String.format('%1024.1mB', c.total) ])
+				]),
+				E('td', { 'class': 'td nss-num-cell' }, [ c.conns.toLocaleString() ])
+			]);
+		},
+		renderExpandRow: function(c) {
+			if (!expandedClientsMap['audit_' + c.mac]) return null;
+			return renderItemExpandPanel(c, function() {
+				expandedClientsMap['audit_' + c.mac] = false;
 				if (onSortSwitch) onSortSwitch();
-			}
-		}, [
-			E('td', { 'class': 'td', 'style': 'width:220px;' }, [ renderClientCell(c, 'audit_' + c.mac, onSortSwitch) ]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:150px;' }, [
-				String.format('%1024.1mB', c.rx),
-				E('span', { 'style': 'font-size:10px; color:var(--text-color-medium); margin-left:4px;' }, [ '(' + rxPct + '%)' ])
-			]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px;' }, [ String.format('%1024.1mB', c.tx) ]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px;' }, [
-				E('strong', { 'style': 'color:var(--primary-color-high);' }, [ String.format('%1024.1mB', c.total) ])
-			]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:120px;' }, [ c.conns.toLocaleString() ])
-		]);
-
-		if (isExpanded) {
-			return [ mainRow, renderExpandRow(c, 5, 'audit_' + c.mac, onSortSwitch) ];
+			});
 		}
-		return [ mainRow ];
 	});
-	rows = [].concat.apply([], rows);
 
-	if (!rows.length) {
-		rows = [
-			E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td', 'colspan': '5', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
-					_('当前暂未采集到终端历史流量数据')
-				])
-			])
-		];
-	}
+	auditTable.update(clientAuditList);
 
 	var summarySec = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
@@ -2267,16 +2157,7 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('终端长期流量明细账单') ])
 		]),
-		E('div', { 'class': 'cbi-section-node' }, [
-			E('div', makeScrollWrapAttrs('audit-scroll-wrap', onRefreshToggle), [
-				E('table', { 'class': 'table nss-fixed-table' }, [
-					E('thead', {}, [
-						E('tr', { 'class': 'tr table-titles' }, auditHeaders)
-					]),
-					E('tbody', {}, rows)
-				])
-			])
-		]),
+		E('div', { 'class': 'cbi-section-node' }, [ auditTable.node ]),
 		E('div', { 'class': 'cbi-map-descr', 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:6px;' }, [
 			_('说明: 流量档案数据直接映射自 nlbwmon 内存驻留数据库 (-Z)，无闪存擦写开销；点击设备单元格可展开对应终端的多网卡与地址池。')
 		])

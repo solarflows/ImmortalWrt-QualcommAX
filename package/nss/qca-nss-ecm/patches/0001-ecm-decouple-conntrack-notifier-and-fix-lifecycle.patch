@@ -10,7 +10,14 @@ Subject: [PATCH] qca-nss-ecm: decouple conntrack notifier, fix tail packet accou
      sync_conntrack to account tail packets into Linux conntrack acct before exit.
    - Guard ct->timeout updates with if (delta_jiffies && ...) so tail packet
      accounting never artificially extends defunct connection timeouts.
-   - Replace msleep_interruptible(4) with high-resolution usleep_range(3800, 4000).
+   - Replace msleep_interruptible(4) with high-resolution usleep_range_idle(3800, 4000).
+     usleep_range() puts the worker in TASK_UNINTERRUPTIBLE, and since the NSS
+     stats sync paces at ~100Hz, the 5s loadavg sampler almost always sees
+     exactly one D-state task, pinning load average at 1.0 despite ~97% idle
+     CPU. usleep_range_idle() (available since kernel 5.16, verified on 6.18)
+     sleeps in TASK_IDLE (TASK_UNINTERRUPTIBLE | TASK_NOLOAD): identical
+     uninterruptible semantics for a kworker, but excluded from load
+     average accounting.
    - In periodic stats sync, replace msleep_interruptible blocking inside the
      workqueue with non-blocking queue_delayed_work() rescheduling.
    - In ecm_nss_ipv4.c and ecm_nss_ipv6.c, relax stats sync timeout from 5000ms
@@ -117,7 +124,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	spin_unlock_bh(&ecm_nss_ipv4_lock);
 
 -	msleep_interruptible(ECM_NSS_IPV4_STATS_SYNC_UDELAY / 1000);
-+	usleep_range(ECM_NSS_IPV4_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV4_STATS_SYNC_UDELAY);
++	usleep_range_idle(ECM_NSS_IPV4_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV4_STATS_SYNC_UDELAY);
 
  	/*
  	 * If index is 0, we are starting a new round, but if we still have time remain
@@ -191,7 +198,7 @@ Signed-off-by: Husky <hyiy666@gmail.com>
  	spin_unlock_bh(&ecm_nss_ipv6_lock);
 
 -	msleep_interruptible(ECM_NSS_IPV6_STATS_SYNC_UDELAY / 1000);
-+	usleep_range(ECM_NSS_IPV6_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV6_STATS_SYNC_UDELAY);
++	usleep_range_idle(ECM_NSS_IPV6_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV6_STATS_SYNC_UDELAY);
 
  	/*
  	 * If index is 0, we are starting a new round, but if we still have time remain

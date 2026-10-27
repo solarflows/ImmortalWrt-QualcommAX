@@ -101,13 +101,6 @@ function cyclePollMode(onRefreshToggle) {
 	if (onRefreshToggle) onRefreshToggle();
 }
 
-function makeScrollWrapAttrs(id, onRefreshToggle) {
-	return util.makeScrollWrapAttrs(id, function(hovered) {
-		isTableHovered = hovered;
-		if (onRefreshToggle) onRefreshToggle();
-	});
-}
-
 var copyTextToClipboard = util.copyTextToClipboard.bind(util);
 
 function traceFlowByIp(targetIp) {
@@ -321,7 +314,7 @@ var calcCpuLoad = chips.calcCpuLoad.bind(chips);
 var sampleMetricsRate = chips.sampleMetricsRate.bind(chips);
 
 function progressbar(value, max, label) {
-	return chips.bar({ value: value, max: max, label: label, height: 13 });
+	return chips.bar({ value: value, max: max, label: label, disabledText: label || _('休眠待机'), height: 13 });
 }
 
 function hostCpuProgressbar(total, usr, sys, sirq) {
@@ -594,7 +587,6 @@ function renderConflictBanner(d) {
 function renderStatusCard(d, p) {
 	var mods = (d && d.modules) ? d.modules : ((p && p.modules) ? p.modules : {});
 	var spec = chips.buildSpec(d, p);
-	var mods = (d && d.modules) ? d.modules : ((p && p.modules) ? p.modules : {});
 	var totalConns = spec.conns;
 	var isDualNpu = spec.isDualNpu;
 	var npuLabel = spec.npuLabel;
@@ -1099,17 +1091,6 @@ function renderClientCell(c, expandKey, onToggle) {
 		]),
 		E('div', { 'style': 'font-size:11px; margin-top:3px; padding-left:4px;' }, [
 			E('code', {}, [ c.ip ])
-		])
-	]);
-}
-
-function renderExpandRow(c, colSpan, expandKey, onToggle) {
-	return E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
-		E('td', { 'class': 'td', 'colspan': String(colSpan) }, [
-			renderItemExpandPanel(c, function() {
-				expandedClientsMap[expandKey] = false;
-				if (onToggle) onToggle();
-			})
 		])
 	]);
 }
@@ -2060,7 +2041,16 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 	});
 
 	var grandTotal = totalRx + totalTx;
-	var topClients = clientAuditList.slice(0, 5);
+
+	// Top 5 榜单必须取自排序后的列表（跟随表格当前排序），否则拿到的是 nlbwmon 输出顺序的前 5 条
+	var chartCol = AUDIT_COLS.find(function(col) { return col.key === auditSortKey; }) || AUDIT_COLS[0];
+	var sortedForChart = clientAuditList.slice().sort(function(a, b) {
+		var va = chartCol.get ? chartCol.get(a) : a[chartCol.key];
+		var vb = chartCol.get ? chartCol.get(b) : b[chartCol.key];
+		if (chartCol.num) return ((va || 0) - (vb || 0)) * auditSortDir;
+		return String(va || '').localeCompare(String(vb || '')) * auditSortDir;
+	});
+	var topClients = sortedForChart.slice(0, 5);
 
 	var auditTable = DataTable.create({
 		wrapId: 'audit-scroll-wrap',
@@ -2484,16 +2474,6 @@ return view.extend({
 			var lastFetchTimestamp = 0;
 			var isFetchRunning = false;
 			var update = function() {
-				if (!document.getElementById('nss-subcard-mount')) {
-					if (poll && poll.remove) {
-						try { poll.remove(update); } catch (e) {}
-					}
-					if (window._nssCleanupListeners) {
-						try { window._nssCleanupListeners(); } catch (e) {}
-					}
-					return Promise.resolve();
-				}
-
 				var now = Date.now();
 
 				if (!isPageVisible || pollMode === 'paused' || isTableHovered) {

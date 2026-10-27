@@ -16,26 +16,23 @@ return baseclass.extend({
 		}
 		this.lastCpuTicksKey = key;
 
+		// 与旧实现保持一致的口径：dtot 含 irq/steal，load = (dtot - idle - iowait) / dtot
 		var totalLoad = 0, usrRate = 0, sysRate = 0, sirqRate = 0;
 		if (this.prevCpuTicks && this.prevCpuTicks.length >= 7) {
-			var u1 = this.prevCpuTicks[0], n1 = this.prevCpuTicks[1], s1 = this.prevCpuTicks[2],
-			    i1 = this.prevCpuTicks[3], w1 = this.prevCpuTicks[4], q1 = this.prevCpuTicks[5], sq1 = this.prevCpuTicks[6];
-			var u2 = cpuTicks[0], n2 = cpuTicks[1], s2 = cpuTicks[2],
-			    i2 = cpuTicks[3], w2 = cpuTicks[4], q2 = cpuTicks[5], sq2 = cpuTicks[6];
-
-			var usrDiff  = (u2 + n2) - (u1 + n1);
-			var sysDiff  = (s2) - (s1);
-			var sirqDiff = (q2 + sq2) - (q1 + sq1);
-			var idleDiff = (i2 + w2) - (i1 + w1);
-
-			var activeDiff = usrDiff + sysDiff + sirqDiff;
-			var totalDiff  = activeDiff + idleDiff;
-
-			if (totalDiff > 0) {
-				totalLoad = Math.min(100, Math.max(0, (activeDiff / totalDiff) * 100));
-				usrRate   = Math.min(100, Math.max(0, (usrDiff / totalDiff) * 100));
-				sysRate   = Math.min(100, Math.max(0, (sysDiff / totalDiff) * 100));
-				sirqRate  = Math.min(100, Math.max(0, (sirqDiff / totalDiff) * 100));
+			var du = cpuTicks[0] - this.prevCpuTicks[0];
+			var dn = cpuTicks[1] - this.prevCpuTicks[1];
+			var ds = cpuTicks[2] - this.prevCpuTicks[2];
+			var did = cpuTicks[3] - this.prevCpuTicks[3];
+			var dio = cpuTicks[4] - this.prevCpuTicks[4];
+			var dirq = cpuTicks[5] - this.prevCpuTicks[5];
+			var dsirq = cpuTicks[6] - this.prevCpuTicks[6];
+			var dst = (cpuTicks[7] || 0) - (this.prevCpuTicks[7] || 0);
+			var dtot = du + dn + ds + did + dio + dirq + dsirq + dst;
+			if (dtot > 0) {
+				totalLoad = Math.max(0, Math.min(100, ((dtot - did - dio) / dtot) * 100));
+				usrRate = Math.max(0, Math.min(100, ((du + dn) / dtot) * 100));
+				sysRate = Math.max(0, Math.min(100, (ds / dtot) * 100));
+				sirqRate = Math.max(0, Math.min(100, (dsirq / dtot) * 100));
 			}
 		}
 		this.prevCpuTicks = cpuTicks.slice();
@@ -43,18 +40,24 @@ return baseclass.extend({
 		return this.cachedCpuLoad;
 	},
 
-	prevMetricsNssBytes: 0,
+	prevMetricsNssBytes: null,
 	prevMetricsNssTime: 0,
 	nssMetricsRateBps: 0,
 
-	sampleMetricsRate: function(curBytes) {
+	sampleMetricsRate: function(nssBytes) {
+		// 与旧实现保持一致：计数 3 秒不变则归零，避免空闲时吞吐冻结在旧值
+		var curBytes = parseFloat(nssBytes);
+		if (isNaN(curBytes) || curBytes <= 0) return this.nssMetricsRateBps;
+
 		var now = Date.now();
-		curBytes = parseFloat(curBytes) || 0;
-		if (this.prevMetricsNssTime > 0 && curBytes >= this.prevMetricsNssBytes) {
+		if (this.prevMetricsNssBytes !== null && this.prevMetricsNssTime > 0) {
 			var dt = (now - this.prevMetricsNssTime) / 1000;
-			if (dt > 0.5) {
-				var diff = curBytes - this.prevMetricsNssBytes;
-				this.nssMetricsRateBps = Math.max(0, (diff * 8) / dt);
+			if (dt >= 0.4) {
+				if (curBytes > this.prevMetricsNssBytes) {
+					this.nssMetricsRateBps = ((curBytes - this.prevMetricsNssBytes) * 8) / dt;
+				} else if (curBytes === this.prevMetricsNssBytes && dt >= 3.0) {
+					this.nssMetricsRateBps = 0;
+				}
 				this.prevMetricsNssBytes = curBytes;
 				this.prevMetricsNssTime = now;
 			}

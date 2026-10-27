@@ -17,18 +17,18 @@ function ensureCss() {
 			'id': id,
 			'rel': 'stylesheet',
 			'type': 'text/css',
-			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261024a'
+			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261027i'
 		}));
-	} else if (el.href.indexOf('?v=261024a') === -1) {
-		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261024a';
+	} else if (el.href.indexOf('?v=261027i') === -1) {
+		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261027i';
 	}
 }
 
 function progressbar(value, max, label) {
 	if (value === null || value === undefined) {
 		return E('div', {
-			'class': 'cbi-progressbar disabled nss-bar',
-			'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0; border:none !important;',
+			'class': 'nss-bar nss-bar-disabled',
+			'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 			'title': label || _('待机 (无服务固件或未引导)')
 		}, [
 			E('span', { 'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:10px; font-weight:500; color:var(--text-color-medium);' }, [
@@ -40,14 +40,15 @@ function progressbar(value, max, label) {
 	    mn = parseFloat(max) || 100,
 	    pc = Math.min(100, Math.max(0, Math.floor((100 / mn) * vn)));
 
+	var fillClass = (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : 'nss-bar-fill';
 	return E('div', {
-		'class': 'cbi-progressbar nss-bar',
-		'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0; border:none !important;',
+		'class': 'nss-bar',
+		'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 		'title': '%s%%'.format(vn)
 	}, [
 		E('div', {
-			'style': 'width:%.2f%%; height:100%; transition:width 0.3s ease;'.format(pc),
-			'class': (vn > 80) ? 'cbi-progressbar-danger' : (vn > 50) ? 'cbi-progressbar-warn' : ''
+			'class': fillClass,
+			'style': 'width:%.2f%%; height:100%; transition:width 0.3s ease;'.format(pc)
 		}),
 		label ? E('span', { 'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:10px; font-weight:bold; white-space:nowrap;' }, [
 			label
@@ -63,13 +64,13 @@ function hostCpuProgressbar(total, usr, sys, sirq) {
 	var label = 'usr: ' + u.toFixed(0) + '% • sys: ' + s.toFixed(0) + '% • sirq: ' + si.toFixed(0) + '%';
 
 	return E('div', {
-		'class': 'cbi-progressbar nss-bar nss-stacked',
-		'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0; display:flex; border:none !important; background:var(--background-color-medium, rgba(255,255,255,0.08));',
+		'class': 'nss-bar nss-stacked',
+		'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0; display:flex; border-radius:999px;',
 		'title': 'CPU: ' + vn.toFixed(1) + '% (usr: ' + u.toFixed(1) + '% sys: ' + s.toFixed(1) + '% sirq: ' + si.toFixed(1) + '%)'
-	}, [
-		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
+		}, [
+		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; border-radius:0; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; border-radius:0; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; border-radius:0; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
 		E('span', {
 			'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:10px; font-weight:600; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.9);'
 		}, [ label ])
@@ -101,12 +102,13 @@ function moduleChip(name, state, customLabel, customTitle) {
 		label = customLabel || _('未安装');
 	}
 	return E('span', {
-		'class': 'badge ' + cls + ' badge-tile-102',
-		'title': customTitle || (name + ': ' + label)
+		'class': 'badge ' + cls,
+		'title': customTitle || (name + ': ' + label),
+		'style': 'white-space:nowrap !important;'
 	}, [
 		(state === 2) ? E('span', { 'class': 'badge-dot' }) : '',
 		E('strong', {}, [ name + ':' ]),
-		label
+		' ' + label
 	]);
 }
 
@@ -115,11 +117,12 @@ function tempBadge(label, temp) {
 	var cls = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
 
 	return E('span', {
-		'class': 'badge ' + cls + ' badge-tile-102',
-		'title': label + ': ' + t.toFixed(1) + '°C'
+		'class': 'badge ' + cls,
+		'title': label + ': ' + t.toFixed(1) + '°C',
+		'style': 'white-space:nowrap !important;'
 	}, [
 		E('strong', {}, [ label + ':' ]),
-		t.toFixed(1) + '°C'
+		' ' + t.toFixed(1) + '°C'
 	]);
 }
 
@@ -177,7 +180,7 @@ return baseclass.extend({
 				sqmChip = moduleChip('SQM', 0, _('未安装'), _('未安装 sqm-scripts'));
 			}
 
-			var modulesView = E('div', { 'style': 'display:inline-grid; grid-template-columns:repeat(3, 102px); gap:6px;' }, [
+			var modulesView = E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:8px 6px; max-width:340px;' }, [
 				moduleChip('Bridge', mods.bridge),
 				moduleChip('PPPoE', mods.pppoe),
 				wifiChip,
@@ -249,25 +252,25 @@ return baseclass.extend({
 
 			var computeLoadView = E('div', { 'style': 'display:flex; flex-direction:column; gap:4px; max-width:280px;' }, computeLoadElements);
 
-			// 4. 硬件遥测 (ECM 并发流表与物理温度 102px 等宽卡片网格)
+			// 4. 硬件遥测 (ECM 并发流表与物理温度 自适应弹性卡片容器)
 			var totalConns = (d.ecm_total != null) ? d.ecm_total : 0;
 			var ecmTotalChip = E('span', {
 				'class': 'badge badge-info',
 				'title': _('当前经由高通增强连接管理器 (ECM) 卸载的硬件并发流总数'),
-				'style': 'min-width:102px; justify-content:center; box-sizing:border-box; text-align:center; margin:1px 0;'
+				'style': 'white-space:nowrap !important;'
 			}, [
 				E('span', { 'class': 'badge-dot' }),
 				E('strong', {}, [ 'ECM:' ]),
-				totalConns.toLocaleString() + ' ' + _('流')
+				' ' + totalConns.toLocaleString() + ' ' + _('流')
 			]);
 
 			var ecmDistChip = E('span', {
 				'class': 'badge badge-neutral',
 				'title': 'IPv4: ' + (d.ecm_v4 || 0) + ' • IPv6: ' + (d.ecm_v6 || 0),
-				'style': 'min-width:102px; justify-content:center; box-sizing:border-box; text-align:center; margin:1px 0;'
+				'style': 'white-space:nowrap !important;'
 			}, [
 				E('strong', {}, [ 'v4/v6:' ]),
-				(d.ecm_v4 || 0) + '/' + (d.ecm_v6 || 0)
+				' ' + (d.ecm_v4 || 0) + '/' + (d.ecm_v6 || 0)
 			]);
 
 			var tempElements = [];
@@ -281,11 +284,11 @@ return baseclass.extend({
 			}
 
 			var telemetryView = E('div', {
-				'style': 'display:inline-grid; grid-template-columns:repeat(3, 102px); gap:6px;'
+				'style': 'display:flex; flex-wrap:wrap; gap:8px 6px; max-width:340px;'
 			}, [ ecmTotalChip, ecmDistChip ].concat(tempElements));
 
 			// 统一 4 行纯净架构 (各行 Label 统一为规整 4 字，消除长短参差)
-			var table = E('table', { 'class': 'table' }, [
+			var table = E('table', { 'id': 'nss-status-table', 'class': 'table' }, [
 				row(_('协处理器'), specView, _('高通网络子系统 (NSS) 硬件卸载协处理器，内置独立双核/单核与硬件转发管线，微码执行物理层线速转发')),
 				row(_('模块状态'), modulesView, _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)')),
 				row(_('核心负载'), computeLoadView, _('Linux 主机通用处理器 (usr/sys/sirq) 与 NSS 硬件协处理器独立运算负载')),

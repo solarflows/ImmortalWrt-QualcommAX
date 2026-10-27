@@ -58,51 +58,25 @@ var callGetAudit = rpc.declare({
 });
 
 function normIp(ip) {
-	if (!ip) return '';
-	ip = ip.trim().toLowerCase();
-	if (ip.indexOf(':') === -1) return ip;
-	var parts = ip.split('::');
-	var left = parts[0] ? parts[0].split(':') : [];
-	var right = (parts.length > 1 && parts[1]) ? parts[1].split(':') : [];
-	var missing = 8 - (left.length + right.length);
-	var mid = [];
-	for (var i = 0; i < missing; i++) mid.push('0');
-	return [].concat(left, mid, right).map(function(hex) {
-		return parseInt(hex || '0', 16).toString(16);
-	}).join(':');
+	if (!ip || ip.indexOf(':') === -1) return (ip || '').trim().toLowerCase();
+	var p = ip.trim().toLowerCase().split('::');
+	var l = p[0] ? p[0].split(':') : [], r = (p.length > 1 && p[1]) ? p[1].split(':') : [];
+	var mid = Array(Math.max(0, 8 - (l.length + r.length))).fill('0');
+	return l.concat(mid, r).map(function(h) { return parseInt(h || '0', 16).toString(16); }).join(':');
 }
 
 function compressIPv6(ip) {
 	if (!ip || ip.indexOf(':') === -1) return ip;
-	ip = ip.trim().toLowerCase();
-	var parts = ip.split('::');
-	var left = parts[0] ? parts[0].split(':') : [];
-	var right = (parts.length > 1 && parts[1]) ? parts[1].split(':') : [];
-	var missing = 8 - (left.length + right.length);
-	var words = [];
-	for (var i = 0; i < left.length; i++) words.push(parseInt(left[i] || '0', 16));
-	for (var i = 0; i < missing; i++) words.push(0);
-	for (var i = 0; i < right.length; i++) words.push(parseInt(right[i] || '0', 16));
-
-	var bestStart = -1, bestLen = 0, curStart = -1, curLen = 0;
-	for (var i = 0; i < 8; i++) {
-		if (words[i] === 0) {
-			if (curStart === -1) { curStart = i; curLen = 1; }
-			else { curLen++; }
-			if (curLen > bestLen) { bestStart = curStart; bestLen = curLen; }
-		} else {
-			curStart = -1; curLen = 0;
-		}
-	}
-	if (bestLen < 2) bestStart = -1;
-
-	var hex = words.map(function(w) { return w.toString(16); });
-	if (bestStart !== -1) {
-		var head = hex.slice(0, bestStart).join(':');
-		var tail = hex.slice(bestStart + bestLen).join(':');
-		return head + '::' + tail;
-	}
-	return hex.join(':');
+	var words = normIp(ip).split(':');
+	var best = -1, bestLen = 0, cur = -1, curLen = 0;
+	words.forEach(function(w, i) {
+		if (w === '0') {
+			if (cur === -1) { cur = i; curLen = 1; } else { curLen++; }
+			if (curLen > bestLen) { best = cur; bestLen = curLen; }
+		} else { cur = -1; curLen = 0; }
+	});
+	if (bestLen < 2) return words.join(':');
+	return (words.slice(0, best).join(':') + '::' + words.slice(best + bestLen).join(':')).replace(/^:::/, '::').replace(/:::$/, '::');
 }
 
 function getSessionData(key) {
@@ -243,55 +217,18 @@ function copyTextToClipboard(text, btnElement, successMsg) {
 
 function traceFlowByIp(targetIp) {
 	if (!targetIp) return;
-
-	// 1. 若当前不在 flows 选项卡，先自动切换至 flows
-	if (activeTab !== 'flows') {
-		var flowsTabLink = document.querySelector('.cbi-tabmenu a[href="#flows"]');
-		if (flowsTabLink) {
-			flowsTabLink.click();
-		} else {
-			activeTab = 'flows';
-			window.location.hash = 'flows';
-		}
+	flowColFilters['src'] = targetIp.toLowerCase();
+	activeTab = 'flows';
+	flowSubTab = 'all';
+	window.location.hash = 'flows';
+	var tabMenu = document.querySelector('.nss-dashboard-spa > .cbi-section > .cbi-tabmenu');
+	var flowsTabLink = tabMenu ? tabMenu.querySelector('a[href="#flows"]') : null;
+	if (flowsTabLink) {
+		flowsTabLink.click();
+	} else {
+		renderSubTabs();
+		renderActiveCard();
 	}
-
-	// 2. 自动切换到底层全量明细或对应 IPv6 流视图
-	setTimeout(function() {
-		var subTabId = (targetIp.indexOf(':') !== -1) ? 'ipv6' : 'all';
-		var subLink = document.querySelector('#nss-subcard-mount .cbi-tabmenu [data-tab="' + subTabId + '"] a');
-		if (subLink) {
-			subLink.click();
-		} else {
-			subLink = document.querySelector('#nss-subcard-mount .cbi-tabmenu [data-tab="all"] a');
-			if (subLink) subLink.click();
-		}
-
-		// 3. 在渲染出的表格中高亮匹配的行并平滑滚动定位
-		setTimeout(function() {
-			var tbody = document.querySelector('#flows-tbody');
-			if (!tbody) return;
-			var cleanTarget = normIp(targetIp).toLowerCase();
-			var rows = tbody.querySelectorAll('tr[data-key]');
-			var matchedRow = null;
-
-			for (var i = 0; i < rows.length; i++) {
-				var r = rows[i];
-				var key = (r.getAttribute('data-key') || '').toLowerCase();
-				var text = r.textContent.toLowerCase();
-				if (key.indexOf(cleanTarget) !== -1 || text.indexOf(cleanTarget) !== -1 || text.indexOf(targetIp.toLowerCase()) !== -1) {
-					matchedRow = r;
-					break;
-				}
-			}
-
-			if (matchedRow) {
-				matchedRow.classList.remove('highlight-row');
-				void matchedRow.offsetWidth; // 触发 reflow
-				matchedRow.classList.add('highlight-row');
-				matchedRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-			}
-		}, 300);
-	}, 200);
 }
 
 function renderItemExpandPanel(clientObj, onToggle) {
@@ -303,10 +240,10 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	// 1. 顶部 Header 栏 (主机名、MAC、类型、操作按钮)
 	var macDisplay = clientObj.mac ? clientObj.mac.toUpperCase() : (clientObj.isDevice ? _('虚拟/本地总线') : _('未知 MAC'));
 	var headerBar = E('div', {
-		'style': 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border-color-medium, rgba(255,255,255,0.1)); padding-bottom: 8px;'
+		'style': 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; border-bottom: 1px dashed var(--border-color-medium, rgba(255,255,255,0.1)); padding-bottom: 6px;'
 	}, [
 		E('div', { 'style': 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [
-			E('strong', { 'style': 'font-size: 13px;' }, [ clientObj.hostName ]),
+			E('span', { 'style': 'font-size: 11px; color: var(--text-color-medium);' }, [ 'MAC: ' ]),
 			E('code', { 'style': 'font-size: 11px; padding: 1px 5px; background: var(--background-color-low, rgba(0,0,0,0.2)); border-radius: 3px;' }, [ macDisplay ]),
 			clientObj.isRouter ? E('span', { 'class': 'badge badge-info' }, [ _('路由器本机') ]) : ''
 		]),
@@ -336,64 +273,69 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	if (clientObj.totalBytes != null) {
 		var protoList = Object.keys(clientObj.protos || {}).sort().join(', ') || 'TCP/UDP';
 		metricsItems = [
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('硬件加速流量:') ]),
-				E('span', { 'style': 'font-weight: bold; color: var(--primary-color-high);' }, [
-					String.format('%1024.1mB', clientObj.totalBytes || 0) + ' (' + (clientObj.totalPkts || 0).toLocaleString() + ' ' + _('pkts') + ')'
-				])
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('硬件流量:') ]),
+				E('strong', { 'style': 'color: var(--text-color-high);' }, [ String.format('%1024.1mB', clientObj.totalBytes || 0) ]),
+				E('span', { 'style': 'color: var(--text-color-medium); font-size: 10px;' }, [ '(' + (clientObj.totalPkts || 0).toLocaleString() + ' pkts)' ])
 			]),
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('实时速率:') ]),
-				E('span', { 'style': 'font-weight: bold; color: var(--primary-color-high); font-variant-numeric: tabular-nums;' }, [
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('实时速率:') ]),
+				E('strong', { 'style': (clientObj.totalBps > 1e6) ? 'color: var(--primary-color-high);' : 'color: var(--text-color-high); font-variant-numeric: tabular-nums;' }, [
 					(clientObj.totalBps > 0) ? fmtRate(clientObj.totalBps) : '—'
 				])
 			]),
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('活跃加速流:') ]),
-				E('span', { 'style': 'font-weight: 600;' }, [ (clientObj.flowCount || 0) + ' ' + _('条并发连接') ])
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('活跃连接:') ]),
+				E('strong', { 'style': 'color: var(--text-color-high);' }, [ (clientObj.flowCount || 0) + ' ' + _('条并发') ])
 			]),
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('支持协议:') ]),
-				protoList
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('协议分布:') ]),
+				E('strong', { 'style': 'color: var(--text-color-high);' }, [ protoList ])
 			])
 		];
 	} else {
 		metricsItems = [
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('历史总流量:') ]),
-				E('span', { 'style': 'font-weight: bold; color: var(--primary-color-high);' }, [
-					String.format('%1024.1mB', clientObj.total || 0)
-				])
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('历史总流量:') ]),
+				E('strong', { 'style': 'color: var(--primary-color-high);' }, [ String.format('%1024.1mB', clientObj.total || 0) ])
 			]),
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('下行 / 上行:') ]),
-				E('span', { 'style': 'font-weight: 600;' }, [
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('下行 / 上行:') ]),
+				E('strong', { 'style': 'color: var(--text-color-high);' }, [
 					String.format('%1024.1mB', clientObj.rx || 0) + ' / ' + String.format('%1024.1mB', clientObj.tx || 0)
 				])
 			]),
-			E('span', {}, [
-				E('strong', { 'style': 'color: var(--text-color-medium); margin-right: 4px;' }, [ _('记录会话数:') ]),
-				E('span', { 'style': 'font-weight: 600;' }, [ (clientObj.conns || 0).toLocaleString() + ' ' + _('条') ])
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
+				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('记录会话数:') ]),
+				E('strong', { 'style': 'color: var(--text-color-high);' }, [ (clientObj.conns || 0).toLocaleString() + ' ' + _('条') ])
 			])
 		];
 	}
 	var metricsBar = E('div', {
-		'style': 'display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 11px; padding: 4px 8px; background: var(--background-color-low, rgba(0,0,0,0.15)); border-radius: 3px;'
+		'style': 'display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 11px; padding: 6px 10px; background: var(--background-color-medium, rgba(255,255,255,0.04)); border: 1px solid var(--border-color-low, rgba(255,255,255,0.06)); border-radius: 4px;'
 	}, metricsItems);
 
 	// 3. IPv4 地址池区域
 	var v4Section = null;
 	if (ipv4List.length > 0) {
 		var v4Items = ipv4List.map(function(ip) {
-			var note = (ip === '127.0.0.1') ? ' (Loopback)' : (ip.indexOf('100.') === 0) ? ' (WAN)' : (ip === clientObj.ip ? ' (' + _('主IP') + ')' : '');
+			var note = (ip === '127.0.0.1') ? 'Loopback' : (ip.indexOf('100.') === 0) ? 'WAN' : (ip === clientObj.ip ? _('主IP') : '');
+			var noteBadge = note ? E('span', {
+				'class': 'badge ' + (note === _('主IP') ? 'badge-info' : 'badge-neutral'),
+				'style': 'font-size: 9px; padding: 0 4px; line-height: 14px; height: 14px;'
+			}, [ note ]) : '';
+
 			return E('div', {
-				'style': 'display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 6px; background: var(--background-color-low, rgba(0,0,0,0.1)); border-radius: 3px; min-width: 180px;'
+				'style': 'display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; background: var(--background-color-medium, rgba(255,255,255,0.05)); border: 1px solid var(--border-color-low, rgba(255,255,255,0.08)); border-radius: 4px; min-width: 190px;'
 			}, [
-				E('code', { 'style': 'font-size: 11px;' }, [ ip + note ]),
+				E('div', { 'style': 'display: inline-flex; align-items: center; gap: 6px;' }, [
+					E('code', { 'style': 'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; font-weight: 500;' }, [ ip ]),
+					noteBadge
+				]),
 				E('div', { 'style': 'display: inline-flex; gap: 3px;' }, [
 					E('button', {
 						'class': 'ip-action-btn',
-						'title': _('复制此 IPv4 地址'),
+						'title': _('复制此 IPv4 地址: ') + ip,
 						'click': function(ev) {
 							ev.stopPropagation();
 							copyTextToClipboard(ip, this, 'OK');
@@ -401,7 +343,7 @@ function renderItemExpandPanel(clientObj, onToggle) {
 					}, [ '📋' ]),
 					E('button', {
 						'class': 'ip-action-btn',
-						'title': _('在流表中查寻此 IP 流量'),
+						'title': _('在流表中查寻此 IP 流量: ') + ip,
 						'click': function(ev) {
 							ev.stopPropagation();
 							traceFlowByIp(ip);
@@ -410,8 +352,11 @@ function renderItemExpandPanel(clientObj, onToggle) {
 				])
 			]);
 		});
-		v4Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 4px;' }, [
-			E('div', { 'style': 'font-size: 11px; font-weight: 600; color: var(--text-color-medium);' }, [ _('IPv4 地址池 (%d 个):').format(ipv4List.length) ]),
+		v4Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px;' }, [
+			E('div', { 'style': 'font-size: 11px; font-weight: 700; color: var(--text-color-medium); display: flex; align-items: center; gap: 6px;' }, [
+				E('span', { 'class': 'badge-dot', 'style': 'width:5px; height:5px; background:var(--primary-color-high);' }),
+				_('IPv4 地址池 (%d 个):').format(ipv4List.length)
+			]),
 			E('div', { 'style': 'display: flex; flex-wrap: wrap; gap: 6px;' }, v4Items)
 		]);
 	}
@@ -422,15 +367,23 @@ function renderItemExpandPanel(clientObj, onToggle) {
 		var v6Grid = E('div', { 'style': 'display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 6px;' });
 		ipv6List.forEach(function(ip6) {
 			var norm = compressIPv6(ip6);
-			var note = (norm === '::1') ? ' (Loopback)' : (ip6.indexOf('fe80:') === 0) ? ' (Link-Local)' : '';
+			var note = (norm === '::1') ? 'Loopback' : (ip6.indexOf('fe80:') === 0) ? 'Link-Local' : '';
+			var noteBadge = note ? E('span', {
+				'class': 'badge badge-neutral',
+				'style': 'font-size: 9px; padding: 0 4px; line-height: 14px; height: 14px;'
+			}, [ note ]) : '';
+
 			v6Grid.appendChild(E('div', {
-				'style': 'display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 6px; background: var(--background-color-low, rgba(0,0,0,0.1)); border-radius: 3px;'
+				'style': 'display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; background: var(--background-color-medium, rgba(255,255,255,0.05)); border: 1px solid var(--border-color-low, rgba(255,255,255,0.08)); border-radius: 4px;'
 			}, [
-				E('code', { 'style': 'font-size: 11px; word-break: break-all; white-space: nowrap;' }, [ norm + note ]),
+				E('div', { 'style': 'display: inline-flex; align-items: center; gap: 6px; min-width: 0;' }, [
+					E('code', { 'style': 'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; word-break: break-all;' }, [ norm ]),
+					noteBadge
+				]),
 				E('div', { 'style': 'display: inline-flex; gap: 3px; flex-shrink: 0;' }, [
 					E('button', {
 						'class': 'ip-action-btn',
-						'title': _('复制此 IPv6 地址'),
+						'title': _('复制此 IPv6 地址: ') + norm,
 						'click': function(ev) {
 							ev.stopPropagation();
 							copyTextToClipboard(norm, this, 'OK');
@@ -438,7 +391,7 @@ function renderItemExpandPanel(clientObj, onToggle) {
 					}, [ '📋' ]),
 					E('button', {
 						'class': 'ip-action-btn',
-						'title': _('在流表中查寻此 IP 流量'),
+						'title': _('在流表中查寻此 IP 流量: ') + norm,
 						'click': function(ev) {
 							ev.stopPropagation();
 							traceFlowByIp(norm);
@@ -447,15 +400,17 @@ function renderItemExpandPanel(clientObj, onToggle) {
 				])
 			]));
 		});
-		v6Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 4px;' }, [
-			E('div', { 'style': 'font-size: 11px; font-weight: 600; color: var(--text-color-medium);' }, [ _('IPv6 地址池 (%d 个):').format(ipv6List.length) ]),
+		v6Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px;' }, [
+			E('div', { 'style': 'font-size: 11px; font-weight: 700; color: var(--text-color-medium); display: flex; align-items: center; gap: 6px;' }, [
+				E('span', { 'class': 'badge-dot', 'style': 'width:5px; height:5px; background:var(--success-color-high);' }),
+				_('IPv6 地址池 (%d 个):').format(ipv6List.length)
+			]),
 			v6Grid
 		]);
 	}
 
 	var panel = E('div', {
-		'class': 'client-expand-panel',
-		'style': 'padding: 10px 14px; border-radius: 4px; background: var(--background-color-medium, rgba(255,255,255,0.06)); border: 1px solid var(--border-color-medium, rgba(255,255,255,0.12)); display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box;'
+		'class': 'client-tree-panel'
 	}, [
 		headerBar,
 		metricsBar,
@@ -474,10 +429,10 @@ function ensureCss() {
 			'id': id,
 			'rel': 'stylesheet',
 			'type': 'text/css',
-			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261024a'
+			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261027i'
 		}));
-	} else if (el.href.indexOf('?v=261024a') === -1) {
-		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261024a';
+	} else if (el.href.indexOf('?v=261027i') === -1) {
+		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261027i';
 	}
 }
 
@@ -548,7 +503,7 @@ function sampleMetricsRate(nssBytes) {
 function progressbar(value, max, label) {
 	if (value === null || value === undefined) {
 		return E('div', {
-			'class': 'cbi-progressbar disabled nss-bar',
+			'class': 'nss-bar nss-bar-disabled',
 			'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 			'title': label || _('待机 (无服务固件或未引导)')
 		}, [
@@ -562,13 +517,13 @@ function progressbar(value, max, label) {
 	    pc = Math.min(100, Math.max(0, Math.floor((100 / mn) * vn)));
 
 	return E('div', {
-		'class': 'cbi-progressbar nss-bar',
+		'class': 'nss-bar',
 		'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
 		'title': '%s%%'.format(vn)
 	}, [
 		E('div', {
 			'style': 'width:%.2f%%; height:100%; transition:width 0.3s ease;'.format(pc),
-			'class': (vn > 80) ? 'cbi-progressbar-danger' : (vn > 50) ? 'cbi-progressbar-warn' : ''
+			'class': (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : ''
 		}),
 		label ? E('span', { 'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:bold; line-height:13px; white-space:nowrap;' }, [
 			label
@@ -584,15 +539,15 @@ function hostCpuProgressbar(total, usr, sys, sirq) {
 	var label = 'usr: ' + u.toFixed(0) + '% • sys: ' + s.toFixed(0) + '% • sirq: ' + si.toFixed(0) + '%';
 
 	return E('div', {
-		'class': 'cbi-progressbar nss-bar nss-stacked',
-		'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0; display:flex; background:var(--background-color-medium, rgba(255,255,255,0.08));',
+		'class': 'nss-bar nss-stacked',
+		'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0; display:flex; border-radius:999px !important; border:none !important;',
 		'title': 'CPU: ' + vn.toFixed(1) + '% (usr: ' + u.toFixed(1) + '% sys: ' + s.toFixed(1) + '% sirq: ' + si.toFixed(1) + '%)'
 	}, [
-		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
 		E('span', {
-			'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:600; line-height:13px; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.8);'
+			'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:10px; font-weight:600; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.9);'
 		}, [ label ])
 	]);
 }
@@ -605,12 +560,12 @@ function miniCpuStackedBlock(cpu) {
 	var labelText = 'u:' + u.toFixed(0) + '% s:' + s.toFixed(0) + '% i:' + si.toFixed(0) + '%';
 
 	var barEl = E('div', {
-		'class': 'cbi-progressbar nss-bar nss-stacked',
-		'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; display:flex; border-radius:2px; border:none; background:var(--background-color-low, rgba(255,255,255,0.08));'
+		'class': 'nss-bar nss-stacked',
+		'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; display:flex; border-radius:999px !important; border:none !important;'
 	}, [
-		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
+		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
 		E('span', {
 			'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:700; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.95);'
 		}, [ labelText ])
@@ -629,8 +584,8 @@ function miniBarBlock(label, value, isCpu, disabledText, titleText) {
 	var barEl;
 	if (value === null || value === undefined) {
 		barEl = E('div', {
-			'class': 'cbi-progressbar disabled nss-bar',
-			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:2px; border:none;'
+			'class': 'nss-bar nss-bar-disabled',
+			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:999px !important; border:none;'
 		}, [
 			E('span', {
 				'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:500; color:var(--text-color-medium);'
@@ -639,17 +594,14 @@ function miniBarBlock(label, value, isCpu, disabledText, titleText) {
 	} else {
 		var vn = parseFloat(value) || 0;
 		var pc = Math.min(100, Math.max(0, vn));
-		var fillStyle = 'width:' + pc.toFixed(1) + '%; height:100%; transition:width 0.3s ease;';
-		if (isCpu && vn <= 50) {
-			fillStyle += ' background:var(--primary-color-medium, #1976d2);';
-		}
+		var fillClass = (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : 'nss-bar-fill';
 		barEl = E('div', {
-			'class': 'cbi-progressbar nss-bar',
-			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:2px; border:none;'
+			'class': 'nss-bar',
+			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:999px !important; border:none;'
 		}, [
 			E('div', {
-				'style': fillStyle,
-				'class': (vn > 80) ? 'cbi-progressbar-danger' : (vn > 50) ? 'cbi-progressbar-warn' : ''
+				'class': fillClass,
+				'style': 'width:' + pc.toFixed(1) + '%; height:100%; border-radius:999px; transition:width 0.3s ease;'
 			}),
 			E('span', {
 				'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:700; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.95);'
@@ -691,7 +643,7 @@ function tempBadge(label, temp) {
 		'title': label + ': ' + t.toFixed(1) + '°C'
 	}, [
 		E('strong', {}, [ label + ':' ]),
-		t.toFixed(1) + '°C'
+		' ' + t.toFixed(1) + '°C'
 	]);
 }
 
@@ -713,7 +665,7 @@ function moduleChip(name, state, customLabel, customTitle) {
 	}, [
 		(state === 2) ? E('span', { 'class': 'badge-dot' }) : '',
 		E('strong', {}, [ name + ':' ]),
-		label
+		' ' + label
 	]);
 }
 
@@ -800,26 +752,10 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 		]);
 	}
 
-	var refreshIconSvg = E('svg', {
-		'viewBox': '0 0 24 24',
-		'width': '11',
-		'height': '11',
-		'fill': 'none',
-		'stroke': 'currentColor',
-		'stroke-width': '2.5',
-		'stroke-linecap': 'round',
-		'stroke-linejoin': 'round',
-		'class': isRefreshing ? 'nss-icon-spin' : ''
-	}, [
-		E('path', { 'd': 'M23 4v6h-6' }),
-		E('path', { 'd': 'M1 20v-6h6' }),
-		E('path', { 'd': 'M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15' })
-	]);
-
 	var forceRefreshBtn = E('button', {
 		'class': 'btn cbi-button cbi-button-action fit-unit',
 		'id': 'btn-force-refresh',
-		'style': 'gap:4px; height:24px;',
+		'style': 'height:24px !important; min-height:24px !important; max-height:24px !important; padding:0 8px !important; line-height:22px !important;',
 		'disabled': isRefreshing ? 'disabled' : null,
 		'title': _('跳过轮询等待，立即抓取最新遥测与当前子卡数据'),
 		'click': function(ev) {
@@ -828,7 +764,6 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 			if (onForceRefresh) onForceRefresh();
 		}
 	}, [
-		refreshIconSvg,
 		isRefreshing ? _('刷新中…') : _('强制刷新')
 	]);
 
@@ -1088,7 +1023,7 @@ function renderStatusCard(d, p) {
 			}, [ fwDisplay ])
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [
-			E('table', { 'class': 'table' }, [
+			E('table', { 'class': 'table nss-status-table' }, [
 				E('tbody', {}, [
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td left nss-status-label', 'title': _('高通独立网络子系统架构规格、NPU 频率与微码版本') }, [
@@ -1157,7 +1092,7 @@ function renderStatusCard(d, p) {
 			badge('badge-info', totalConns.toLocaleString() + ' ' + _('活动流'))
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [
-			E('table', { 'class': 'table' }, [
+			E('table', { 'class': 'table nss-status-table' }, [
 				E('tbody', {}, [
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td left nss-status-label', 'title': _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流数与 v4/v6 概况') }, [
@@ -1465,6 +1400,187 @@ function formatEndpoint(ip, port) {
 	return ip + pStr;
 }
 
+/* ── DataTable Core Primitives ── */
+function renderTableHeaders(cols, sortKey, sortDir, onSort) {
+	return cols.map(function(col) {
+		var isSorted = (sortKey === col.key);
+		var arrow = isSorted ? (sortDir > 0 ? ' ▲' : ' ▼') : '';
+		return E('th', {
+			'class': 'th' + (isSorted ? ' sorted' : ''),
+			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
+			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
+			'click': function() {
+				if (sortKey === col.key) {
+					onSort(col.key, -sortDir);
+				} else {
+					onSort(col.key, col.num ? -1 : 1);
+				}
+			}
+		}, [ col.title + arrow ]);
+	});
+}
+
+function sortTableItems(items, cols, sortKey, sortDir) {
+	var curCol = cols.find(function(c) { return c.key === sortKey; }) || cols[0];
+	return items.sort(function(a, b) {
+		var va = curCol.get ? curCol.get(a) : a[curCol.key];
+		var vb = curCol.get ? curCol.get(b) : b[curCol.key];
+		if (curCol.num) return ((va || 0) - (vb || 0)) * sortDir;
+		return String(va || '').localeCompare(String(vb || '')) * sortDir;
+	});
+}
+
+function patchTableRows(tbody, items, renderRow, patchRow, emptyText, colSpan) {
+	if (!items.length) {
+		dom.content(tbody, [
+			E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
+				E('td', { 'class': 'td', 'colspan': String(colSpan || 6), 'style': 'text-align:center; color:var(--text-color-medium);' }, [ emptyText ])
+			])
+		]);
+		return;
+	}
+
+	tbody.querySelectorAll('tr[data-empty], .tr-empty-placeholder, tr.tr-empty-placeholder').forEach(function(ph) {
+		if (ph.parentNode === tbody) tbody.removeChild(ph);
+	});
+
+	var existing = {};
+	tbody.querySelectorAll('tr[data-key]').forEach(function(r) {
+		existing[r.getAttribute('data-key')] = r;
+	});
+
+	items.forEach(function(item) {
+		var row = existing[item.key];
+		if (row) {
+			delete existing[item.key];
+			if (patchRow) patchRow(row, item);
+		} else {
+			row = renderRow(item);
+		}
+		tbody.appendChild(row);
+
+		// 若该项存在展开中的详情子行，将其按正确从属顺序紧随主行挂载，防止被全表 diff 覆盖冲刷
+		var expandRow = tbody.querySelector('tr[data-expand-for="' + item.key + '"]');
+		if (expandRow) {
+			tbody.appendChild(expandRow);
+		}
+	});
+
+	Object.keys(existing).forEach(function(k) {
+		if (existing[k].parentNode === tbody) {
+			var expandRow = tbody.querySelector('tr[data-expand-for="' + k + '"]');
+			if (expandRow && expandRow.parentNode === tbody) expandRow.parentNode.removeChild(expandRow);
+			tbody.removeChild(existing[k]);
+		}
+	});
+}
+
+function renderClientCell(c, expandKey, onToggle) {
+	var isExpanded = !!expandedClientsMap[expandKey];
+	var arrow = isExpanded ? '▾' : '▸';
+	var v6Badge = (c.v6Count > 0)
+		? E('span', {
+			'class': 'badge badge-neutral',
+			'style': 'font-size:10px; padding:0 4px; margin-left:4px;',
+			'title': _('该终端拥有 %d 个 IPv6 地址').format(c.v6Count)
+		}, [ '+' + c.v6Count + ' IPv6' ])
+		: '';
+
+	return E('div', {
+		'class': 'client-trigger-box' + (isExpanded ? ' no-hover' : ''),
+		'style': 'user-select:none;',
+		'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端地址池')
+	}, [
+		E('div', { 'style': 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
+			E('span', {
+				'class': 'badge ' + (isExpanded ? 'badge-info' : 'badge-neutral') + ' client-expand-badge',
+				'style': 'font-size:11px; padding:2px 8px; display:inline-flex; align-items:center; gap:5px; font-weight:600;'
+			}, [
+				E('span', { 'style': 'font-size:10px; line-height:1;' }, [ arrow ]),
+				c.hostName
+			]),
+			v6Badge
+		]),
+		E('div', { 'style': 'font-size:11px; margin-top:3px; padding-left:4px;' }, [
+			E('code', {}, [ c.ip ])
+		])
+	]);
+}
+
+function renderExpandRow(c, colSpan, expandKey, onToggle) {
+	return E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
+		E('td', { 'class': 'td', 'colspan': String(colSpan) }, [
+			renderItemExpandPanel(c, function() {
+				expandedClientsMap[expandKey] = false;
+				if (onToggle) onToggle();
+			})
+		])
+	]);
+}
+
+var flowColFilters = {};
+
+function renderTableFilters(cols, filterMap, onFilterChange) {
+	return E('tr', { 'class': 'tr' }, cols.map(function(col) {
+		return E('td', { 'class': 'td' }, [
+			E('input', {
+				'type': 'text',
+				'class': 'cbi-input-text',
+				'style': 'width:100%; min-width:3em;',
+				'placeholder': _('过滤…'),
+				'value': filterMap[col.key] || '',
+				'input': function(ev) {
+					filterMap[col.key] = ev.target.value.trim().toLowerCase();
+					onFilterChange();
+				}
+			})
+		]);
+	}));
+}
+
+function getFilteredFlows(normalizedFlows, subtab, hostnames) {
+	var list = normalizedFlows;
+	if (subtab === 'ipv4') {
+		list = list.filter(function(f) { return f.family === 'ipv4' || f.srcRaw.indexOf('.') !== -1; });
+	} else if (subtab === 'ipv6') {
+		list = list.filter(function(f) { return f.family === 'ipv6' || f.srcRaw.indexOf(':') !== -1; });
+	}
+
+	var hasFilter = false;
+	for (var k in flowColFilters) {
+		if (flowColFilters[k]) { hasFilter = true; break; }
+	}
+	if (!hasFilter) return list;
+
+	return list.filter(function(f) {
+		for (var k in flowColFilters) {
+			var q = flowColFilters[k];
+			if (!q) continue;
+			if (k === 'proto') {
+				if ((f.proto || '').toLowerCase().indexOf(q) === -1) return false;
+			} else if (k === 'src') {
+				var srcName = hostnames ? (hostnames[f.srcRaw] || '') : '';
+				var sText = (f.src || '') + ' ' + (f.srcRaw || '') + ' ' + srcName;
+				if (sText.toLowerCase().indexOf(q) === -1) return false;
+			} else if (k === 'dst') {
+				var dstName = hostnames ? (hostnames[f.dstRaw] || '') : '';
+				var dText = (f.dst || '') + ' ' + (f.dstRaw || '') + ' ' + dstName;
+				if (dText.toLowerCase().indexOf(q) === -1) return false;
+			} else if (k === 'dscp') {
+				var dName = f.dscpMeta ? (f.dscpMeta.name + ' ' + f.dscpMeta.label + ' ' + f.dscpMeta.category) : '';
+				if (dName.toLowerCase().indexOf(q) === -1) return false;
+			} else if (k === 'rate') {
+				if (fmtRate(f.bps || 0).toLowerCase().indexOf(q) === -1) return false;
+			} else if (k === 'pkts') {
+				if (String(f.pkts || 0).indexOf(q) === -1) return false;
+			} else if (k === 'bytes') {
+				if (String.format('%1024.1mB', f.bytes || 0).toLowerCase().indexOf(q) === -1) return false;
+			}
+		}
+		return true;
+	});
+}
+
 var CLIENT_COLS = [
 	{ key: 'client',     width: '210px', title: _('终端设备'), hint: _('局域网在线设备，依据 MAC/ARP/DHCP 自动识别。支持点击展开全部 IPv6 地址与流表反查穿透'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.ip || ''); } },
 	{ key: 'rate',       width: '108px', title: _('实时速率'), hint: _('客户端 V8 两帧差分计算的该终端实时双向吞吐速率'), num: true,  get: function(c) { return c.totalBps || 0; } },
@@ -1485,14 +1601,7 @@ var DSCP_NAMES = {
 	40: 'CS5', 44: 'VA', 46: 'EF', 48: 'CS6', 56: 'CS7'
 };
 
-var SVG_ICONS = {
-	voip: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M7 1v7H4l5 7V8h3L7 1z"/></svg>',
-	media: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M4 2.5v11l9-5.5-9-5.5z"/></svg>',
-	biz: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M5 2V1h6v1h3v4H2V2h3zm1 0h4V2H6v0zM2 7h12v7H2V7zm5 2v2h2V9H7z"/></svg>',
-	ctrl: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M8 1L2 3.5v5c0 3.7 2.6 7.1 6 7.5 3.4-.4 6-3.8 6-7.5v-5L8 1z"/></svg>',
-	scavenger: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M8 13l-4-4h2.5V3h3v6H12l-4 4z"/></svg>',
-	tag: '<svg viewBox="0 0 16 16" width="11" height="11" style="vertical-align:-1px; margin-right:3px; fill:currentColor;"><path d="M1 1h6l8 8-6 6L1 7V1zm3 2a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/></svg>'
-};
+
 
 function fmtRate(bps) {
 	if (bps >= 1e9) return (bps / 1e9).toFixed(1) + ' Gbps';
@@ -1516,28 +1625,28 @@ function getDscpMeta(mark) {
 	var name = DSCP_NAMES[d] || ('0x' + d.toString(16).toUpperCase());
 
 	var cls = 'badge-neutral';
-	var icon = SVG_ICONS.tag;
+	var icon = '🏷️';
 	var category = _('非标标记');
 
 	if (d === 46 || d === 44) {
 		cls = 'badge-danger';
-		icon = SVG_ICONS.voip;
+		icon = '📞';
 		category = _('VoIP 实时语音');
 	} else if (d === 34 || d === 36 || d === 38 || d === 26 || d === 28 || d === 30 || d === 32 || d === 40) {
 		cls = 'badge-warning';
-		icon = SVG_ICONS.media;
+		icon = '🎬';
 		category = _('流媒体视频');
 	} else if (d === 18 || d === 20 || d === 22 || d === 10 || d === 12 || d === 14 || d === 16 || d === 24) {
 		cls = 'badge-info';
-		icon = SVG_ICONS.biz;
+		icon = '💼';
 		category = _('关键事务交互');
 	} else if (d === 48 || d === 56) {
 		cls = 'badge-success';
-		icon = SVG_ICONS.ctrl;
+		icon = '🛡️';
 		category = _('网络协议控制');
 	} else if (d === 1 || d === 8) {
 		cls = 'badge-neutral';
-		icon = SVG_ICONS.scavenger;
+		icon = '🔽';
 		category = _('低优清道夫');
 	} else if (d === 0) {
 		return { dscp: 0, name: 'CS0', label: '— #CS0', cls: 'badge-neutral', icon: '', category: _('尽力而为') };
@@ -1725,10 +1834,24 @@ function processFlowsData(d, hostHints) {
 
 	var unknownPrivateIpFound = false;
 	var calcGlobalRate = 0;
+	var calcGlobalPps = 0;
+	var tcpCount = 0;
+	var udpCount = 0;
+	var v4Count = 0;
+	var v6Count = 0;
+
 	normalizedFlows.forEach(function(f) {
 		totalPkts += f.pkts;
 		totalBytes += f.bytes;
 		calcGlobalRate += (f.bps || 0);
+		calcGlobalPps += (f.pps || 0);
+
+		var p = (f.proto || '').toUpperCase();
+		if (p === 'TCP') tcpCount++;
+		else if (p === 'UDP') udpCount++;
+
+		if (f.family === 'ipv6' || (f.srcRaw && f.srcRaw.indexOf(':') !== -1)) v6Count++;
+		else v4Count++;
 
 		var rawSrc = f.srcRaw;
 		var dev = ipToDevice[rawSrc] || ipToDevice[normIp(rawSrc)];
@@ -1791,7 +1914,13 @@ function processFlowsData(d, hostHints) {
 		clientsList: clientsList,
 		normalizedFlows: normalizedFlows,
 		hostnames: hostnames,
-		ipToDevice: ipToDevice
+		ipToDevice: ipToDevice,
+		globalRateBps: calcGlobalRate,
+		globalPps: calcGlobalPps,
+		tcpCount: tcpCount,
+		udpCount: udpCount,
+		v4Count: v4Count,
+		v6Count: v6Count
 	};
 	return d._processed;
 }
@@ -1804,46 +1933,22 @@ function renderClientRateContent(c) {
 
 function renderClientRow(c, onToggleExpand) {
 	var isExpanded = !!expandedClientsMap[c.key];
-
-	var toggleBtnText = isExpanded
-		? ('▲ ' + _('收起'))
-		: ('▼ ' + _('详情') + (c.v6Count > 0 ? (' (+' + c.v6Count + ' IPv6)') : ''));
-
-	var expandBtn = E('span', {
-		'class': 'badge ' + (isExpanded ? 'badge-info' : 'badge-neutral') + ' ip-expand-toggle-btn',
-		'style': 'cursor:pointer; font-size:10px; padding:1px 6px; user-select:none;',
-		'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的完整硬件加速流量、MAC 与 IP 地址池详情'),
-		'click': function(ev) {
-			ev.stopPropagation();
-			expandedClientsMap[c.key] = !isExpanded;
-			if (onToggleExpand) onToggleExpand();
-		}
-	}, [ toggleBtnText ]);
-
-	var cellTrigger = E('div', {
-		'class': 'client-trigger-box' + (isExpanded ? ' no-hover' : ''),
-		'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的完整硬件加速流量、MAC 与 IP 地址池详情'),
-		'click': function() {
-			expandedClientsMap[c.key] = !isExpanded;
-			if (onToggleExpand) onToggleExpand();
-		}
-	}, [
-		E('div', { 'style': 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
-			E('strong', { 'style': 'font-size:12px; white-space:nowrap;' }, [ c.hostName ]),
-			expandBtn
-		]),
-		E('div', { 'style': 'font-size:11px;' }, [
-			E('code', {}, [ c.ip ])
-		])
-	]);
-
 	var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
 		var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
 		return badge(protoCls, pr);
 	});
 
-	return E('tr', { 'class': 'tr', 'data-key': c.key }, [
-		E('td', { 'class': 'td', 'style': 'width:210px;' }, [ cellTrigger ]),
+	return E('tr', {
+		'class': 'tr client-main-row' + (isExpanded ? ' expanded' : ''),
+		'data-key': c.key,
+		'title': isExpanded ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池'),
+		'click': function(ev) {
+			if (ev.target.closest('button, a, input')) return;
+			expandedClientsMap[c.key] = !isExpanded;
+			if (onToggleExpand) onToggleExpand();
+		}
+	}, [
+		E('td', { 'class': 'td', 'style': 'width:210px;' }, [ renderClientCell(c, c.key, onToggleExpand) ]),
 		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate', 'style': 'width:108px;' }, [ renderClientRateContent(c) ]),
 		E('td', { 'class': 'td nss-num-cell', 'data-col': 'conns', 'style': 'width:92px;' }, [ c.flowCount + ' ' + _('条连接') ]),
 		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts', 'style': 'width:115px;' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
@@ -1891,13 +1996,12 @@ function renderFlowRow(f, hostnames, ipToDevice) {
 	var dstShortName = dstFullName ? dstFullName.replace(/\s*\([^)]*\)$/, '') : '';
 
 	var dmeta = f.dscpMeta || getDscpMeta(f.mark);
+	var dscpLabel = (dmeta.icon ? (dmeta.icon + ' ') : '') + dmeta.label;
 	var dscpEl = E('span', {
 		'class': 'badge ' + dmeta.cls,
 		'style': 'white-space:nowrap; display:inline-flex; align-items:center; font-size:10px; padding:1px 6px;',
 		'title': (dmeta.category ? (dmeta.category + ' • ') : '') + 'mark: ' + (f.mark || 0) + ' (DSCP ' + dmeta.dscp + ')'
-	});
-	if (dmeta.icon) dscpEl.innerHTML = dmeta.icon + dmeta.label;
-	else dscpEl.textContent = dmeta.label;
+	}, [ dscpLabel ]);
 
 	return E('tr', { 'class': 'tr', 'data-key': f.key }, [
 		E('td', { 'class': 'td', 'data-col': 'proto', 'style': 'width:98px; padding-left:4px !important; padding-right:4px !important;' }, [ renderFlowProtoContent(f) ]),
@@ -1958,151 +2062,84 @@ function renderTruncationBanner(isTruncated, showAll, totalCount, onToggle) {
 }
 
 function patchClientRows(tbody, clientsList, onToggleExpand) {
-	if (!clientsList.length) {
-		dom.content(tbody, [
-			E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-				E('td', { 'class': 'td', 'colspan': '6', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
-					_('当前暂无活跃的客户端硬件加速流')
-				])
-			])
-		]);
-		return;
-	}
+	patchTableRows(tbody, clientsList, function(c) {
+		return renderClientRow(c, onToggleExpand);
+	}, function(row, c) {
+		var isExp = !!expandedClientsMap[c.key];
 
-	tbody.querySelectorAll('tr:not([data-key]), tr[data-empty], .tr-empty-placeholder').forEach(function(ph) {
-		if (ph.parentNode === tbody) {
-			tbody.removeChild(ph);
+		row.classList.toggle('expanded', isExp);
+		row.title = isExp ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池');
+
+		var connsTd = row.querySelector('[data-col="conns"]');
+		if (connsTd) connsTd.textContent = c.flowCount + ' ' + _('条连接');
+
+		var pktsTd = row.querySelector('[data-col="pkts"]');
+		if (pktsTd) pktsTd.textContent = c.totalPkts.toLocaleString() + ' pkts';
+
+		var bytesTd = row.querySelector('[data-col="bytes"]');
+		if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', c.totalBytes);
+
+		var rateTd = row.querySelector('[data-col="rate"]');
+		if (rateTd) dom.content(rateTd, [ renderClientRateContent(c) ]);
+
+		var protoDiv = row.querySelector('[data-col="protos"] > div');
+		if (protoDiv) {
+			var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
+				var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
+				return badge(protoCls, pr);
+			});
+			dom.content(protoDiv, protoBadges);
 		}
-	});
 
-	var existingRows = {};
-	tbody.querySelectorAll('tr[data-key]').forEach(function(r) {
-		existingRows[r.getAttribute('data-key')] = r;
-	});
+		var triggerBox = row.querySelector('.client-trigger-box');
+		if (triggerBox) {
+			triggerBox.classList.toggle('no-hover', isExp);
+			var expandBadge = triggerBox.querySelector('.client-expand-badge');
+			if (expandBadge) {
+				expandBadge.className = 'badge ' + (isExp ? 'badge-info' : 'badge-neutral') + ' client-expand-badge';
+				var arrowSpan = expandBadge.querySelector('span');
+				if (arrowSpan) arrowSpan.textContent = isExp ? '▾' : '▸';
+			}
+		}
+	}, _('当前暂无活跃的客户端硬件加速流'), 6);
 
 	clientsList.forEach(function(c) {
-		var row = existingRows[c.key];
-		if (row) {
-			delete existingRows[c.key];
-
-			var connsTd = row.querySelector('[data-col="conns"]');
-			if (connsTd) connsTd.textContent = c.flowCount + ' ' + _('条连接');
-
-			var pktsTd = row.querySelector('[data-col="pkts"]');
-			if (pktsTd) pktsTd.textContent = c.totalPkts.toLocaleString() + ' pkts';
-
-			var bytesTd = row.querySelector('[data-col="bytes"]');
-			if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', c.totalBytes);
-
-			var rateTd = row.querySelector('[data-col="rate"]');
-			if (rateTd) dom.content(rateTd, [ renderClientRateContent(c) ]);
-
-			var protoDiv = row.querySelector('[data-col="protos"] > div');
-			if (protoDiv) {
-				var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
-					var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
-					return badge(protoCls, pr);
-				});
-				dom.content(protoDiv, protoBadges);
-			}
-
-			var triggerBox = row.querySelector('.client-trigger-box');
-			if (triggerBox) {
-				var isExp = !!expandedClientsMap[c.key];
-				triggerBox.classList.toggle('no-hover', isExp);
-				var btn = triggerBox.querySelector('.ip-expand-toggle-btn');
-				if (btn) btn.textContent = isExp ? ('▲ ' + _('收起')) : ('▼ ' + _('详情') + (c.v6Count > 0 ? (' (+' + c.v6Count + ' IPv6)') : ''));
-			}
-		} else {
-			row = renderClientRow(c, onToggleExpand);
-		}
-		tbody.appendChild(row);
-
-		var isExpRow = !!expandedClientsMap[c.key];
+		var isExp = !!expandedClientsMap[c.key];
 		var detailRow = tbody.querySelector('tr[data-expand-for="' + c.key + '"]');
-		if (isExpRow && !detailRow) {
-			detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
-				E('td', { 'class': 'td', 'colspan': '6', 'style': 'padding: 6px 14px 10px 14px;' }, [
-					renderItemExpandPanel(c, function() {
-						expandedClientsMap[c.key] = false;
-						if (onToggleExpand) onToggleExpand();
-					})
-				])
-			]);
-			tbody.appendChild(detailRow);
-		} else if (isExpRow && detailRow) {
+		var mainRow = tbody.querySelector('tr[data-key="' + c.key + '"]');
+		if (isExp && !detailRow && mainRow) {
+			mainRow.insertAdjacentElement('afterend', renderExpandRow(c, 6, c.key, onToggleExpand));
+		} else if (isExp && detailRow && mainRow) {
 			var detailTd = detailRow.querySelector('td');
 			if (detailTd) {
-				dom.content(detailTd, [
-					renderItemExpandPanel(c, function() {
-						expandedClientsMap[c.key] = false;
-						if (onToggleExpand) onToggleExpand();
-					})
-				]);
+				dom.content(detailTd, [ renderItemExpandPanel(c, function() {
+					expandedClientsMap[c.key] = false;
+					if (onToggleExpand) onToggleExpand();
+				}) ]);
 			}
-			tbody.appendChild(detailRow);
-		} else if (!isExpRow && detailRow) {
+			mainRow.insertAdjacentElement('afterend', detailRow);
+		} else if (!isExp && detailRow) {
 			detailRow.parentNode.removeChild(detailRow);
-		}
-	});
-
-	Object.keys(existingRows).forEach(function(k) {
-		if (existingRows[k].parentNode === tbody) {
-			tbody.removeChild(existingRows[k]);
 		}
 	});
 }
 
 function patchFlowRows(tbody, flowsToRender, hostnames, ipToDevice) {
-	if (!flowsToRender.length) {
-		dom.content(tbody, [
-			E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
-				E('td', { 'class': 'td', 'colspan': '7', 'style': 'text-align:center; color:var(--text-color-medium);' }, [
-					_('当前分类下暂无活跃硬件加速流')
-				])
-			])
-		]);
-		return;
-	}
+	patchTableRows(tbody, flowsToRender, function(f) {
+		return renderFlowRow(f, hostnames, ipToDevice);
+	}, function(row, f) {
+		var protoTd = row.querySelector('[data-col="proto"]');
+		if (protoTd) dom.content(protoTd, [ renderFlowProtoContent(f) ]);
 
-	tbody.querySelectorAll('tr:not([data-key]), tr[data-empty], .tr-empty-placeholder').forEach(function(ph) {
-		if (ph.parentNode === tbody) {
-			tbody.removeChild(ph);
-		}
-	});
+		var pktsTd = row.querySelector('[data-col="pkts"]');
+		if (pktsTd) pktsTd.textContent = (f.pkts || 0).toLocaleString() + ' pkts';
 
-	var existingRows = {};
-	tbody.querySelectorAll('tr[data-key]').forEach(function(r) {
-		existingRows[r.getAttribute('data-key')] = r;
-	});
+		var bytesTd = row.querySelector('[data-col="bytes"]');
+		if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', f.bytes || 0);
 
-	flowsToRender.forEach(function(f) {
-		var row = existingRows[f.key];
-		if (row) {
-			delete existingRows[f.key];
-
-			var protoTd = row.querySelector('[data-col="proto"]');
-			if (protoTd) dom.content(protoTd, [ renderFlowProtoContent(f) ]);
-
-			var pktsTd = row.querySelector('[data-col="pkts"]');
-			if (pktsTd) pktsTd.textContent = (f.pkts || 0).toLocaleString() + ' pkts';
-
-			var bytesTd = row.querySelector('[data-col="bytes"]');
-			if (bytesTd) bytesTd.textContent = String.format('%1024.1mB', f.bytes || 0);
-
-			var flowRateTd = row.querySelector('[data-col="rate"]');
-			if (flowRateTd) dom.content(flowRateTd, renderFlowRateContent(f));
-		} else {
-			row = renderFlowRow(f, hostnames, ipToDevice);
-		}
-		tbody.appendChild(row);
-	});
-
-	Object.keys(existingRows).forEach(function(k) {
-		if (existingRows[k].parentNode === tbody) {
-			tbody.removeChild(existingRows[k]);
-		}
-	});
+		var flowRateTd = row.querySelector('[data-col="rate"]');
+		if (flowRateTd) dom.content(flowRateTd, renderFlowRateContent(f));
+	}, _('当前分类下暂无活跃硬件加速流'), 7);
 }
 
 function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeTrigger) {
@@ -2118,63 +2155,23 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 
 	var scrollWrapAttrs = makeScrollWrapAttrs('flows-scroll-wrap', onRefreshToggle);
 
-	var filteredFlows = normalizedFlows;
-	if (flowSubTab === 'ipv4') {
-		filteredFlows = normalizedFlows.filter(function(f) { return f.family === 'ipv4' || f.srcRaw.indexOf('.') !== -1; });
-	} else if (flowSubTab === 'ipv6') {
-		filteredFlows = normalizedFlows.filter(function(f) { return f.family === 'ipv6' || f.srcRaw.indexOf(':') !== -1; });
-	}
+	var filteredFlows = getFilteredFlows(normalizedFlows, flowSubTab, hostnames);
+	var clientsListSorted = clientsList.slice();
+	sortTableItems(clientsListSorted, CLIENT_COLS, clientSortKey, clientSortDir);
+	sortTableItems(filteredFlows, FLOW_COLS, flowSortKey, flowSortDir);
 
-	var curClientCol = CLIENT_COLS.find(function(c) { return c.key === clientSortKey; }) || CLIENT_COLS[1];
-	clientsList.sort(function(a, b) {
-		var va = curClientCol.get(a), vb = curClientCol.get(b);
-		if (curClientCol.num) return (va - vb) * clientSortDir;
-		return String(va).localeCompare(String(vb)) * clientSortDir;
+	var clientHeaders = renderTableHeaders(CLIENT_COLS, clientSortKey, clientSortDir, function(k, d) {
+		clientSortKey = k; clientSortDir = d;
+		if (onSubTabSwitch) onSubTabSwitch();
 	});
 
-	var curFlowCol = FLOW_COLS.find(function(c) { return c.key === flowSortKey; }) || FLOW_COLS[3];
-	filteredFlows.sort(function(a, b) {
-		var va = curFlowCol.get(a), vb = curFlowCol.get(b);
-		if (curFlowCol.num) return (va - vb) * flowSortDir;
-		return String(va).localeCompare(String(vb)) * flowSortDir;
+	var flowHeaders = renderTableHeaders(FLOW_COLS, flowSortKey, flowSortDir, function(k, d) {
+		flowSortKey = k; flowSortDir = d;
+		if (onSubTabSwitch) onSubTabSwitch();
 	});
 
-	var clientHeaders = CLIENT_COLS.map(function(col) {
-		var isSorted = (clientSortKey === col.key);
-		var arrow = isSorted ? (clientSortDir > 0 ? ' ▲' : ' ▼') : '';
-		return E('th', {
-			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
-			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
-			'click': function() {
-				if (clientSortKey === col.key) {
-					clientSortDir = -clientSortDir;
-				} else {
-					clientSortKey = col.key;
-					clientSortDir = col.num ? -1 : 1;
-				}
-				if (onSubTabSwitch) onSubTabSwitch();
-			}
-		}, [ col.title + arrow ]);
-	});
-
-	var flowHeaders = FLOW_COLS.map(function(col) {
-		var isSorted = (flowSortKey === col.key);
-		var arrow = isSorted ? (flowSortDir > 0 ? ' ▲' : ' ▼') : '';
-		return E('th', {
-			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
-			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
-			'click': function() {
-				if (flowSortKey === col.key) {
-					flowSortDir = -flowSortDir;
-				} else {
-					flowSortKey = col.key;
-					flowSortDir = col.num ? -1 : 1;
-				}
-				if (onSubTabSwitch) onSubTabSwitch();
-			}
-		}, [ col.title + arrow ]);
+	var flowFilterRow = renderTableFilters(FLOW_COLS, flowColFilters, function() {
+		updateFlowsTable(secTable.parentNode || document, d, hostHints, onSubTabSwitch);
 	});
 
 	var subTabItems = [
@@ -2228,19 +2225,10 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		]);
 	} else if (flowSubTab === 'clients') {
 		var clientRows = [];
-		clientsList.forEach(function(c) {
-			var mainRow = renderClientRow(c, onSubTabSwitch);
-			clientRows.push(mainRow);
+		clientsListSorted.forEach(function(c) {
+			clientRows.push(renderClientRow(c, onSubTabSwitch));
 			if (expandedClientsMap[c.key]) {
-				var detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.key }, [
-					E('td', { 'class': 'td', 'colspan': '6', 'style': 'padding: 6px 14px 10px 14px;' }, [
-						renderItemExpandPanel(c, function() {
-							expandedClientsMap[c.key] = false;
-							if (onSubTabSwitch) onSubTabSwitch();
-						})
-					])
-				]);
-				clientRows.push(detailRow);
+				clientRows.push(renderExpandRow(c, 6, c.key, onSubTabSwitch));
 			}
 		});
 
@@ -2256,9 +2244,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 
 		tableBody = E('div', scrollWrapAttrs, [
 			E('table', { 'class': 'table nss-fixed-table' }, [
-				E('thead', {}, [
-					E('tr', { 'class': 'tr table-titles' }, clientHeaders)
-				]),
+				E('thead', {}, [ E('tr', { 'class': 'tr table-titles' }, clientHeaders) ]),
 				E('tbody', { 'id': 'flows-tbody', 'data-subtab': 'clients' }, clientRows)
 			])
 		]);
@@ -2282,9 +2268,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 
 		tableBody = E('div', scrollWrapAttrs, [
 			E('table', { 'class': 'table nss-fixed-table' }, [
-				E('thead', {}, [
-					E('tr', { 'class': 'tr table-titles' }, flowHeaders)
-				]),
+				E('thead', {}, [ E('tr', { 'class': 'tr table-titles' }, flowHeaders), flowFilterRow ]),
 				E('tbody', { 'id': 'flows-tbody', 'data-subtab': flowSubTab }, flowRows)
 			]),
 			E('div', { 'id': 'flows-truncation-bar' }, [
@@ -2292,29 +2276,6 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 			])
 		]);
 	}
-
-	var secSummary = E('div', { 'class': 'cbi-section' }, [
-		E('h3', { 'class': 'cbi-section-title' }, [
-			E('span', { 'title': _('实时采集自内核 Netfilter Conntrack 与高通 NSS ECM 硬件卸载引擎。每 4 秒采样一次活跃双向会话并过滤 0 报文静止流，呈现真实的线速流量拓扑。'), 'style': 'cursor:help;' }, [ _('NSS 硬件流表与连接概况') ]),
-			E('span', { 'id': 'flows-summary-badge' }, [
-				badge('badge-info', isInstalled ? (rawFlows.length + ' ' + _('活动流')) : _('未安装 nssqos'))
-			])
-		]),
-		E('div', { 'class': 'cbi-section-node' }, [
-			E('table', { 'class': 'table', 'style': 'margin-bottom:0;' }, [
-				E('tbody', {}, [
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('硬件加速连接总数') ]),
-						E('td', { 'class': 'td left', 'id': 'flows-total-conns', 'style': 'width:25%;' }, [ isInstalled ? (rawFlows.length + ' ' + _('条并发流')) : '-' ]),
-						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('硬件加速总报文/字节') ]),
-						E('td', { 'class': 'td left', 'id': 'flows-total-pkts-bytes', 'style': 'width:25%;' }, [
-							isInstalled ? (totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', totalBytes) + ')') : '-'
-						])
-					])
-				])
-			])
-		])
-	]);
 
 	var noticeBanner = E('div', { 'class': 'nss-notice-banner' }, [
 		E('div', {}, [
@@ -2330,23 +2291,64 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 	var scrollProxy = E('div', { 'class': 'nss-scroll-proxy' }, [ scrollProxyInner ]);
 
 	var scrollSyncLock = false;
-	scrollProxy.addEventListener('scroll', function() {
-		if (scrollSyncLock) return;
-		scrollSyncLock = true;
-		var wrap = secTable.querySelector('#flows-scroll-wrap');
-		if (wrap) wrap.scrollLeft = scrollProxy.scrollLeft;
-		scrollSyncLock = false;
-	}, { passive: true });
 
-	var secTable = E('div', { 'class': 'cbi-section' }, [
+	var mainSection = E('div', { 'class': 'cbi-section' }, [
+		E('h3', { 'class': 'cbi-section-title' }, [
+			E('span', { 'title': _('实时采集自内核 Netfilter Conntrack 与高通 NSS ECM 硬件卸载引擎。每 4 秒采样一次活跃双向会话并过滤 0 报文静止流，呈现真实的线速流量拓扑。'), 'style': 'cursor:help;' }, [ _('NSS 硬件流表与连接概况') ]),
+			E('span', { 'id': 'flows-summary-badge' }, [
+				badge('badge-info', isInstalled ? (rawFlows.length + ' ' + _('活动流')) : _('未安装 nssqos'))
+			])
+		]),
+		isInstalled ? E('div', { 'class': 'cbi-section-node', 'style': 'margin-bottom: 12px;' }, [
+			E('table', { 'class': 'table', 'style': 'margin-bottom:0;' }, [
+				E('tbody', {}, [
+					E('tr', { 'class': 'tr' }, [
+						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('硬件加速连接总数') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-total-conns', 'style': 'width:17%; font-weight:700; color:var(--primary-color-high);' }, [
+							rawFlows.length + ' ' + _('条并发流')
+						]),
+						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('实时硬件线速吞吐') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-global-rate', 'style': 'width:17%; font-weight:700;' }, [
+							fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : '')
+						]),
+						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('传输层协议分布') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-proto-dist', 'style': 'width:18%; font-weight:600;' }, [
+							'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount
+						])
+					]),
+					E('tr', { 'class': 'tr' }, [
+						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('双栈拓扑连接') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-stack-dist', 'style': 'width:17%; font-weight:600;' }, [
+							'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count
+						]),
+						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('活跃在线终端') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-active-clients', 'style': 'width:17%; font-weight:600;' }, [
+							clientsList.length + ' ' + _('台设备')
+						]),
+						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('累计硬件转发量') ]),
+						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-total-pkts-bytes', 'style': 'width:18%;' }, [
+							totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', totalBytes) + ')'
+						])
+					])
+				])
+			])
+		]) : E('div'),
 		isInstalled ? subTabMenu : E('div'),
 		isInstalled ? noticeBanner : E('div'),
 		isInstalled ? scrollProxy : E('div'),
 		E('div', { 'class': 'cbi-section-node' }, [ tableBody ])
 	]);
 
+	scrollProxy.addEventListener('scroll', function() {
+		if (scrollSyncLock) return;
+		scrollSyncLock = true;
+		var wrap = mainSection.querySelector('#flows-scroll-wrap');
+		if (wrap) wrap.scrollLeft = scrollProxy.scrollLeft;
+		scrollSyncLock = false;
+	}, { passive: true });
+
 	setTimeout(function() {
-		var wrap = secTable.querySelector('#flows-scroll-wrap');
+		var wrap = mainSection.querySelector('#flows-scroll-wrap');
 		if (wrap) {
 			wrap.addEventListener('scroll', function() {
 				if (scrollSyncLock) return;
@@ -2357,7 +2359,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		}
 	}, 0);
 
-	return E('div', {}, [ secSummary, secTable ]);
+	return mainSection;
 }
 
 function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSwitch) {
@@ -2373,44 +2375,39 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 	var connsEl = subCardContainer.querySelector('#flows-total-conns');
 	if (connsEl) connsEl.textContent = processed.rawFlows.length + ' ' + _('条并发流');
 
+	var rateEl = subCardContainer.querySelector('#flows-global-rate');
+	if (rateEl) rateEl.textContent = fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : '');
+
+	var protoEl = subCardContainer.querySelector('#flows-proto-dist');
+	if (protoEl) protoEl.textContent = 'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount;
+
+	var stackEl = subCardContainer.querySelector('#flows-stack-dist');
+	if (stackEl) stackEl.textContent = 'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count;
+
+	var clientsEl = subCardContainer.querySelector('#flows-active-clients');
+	if (clientsEl) clientsEl.textContent = processed.clientsList.length + ' ' + _('台设备');
+
 	var pktsBytesEl = subCardContainer.querySelector('#flows-total-pkts-bytes');
 	if (pktsBytesEl) pktsBytesEl.textContent = processed.totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', processed.totalBytes) + ')';
 
 	if (flowSubTab === 'clients') {
-		var curClientCol = CLIENT_COLS.find(function(c) { return c.key === clientSortKey; }) || CLIENT_COLS[1];
-		processed.clientsList.sort(function(a, b) {
-			var va = curClientCol.get(a), vb = curClientCol.get(b);
-			if (curClientCol.num) return (va - vb) * clientSortDir;
-			return String(va).localeCompare(String(vb)) * clientSortDir;
-		});
-		patchClientRows(tbody, processed.clientsList, onSubTabSwitch);
+		var clientsListSorted = processed.clientsList.slice();
+		sortTableItems(clientsListSorted, CLIENT_COLS, clientSortKey, clientSortDir);
+		patchClientRows(tbody, clientsListSorted, onSubTabSwitch);
 	} else {
-		var filteredFlows = processed.normalizedFlows;
-		if (flowSubTab === 'ipv4') {
-			filteredFlows = processed.normalizedFlows.filter(function(f) { return f.family === 'ipv4' || f.srcRaw.indexOf('.') !== -1; });
-		} else if (flowSubTab === 'ipv6') {
-			filteredFlows = processed.normalizedFlows.filter(function(f) { return f.family === 'ipv6' || f.srcRaw.indexOf(':') !== -1; });
-		}
-
-		var curFlowCol = FLOW_COLS.find(function(c) { return c.key === flowSortKey; }) || FLOW_COLS[3];
-		filteredFlows.sort(function(a, b) {
-			var va = curFlowCol.get(a), vb = curFlowCol.get(b);
-			if (curFlowCol.num) return (va - vb) * flowSortDir;
-			return String(va).localeCompare(String(vb)) * flowSortDir;
-		});
-
-		var isTruncated = (!showAllFlows && filteredFlows.length > MAX_FLOWS_RENDER);
-		var flowsToRender = isTruncated ? filteredFlows.slice(0, MAX_FLOWS_RENDER) : filteredFlows;
+		var filtered = getFilteredFlows(processed.normalizedFlows, flowSubTab, processed.hostnames);
+		sortTableItems(filtered, FLOW_COLS, flowSortKey, flowSortDir);
+		var isTruncated = (!showAllFlows && filtered.length > MAX_FLOWS_RENDER);
+		var flowsToRender = isTruncated ? filtered.slice(0, MAX_FLOWS_RENDER) : filtered;
 
 		patchFlowRows(tbody, flowsToRender, processed.hostnames, processed.ipToDevice);
 
 		var truncEl = subCardContainer.querySelector('#flows-truncation-bar');
 		if (truncEl) {
-			dom.content(truncEl, [ renderTruncationBanner(isTruncated, showAllFlows, filteredFlows.length, onSubTabSwitch) ]);
+			dom.content(truncEl, [ renderTruncationBanner(isTruncated, showAllFlows, filtered.length, onSubTabSwitch) ]);
 		}
 	}
 }
-
 // ── 7. 子卡 E：流量档案与长期审计 (Traffic Audit) ──
 var AUDIT_COLS = [
 	{ key: 'client', width: '220px', title: _('终端设备'), hint: _('局域网在线设备，点击「▼ +N IPv6」可展开完整 IPv6 地址池'), num: false, get: function(c) { return (c.hostName || '') + ' ' + (c.mac || ''); } },
@@ -2420,88 +2417,33 @@ var AUDIT_COLS = [
 	{ key: 'conns',  width: '120px', title: _('历史会话'), hint: _('审计周期内该设备建立的 TCP/UDP 历史连接会话总数'), num: true,  get: function(c) { return c.conns || 0; } }
 ];
 
-var SVG_NS = 'http://www.w3.org/2000/svg';
-function svgElem(tag, attrs, children) {
-	var el = document.createElementNS(SVG_NS, tag);
-	if (attrs) {
-		for (var k in attrs) {
-			if (attrs.hasOwnProperty(k)) el.setAttribute(k, attrs[k]);
-		}
-	}
-	if (children) {
-		if (!Array.isArray(children)) children = [ children ];
-		children.forEach(function(c) {
-			if (c == null) return;
-			if (typeof c === 'string' || typeof c === 'number') {
-				el.appendChild(document.createTextNode(String(c)));
-			} else if (c.nodeType) {
-				el.appendChild(c);
-			}
-		});
-	}
-	return el;
-}
-
-function renderAuditSvgChart(topClients, grandTotal) {
+function renderAuditRankBars(topClients, grandTotal) {
 	if (!topClients || !topClients.length) return E('div');
 
-	var height = 24 + topClients.length * 28;
-	var bars = topClients.map(function(c, idx) {
-		var y = 14 + idx * 28;
-		var pct = grandTotal > 0 ? (c.total / grandTotal) : 0;
-		var pctStr = (pct * 100).toFixed(1) + '%';
-		var barWidth = Math.max(4, Math.round(pct * 250));
+	var colors = [
+		'var(--primary-color-high, #1976d2)',
+		'var(--success-color-high, #00ac59)',
+		'var(--warn-color-high, #efbd0b)',
+		'#78909c', '#90a4ae'
+	];
+
+	return E('div', { 'class': 'nss-audit-rank-box' }, topClients.map(function(c, idx) {
+		var pct = grandTotal > 0 ? (c.total / grandTotal * 100) : 0;
+		var pctStr = pct.toFixed(1) + '%';
 		var bytesStr = String.format('%1024.1mB', c.total);
-
-		var fill = (idx === 0) ? 'var(--primary-color-high, var(--brand, #1976d2))' :
-		           (idx === 1) ? 'var(--success-color-high, #00ac59)' :
-		           (idx === 2) ? 'var(--warn-color-high, #efbd0b)' : 'var(--text-color-medium, #8a99ad)';
-
 		var label = c.hostName || c.mac || '-';
-		if (label.length > 20) label = label.substring(0, 19) + '…';
 
-		return svgElem('g', { 'transform': 'translate(0, ' + y + ')' }, [
-			svgElem('text', {
-				'x': '165',
-				'y': '12',
-				'text-anchor': 'end',
-				'font-size': '11px',
-				'fill': 'var(--text-color-high, var(--text, #f9fafb))',
-				'font-weight': '600'
-			}, [ label ]),
-			svgElem('rect', {
-				'x': '175',
-				'y': '2',
-				'width': '250',
-				'height': '12',
-				'rx': '3',
-				'fill': 'var(--background-color-medium, var(--surface-sunken, rgba(255, 255, 255, 0.08)))'
-			}),
-			svgElem('rect', {
-				'x': '175',
-				'y': '2',
-				'width': String(barWidth),
-				'height': '12',
-				'rx': '3',
-				'fill': fill
-			}),
-			svgElem('text', {
-				'x': String(183 + barWidth),
-				'y': '12',
-				'font-size': '11px',
-				'fill': 'var(--text-color-medium, #8a99ad)',
-				'font-weight': 'bold'
-			}, [ bytesStr + ' (' + pctStr + ')' ])
+		return E('div', { 'class': 'nss-rank-row' }, [
+			E('span', { 'class': 'nss-rank-name', 'title': c.mac || label }, [ label ]),
+			E('div', { 'class': 'nss-bar nss-rank-bar' }, [
+				E('div', {
+					'class': 'nss-bar-fill',
+					'style': 'width:' + pct.toFixed(1) + '%; background:' + colors[idx] + ';'
+				})
+			]),
+			E('span', { 'class': 'nss-rank-val' }, [ bytesStr + ' (' + pctStr + ')' ])
 		]);
-	});
-
-	return E('div', { 'style': 'overflow-x:auto; width:100%;' }, [
-		svgElem('svg', {
-			'style': 'width:100%; min-width:480px; max-width:600px; display:block; margin:0 auto;',
-			'height': String(height),
-			'viewBox': '0 0 600 ' + height
-		}, bars)
-	]);
+	}));
 }
 
 function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch) {
@@ -2570,92 +2512,42 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 
 	var grandTotal = totalRx + totalTx;
 
-	var curAuditCol = AUDIT_COLS.find(function(c) { return c.key === auditSortKey; }) || AUDIT_COLS[3];
-	clientAuditList.sort(function(a, b) {
-		var va = curAuditCol.get(a), vb = curAuditCol.get(b);
-		if (curAuditCol.num) return (va - vb) * auditSortDir;
-		return String(va).localeCompare(String(vb)) * auditSortDir;
-	});
-
-	var auditHeaders = AUDIT_COLS.map(function(col) {
-		var isSorted = (auditSortKey === col.key);
-		var arrow = isSorted ? (auditSortDir > 0 ? ' ▲' : ' ▼') : '';
-		return E('th', {
-			'class': 'th' + (isSorted ? ' sorted' : ''),
-			'style': 'width:' + col.width + '; cursor:pointer; user-select:none;',
-			'title': (col.hint ? (col.hint + ' • ') : '') + _('点击排序'),
-			'click': function() {
-				if (auditSortKey === col.key) {
-					auditSortDir = -auditSortDir;
-				} else {
-					auditSortKey = col.key;
-					auditSortDir = col.num ? -1 : 1;
-				}
-				if (onSortSwitch) onSortSwitch();
-			}
-		}, [ col.title + arrow ]);
+	sortTableItems(clientAuditList, AUDIT_COLS, auditSortKey, auditSortDir);
+	var auditHeaders = renderTableHeaders(AUDIT_COLS, auditSortKey, auditSortDir, function(k, d) {
+		auditSortKey = k; auditSortDir = d;
+		if (onSortSwitch) onSortSwitch();
 	});
 
 	var topClients = clientAuditList.slice(0, 5);
 
 	var rows = clientAuditList.map(function(c) {
 		var rxPct = grandTotal > 0 ? ((c.rx / grandTotal) * 100).toFixed(1) : '0.0';
-
 		var isExpanded = !!expandedClientsMap['audit_' + c.mac];
-		var toggleBtnText = isExpanded
-			? ('▲ ' + _('收起'))
-			: ('▼ ' + _('详情') + (c.v6Count > 0 ? (' (+' + c.v6Count + ' IPv6)') : ''));
 
-		var expandBtn = E('span', {
-			'class': 'badge ' + (isExpanded ? 'badge-info' : 'badge-neutral') + ' ip-expand-toggle-btn',
-			'style': 'cursor:pointer; font-size:10px; padding:1px 6px; user-select:none;',
-			'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的历史流量与 IP 地址池详情'),
+		var mainRow = E('tr', {
+			'class': 'tr client-main-row' + (isExpanded ? ' expanded' : ''),
+			'data-key': c.key,
+			'title': isExpanded ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池'),
 			'click': function(ev) {
-				ev.stopPropagation();
-				expandedClientsMap['audit_' + c.mac] = !isExpanded;
-				if (onSortSwitch) onSortSwitch();
-			}
-		}, [ toggleBtnText ]);
-
-		var cellTrigger = E('div', {
-			'class': 'client-trigger-box' + (isExpanded ? ' no-hover' : ''),
-			'title': isExpanded ? _('点击收起详情面板') : _('点击展开该终端的历史流量与 IP 地址池详情'),
-			'click': function() {
+				if (ev.target.closest('button, a, input')) return;
 				expandedClientsMap['audit_' + c.mac] = !isExpanded;
 				if (onSortSwitch) onSortSwitch();
 			}
 		}, [
-			E('div', { 'style': 'display:flex; align-items:center; gap:6px; flex-wrap:wrap;' }, [
-				E('strong', { 'style': 'font-size:12px; white-space:nowrap;' }, [ c.hostName ]),
-				expandBtn
-			]),
-			E('div', { 'style': 'font-size:11px;' }, [
-				E('code', {}, [ c.ip !== '-' ? c.ip : c.mac.toUpperCase() ])
-			])
-		]);
-
-		var mainRow = E('tr', { 'class': 'tr', 'data-key': c.mac }, [
-			E('td', { 'class': 'td', 'style': 'width:220px;' }, [ cellTrigger ]),
+			E('td', { 'class': 'td', 'style': 'width:220px;' }, [ renderClientCell(c, 'audit_' + c.mac, onSortSwitch) ]),
 			E('td', { 'class': 'td nss-num-cell', 'style': 'width:150px;' }, [
-				E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-					E('span', {}, [ String.format('%1024.1mB', c.rx) ]),
-					E('span', { 'class': 'badge badge-neutral', 'style': 'font-size:10px;' }, [ rxPct + '%' ])
-				])
+				String.format('%1024.1mB', c.rx),
+				E('span', { 'style': 'font-size:10px; color:var(--text-color-medium); margin-left:4px;' }, [ '(' + rxPct + '%)' ])
 			]),
 			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px;' }, [ String.format('%1024.1mB', c.tx) ]),
-			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px; font-weight:bold;' }, [ String.format('%1024.1mB', c.total) ]),
+			E('td', { 'class': 'td nss-num-cell', 'style': 'width:125px;' }, [
+				E('strong', { 'style': 'color:var(--primary-color-high);' }, [ String.format('%1024.1mB', c.total) ])
+			]),
 			E('td', { 'class': 'td nss-num-cell', 'style': 'width:120px;' }, [ c.conns.toLocaleString() ])
 		]);
+
 		if (isExpanded) {
-			var detailRow = E('tr', { 'class': 'tr client-expand-row', 'data-expand-for': c.mac }, [
-				E('td', { 'class': 'td', 'colspan': '5', 'style': 'padding: 6px 14px 10px 14px;' }, [
-					renderItemExpandPanel(c, function() {
-						expandedClientsMap['audit_' + c.mac] = false;
-						if (onSortSwitch) onSortSwitch();
-					})
-				])
-			]);
-			return [ mainRow, detailRow ];
+			return [ mainRow, renderExpandRow(c, 5, 'audit_' + c.mac, onSortSwitch) ];
 		}
 		return [ mainRow ];
 	});
@@ -2702,10 +2594,10 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 
 	var chartSec = topClients.length ? E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
-			E('span', {}, [ _('Top 5 终端用量分布 (SVG Native)') ])
+			E('span', {}, [ _('Top 5 终端用量分布') ])
 		]),
 		E('div', { 'class': 'cbi-section-node', 'style': 'padding:12px 14px;' }, [
-			renderAuditSvgChart(topClients, grandTotal)
+			renderAuditRankBars(topClients, grandTotal)
 		])
 	]) : E('div');
 
@@ -3038,15 +2930,18 @@ return view.extend({
 			}).catch(function() {});
 		};
 
-		var pollCounter = 0;
+		var lastFetchTimestamp = 0;
+		var isFetchRunning = false;
 		var update = function() {
+			var now = Date.now();
+
 			if (!isPageVisible || pollMode === 'paused' || isTableHovered) {
 				renderSticky();
 				return Promise.resolve();
 			}
 
 			if (pollMode === 'auto') {
-				var idleTime = Date.now() - lastUserActionTime;
+				var idleTime = now - lastUserActionTime;
 				if (idleTime > IDLE_TIMEOUT_MS && !isIdleBackoff) {
 					isIdleBackoff = true;
 					renderSticky();
@@ -3056,15 +2951,20 @@ return view.extend({
 				renderSticky();
 			}
 
-			pollCounter++;
-			if (pollMode === 'auto' && isIdleBackoff && (pollCounter % 6 !== 0)) {
+			var targetIntervalMs = (pollMode === 'auto' && isIdleBackoff) ? (POLL_IDLE_INTERVAL * 1000) : (POLL_NORMAL_INTERVAL * 1000);
+
+			if (isFetchRunning || (now - lastFetchTimestamp < targetIntervalMs)) {
 				return Promise.resolve();
 			}
 
-			return forceUpdate();
+			isFetchRunning = true;
+			return forceUpdate().finally(function() {
+				lastFetchTimestamp = Date.now();
+				isFetchRunning = false;
+			});
 		};
 
-		poll.add(update, POLL_NORMAL_INTERVAL);
+		poll.add(update, 1);
 
 		return E('div', { 'class': 'nss-dashboard-spa cbi-map' }, [
 			stickyBarContainer,

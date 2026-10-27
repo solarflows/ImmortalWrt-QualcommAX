@@ -39,10 +39,9 @@ var callGetFlows = rpc.declare({
 	method: 'getFlows'
 });
 
-var callDeviceStatus = rpc.declare({
+var callDeviceStatusAll = rpc.declare({
 	object: 'network.device',
-	method: 'status',
-	params: [ 'name' ]
+	method: 'status'
 });
 
 var callHostHints = rpc.declare({
@@ -169,6 +168,18 @@ function renderIpPool(list, opts) {
 	]);
 }
 
+/* 指标徽章条单项：label + 值（可带第三个小注，如 pkts 数） */
+function metricItem(label, strongStyle, valueText, noteText) {
+	var children = [
+		E('span', { 'style': 'color: var(--text-color-medium);' }, [ label ]),
+		E('strong', { 'style': strongStyle }, [ valueText ])
+	];
+	if (noteText) {
+		children.push(E('span', { 'style': 'color: var(--text-color-medium); font-size: 10px;' }, [ noteText ]));
+	}
+	return E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, children);
+}
+
 function renderItemExpandPanel(clientObj, onToggle) {
 	var ipv4List = clientObj.ipv4List || [];
 	var ipv6List = clientObj.ipv6List || [];
@@ -210,43 +221,20 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	var metricsItems;
 	if (clientObj.totalBytes != null) {
 		var protoList = Object.keys(clientObj.protos || {}).sort().join(', ') || 'TCP/UDP';
+		var rateStyle = (clientObj.totalBps > 1e6)
+			? 'color: var(--primary-color-high);'
+			: 'color: var(--text-color-high); font-variant-numeric: tabular-nums;';
 		metricsItems = [
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('硬件流量:') ]),
-				E('strong', { 'style': 'color: var(--text-color-high);' }, [ String.format('%1024.1mB', clientObj.totalBytes || 0) ]),
-				E('span', { 'style': 'color: var(--text-color-medium); font-size: 10px;' }, [ '(' + (clientObj.totalPkts || 0).toLocaleString() + ' pkts)' ])
-			]),
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('实时速率:') ]),
-				E('strong', { 'style': (clientObj.totalBps > 1e6) ? 'color: var(--primary-color-high);' : 'color: var(--text-color-high); font-variant-numeric: tabular-nums;' }, [
-					(clientObj.totalBps > 0) ? fmtRate(clientObj.totalBps) : (clientObj.sampled ? '0 bps' : '—')
-				])
-			]),
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('活跃连接:') ]),
-				E('strong', { 'style': 'color: var(--text-color-high);' }, [ (clientObj.flowCount || 0) + ' ' + _('条并发') ])
-			]),
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('协议分布:') ]),
-				E('strong', { 'style': 'color: var(--text-color-high);' }, [ protoList ])
-			])
+			metricItem(_('硬件流量:'), 'color: var(--text-color-high);', String.format('%1024.1mB', clientObj.totalBytes || 0), '(' + (clientObj.totalPkts || 0).toLocaleString() + ' pkts)'),
+			metricItem(_('实时速率:'), rateStyle, (clientObj.totalBps > 0) ? fmtRate(clientObj.totalBps) : (clientObj.sampled ? '0 bps' : '—')),
+			metricItem(_('活跃连接:'), 'color: var(--text-color-high);', (clientObj.flowCount || 0) + ' ' + _('条并发')),
+			metricItem(_('协议分布:'), 'color: var(--text-color-high);', protoList)
 		];
 	} else {
 		metricsItems = [
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('历史总流量:') ]),
-				E('strong', { 'style': 'color: var(--primary-color-high);' }, [ String.format('%1024.1mB', clientObj.total || 0) ])
-			]),
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('下行 / 上行:') ]),
-				E('strong', { 'style': 'color: var(--text-color-high);' }, [
-					String.format('%1024.1mB', clientObj.rx || 0) + ' / ' + String.format('%1024.1mB', clientObj.tx || 0)
-				])
-			]),
-			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
-				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('记录会话数:') ]),
-				E('strong', { 'style': 'color: var(--text-color-high);' }, [ (clientObj.conns || 0).toLocaleString() + ' ' + _('条') ])
-			])
+			metricItem(_('历史总流量:'), 'color: var(--primary-color-high);', String.format('%1024.1mB', clientObj.total || 0)),
+			metricItem(_('下行 / 上行:'), 'color: var(--text-color-high);', String.format('%1024.1mB', clientObj.rx || 0) + ' / ' + String.format('%1024.1mB', clientObj.tx || 0)),
+			metricItem(_('记录会话数:'), 'color: var(--text-color-high);', (clientObj.conns || 0).toLocaleString() + ' ' + _('条'))
 		];
 	}
 	var metricsBar = E('div', {
@@ -599,44 +587,39 @@ function renderStatusCard(d, p) {
 	]);
 
 	// 2. 核心计算负载 (总宽锁死 348px，与 3×112px 网格右边缘严丝合缝对齐)
+	function loadRow(label, barEl, valueAttrs, valueText) {
+		var spanAttrs = {
+			'class': 'nss-num-cell',
+			'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;'
+		};
+		if (valueAttrs) {
+			if (valueAttrs.style) spanAttrs.style = valueAttrs.style;
+			if (valueAttrs.title) spanAttrs.title = valueAttrs.title;
+		}
+		return E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
+			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ label ]),
+			E('div', { 'style': 'flex:1;' }, [ barEl ]),
+			E('span', spanAttrs, [ valueText ])
+		]);
+	}
+
 	var computeLoadElements = [];
 	if (Array.isArray(d.cpu_ticks) && d.cpu_ticks.length >= 7) {
 		var cpu = calcCpuLoad(d.cpu_ticks);
-		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'CPU:' ]),
-			E('div', { 'style': 'flex:1;' }, [
-				hostCpuProgressbar(cpu.total, cpu.usr, cpu.sys, cpu.sirq)
-			]),
-			E('span', { 'class': 'nss-num-cell', 'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;' }, [ cpu.total.toFixed(0) + '%' ])
-		]));
+		computeLoadElements.push(loadRow('CPU:', hostCpuProgressbar(cpu.total, cpu.usr, cpu.sys, cpu.sirq), null, cpu.total.toFixed(0) + '%'));
 	}
 
-	if (!isDualNpu) {
-		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
-			E('div', { 'style': 'flex:1;' }, [ progressbar(d.core0_load || 0, 100) ]),
-			E('span', { 'class': 'nss-num-cell', 'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;' }, [ (d.core0_load || 0) + '%' ])
-		]));
-	} else {
+	computeLoadElements.push(loadRow('Core 0:', progressbar(d.core0_load || 0, 100), null, (d.core0_load || 0) + '%'));
+
+	if (isDualNpu) {
 		var isCore1Active = (d.core1_load !== null && d.core1_load !== undefined);
-		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'Core 0:' ]),
-			E('div', { 'style': 'flex:1;' }, [ progressbar(d.core0_load || 0, 100) ]),
-			E('span', { 'class': 'nss-num-cell', 'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right;' }, [ (d.core0_load || 0) + '%' ])
-		]));
-		computeLoadElements.push(E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ 'Core 1:' ]),
-			E('div', { 'style': 'flex:1;' }, [
-				isCore1Active ? progressbar(d.core1_load, 100) : progressbar(null, 100, _('休眠待机'))
-			]),
-			E('span', {
-				'class': 'nss-num-cell',
-				'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right; color:' + (isCore1Active ? 'inherit' : 'var(--text-color-medium)') + ';',
-				'title': isCore1Active ? '' : _('NPU Core 1 物理待机 (无蜂窝/IPsec服务固件)')
-			}, [
-				isCore1Active ? ((d.core1_load || 0) + '%') : _('待机')
-			])
-		]));
+		computeLoadElements.push(loadRow('Core 1:',
+			isCore1Active ? progressbar(d.core1_load, 100) : progressbar(null, 100, _('休眠待机')),
+			isCore1Active ? null : {
+				'style': 'font-size:11px; font-weight:600; width:32px; min-width:32px; text-align:right; color:var(--text-color-medium);',
+				'title': _('NPU Core 1 物理待机 (无蜂窝/IPsec服务固件)')
+			},
+			isCore1Active ? ((d.core1_load || 0) + '%') : _('待机')));
 	}
 
 	var computeLoadView = E('div', { 'class': 'nss-load-box-348' }, computeLoadElements);
@@ -894,37 +877,34 @@ function renderControlCard(s, d, p, onSaved) {
 }
 
 // ── 5. 子卡 C：端口线速 (Ports) ──
+/* netifd 设备状态单次批量拉取（原先每端口一次 ubus 调用）：
+   无参 status 返回 { netdev: {up, carrier, speed, statistics} } 全设备映射 */
 function fetchPortStats(portsData) {
 	var ports = portsData.ports || [];
-	var tasks = ports.map(function(p) {
-		if (p.netdev) {
-			return L.resolveDefault(callDeviceStatus(p.netdev), null);
-		}
-		return Promise.resolve(null);
-	});
+	if (!ports.length) return Promise.resolve(portsData);
 
-	return Promise.all(tasks).then(function(devList) {
-		for (var i = 0; i < ports.length; i++) {
-			var dev = devList[i];
-			if (dev) {
-				if (dev.carrier === false || dev.up === false) {
-					ports[i].speed = _('未连接');
-				} else if (dev.speed) {
-					var rawSp = String(dev.speed).replace(/[FfHh]/g, '');
-					var numSp = parseInt(rawSp) || 0;
-					if (numSp >= 10000) ports[i].speed = '10G';
-					else if (numSp >= 2500) ports[i].speed = '2.5G';
-					else if (numSp == 1000) ports[i].speed = '1000M';
-					else if (numSp > 1000) ports[i].speed = (numSp / 1000).toFixed(1) + 'G';
-					else if (numSp > 0) ports[i].speed = numSp + 'M';
-					else ports[i].speed = String(dev.speed);
-				}
-				if (dev.statistics) {
-					if (dev.statistics.rx_bytes != null) ports[i].rx_bytes = dev.statistics.rx_bytes;
-					if (dev.statistics.tx_bytes != null) ports[i].tx_bytes = dev.statistics.tx_bytes;
-				}
+	return L.resolveDefault(callDeviceStatusAll(), {}).then(function(devMap) {
+		ports.forEach(function(p) {
+			var dev = devMap[p.netdev];
+			if (!dev) return;
+
+			if (dev.carrier === false || dev.up === false) {
+				p.link_down = true; /* 布尔哨兵，替代翻译串比较 */
+				p.speed = _('未连接');
+			} else if (dev.speed) {
+				var numSp = parseInt(String(dev.speed).replace(/[FfHh]/g, '')) || 0;
+				if (numSp >= 10000) p.speed = '10G';
+				else if (numSp >= 2500) p.speed = '2.5G';
+				else if (numSp == 1000) p.speed = '1000M';
+				else if (numSp > 1000) p.speed = (numSp / 1000).toFixed(1) + 'G';
+				else if (numSp > 0) p.speed = numSp + 'M';
+				else p.speed = String(dev.speed);
 			}
-		}
+			if (dev.statistics) {
+				if (dev.statistics.rx_bytes != null) p.rx_bytes = dev.statistics.rx_bytes;
+				if (dev.statistics.tx_bytes != null) p.tx_bytes = dev.statistics.tx_bytes;
+			}
+		});
 		return portsData;
 	});
 }
@@ -956,7 +936,7 @@ function renderPortsCard(d, onRefreshToggle) {
 			var hwRatio = parseFloat(p.tx_offload_pct || p.rx_offload_pct || 0);
 			var offloaded = (parseInt(p.tx_offloaded || 0) + parseInt(p.rx_offloaded || 0));
 			var hostPkts = (parseInt(p.tx_host_pkts || 0) + parseInt(p.rx_host_pkts || 0));
-			var isUp = (p.started === 1 && p.speed !== '未连接');
+			var isUp = (p.started === 1 && !p.link_down);
 			var speedText = p.speed || (isUp ? _('已连接') : _('未连接'));
 			var speedCls = isUp ? 'badge-success' : 'badge-neutral';
 
@@ -1618,12 +1598,44 @@ function patchFlowRow(row, f) {
 	if (flowRateTd) dom.content(flowRateTd, renderFlowRateContent(f));
 }
 
+/* 流表汇总条：初始渲染与增量更新共用同一数据源，杜绝两处文案漂移。
+   每项 [id, 文案, 值单元格附加样式] */
+var FLOWS_SUMMARY_LABELS = [
+	_('硬件加速连接总数'), _('实时硬件线速吞吐'), _('传输层协议分布'),
+	_('双栈拓扑连接'), _('活跃在线终端'), _('累计硬件转发量')
+];
+
+function flowsSummaryPairs(processed) {
+	return [
+		[ 'flows-total-conns', processed.rawFlows.length + ' ' + _('条并发流'), 'font-weight:700; color:var(--primary-color-high);' ],
+		[ 'flows-global-rate', fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : ''), 'font-weight:700;' ],
+		[ 'flows-proto-dist', 'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount, 'font-weight:600;' ],
+		[ 'flows-stack-dist', 'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count, 'font-weight:600;' ],
+		[ 'flows-active-clients', processed.clientsList.length + ' ' + _('台设备'), 'font-weight:600;' ],
+		[ 'flows-total-pkts-bytes', processed.totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', processed.totalBytes) + ')', '' ]
+	];
+}
+
+function renderFlowsSummaryTable(processed) {
+	var rowChildren = [ [], [] ];
+	flowsSummaryPairs(processed).forEach(function(pair, i) {
+		rowChildren[i % 2].push(
+			E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ FLOWS_SUMMARY_LABELS[i] ]),
+			E('td', { 'class': 'td left nss-num-cell', 'id': pair[0], 'style': 'width:' + ((i % 3 === 2) ? '18%' : '17%') + '; ' + pair[2] }, [ pair[1] ])
+		);
+	});
+	return E('table', { 'class': 'table', 'style': 'margin-bottom:0;' }, [
+		E('tbody', {}, [
+			E('tr', { 'class': 'tr' }, rowChildren[0]),
+			E('tr', { 'class': 'tr' }, rowChildren[1])
+		])
+	]);
+}
+
 function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeTrigger) {
 	var processed = processFlowsData(d, hostHints);
 	var isInstalled = processed.isInstalled;
 	var rawFlows = processed.rawFlows;
-	var totalPkts = processed.totalPkts;
-	var totalBytes = processed.totalBytes;
 	var clientsList = processed.clientsList;
 	var normalizedFlows = processed.normalizedFlows;
 	var hostnames = processed.hostnames;
@@ -1782,38 +1794,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 			])
 		]),
 		isInstalled ? E('div', { 'class': 'cbi-section-node', 'style': 'margin-bottom: 12px;' }, [
-			E('table', { 'class': 'table', 'style': 'margin-bottom:0;' }, [
-				E('tbody', {}, [
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('硬件加速连接总数') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-total-conns', 'style': 'width:17%; font-weight:700; color:var(--primary-color-high);' }, [
-							rawFlows.length + ' ' + _('条并发流')
-						]),
-						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('实时硬件线速吞吐') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-global-rate', 'style': 'width:17%; font-weight:700;' }, [
-							fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : '')
-						]),
-						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('传输层协议分布') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-proto-dist', 'style': 'width:18%; font-weight:600;' }, [
-							'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('双栈拓扑连接') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-stack-dist', 'style': 'width:17%; font-weight:600;' }, [
-							'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count
-						]),
-						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('活跃在线终端') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-active-clients', 'style': 'width:17%; font-weight:600;' }, [
-							clientsList.length + ' ' + _('台设备')
-						]),
-						E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ _('累计硬件转发量') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'id': 'flows-total-pkts-bytes', 'style': 'width:18%;' }, [
-							totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', totalBytes) + ')'
-						])
-					])
-				])
-			])
+			renderFlowsSummaryTable(processed)
 		]) : E('div'),
 			isInstalled ? subTabMenu : E('div'),
 			isInstalled ? noticeBanner : E('div'),
@@ -1854,18 +1835,10 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 	var processed = processFlowsData(flowsData, hostHintsData);
 	if (!processed.isInstalled) return;
 
-	var summaryText = {
-		'flows-total-conns': processed.rawFlows.length + ' ' + _('条并发流'),
-		'flows-global-rate': fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : ''),
-		'flows-proto-dist': 'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount,
-		'flows-stack-dist': 'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count,
-		'flows-active-clients': processed.clientsList.length + ' ' + _('台设备'),
-		'flows-total-pkts-bytes': processed.totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', processed.totalBytes) + ')'
-	};
-	for (var sid in summaryText) {
-		var el = subCardContainer.querySelector('#' + sid);
-		if (el) el.textContent = summaryText[sid];
-	}
+	flowsSummaryPairs(processed).forEach(function(pair) {
+		var el = subCardContainer.querySelector('#' + pair[0]);
+		if (el) el.textContent = pair[1];
+	});
 
 	var badgeEl = subCardContainer.querySelector('#flows-summary-badge');
 	if (badgeEl) dom.content(badgeEl, [ badge('badge-info', processed.rawFlows.length + ' ' + _('活动流')) ]);

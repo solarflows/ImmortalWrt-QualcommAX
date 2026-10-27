@@ -1,58 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 # rpcd backend provider for luci-app-nss-dashboard
-# Two-tier architecture:
-#   getProfile: static hardware profile (0.00s, reads cached JSON)
-#   getMetrics: ultra-fast dynamic telemetry (<5ms, memory/sysfs only)
-#   getStatus:  backward-compatible merged view
-#   getPorts:   hardware offloaded port telemetry
-#   getFlows:   direct stream from nssqos-conns without shell buffering
 
-. /lib/functions.sh
-
-PROFILE_JSON="/tmp/nss_profile.json"
-
-sample_modules() {
-	local pppoe=0 vlan=0 bridge=0 qdisc=0 crypto=0
-
-	# 1. PPPoE
-	if [ -d /sys/module/qca_nss_pppoe ] || [ -d /sys/module/nss_connmgr_pppoe ]; then
-		pppoe=2
-	elif [ -f /lib/modules/*/qca-nss-pppoe.ko ] || [ -f /lib/modules/*/nss-connmgr-pppoe.ko ]; then
-		pppoe=1
-	fi
-
-	# 2. VLAN
-	if [ -d /sys/module/qca_nss_vlan ] || [ -d /sys/module/qca_nss_vlan_mgr ] || [ -d /sys/module/nss_vlan_mgr ]; then
-		vlan=2
-	elif [ -f /lib/modules/*/qca-nss-vlan.ko ] || [ -f /lib/modules/*/qca-nss-vlan-mgr.ko ] || [ -f /lib/modules/*/nss-vlan-mgr.ko ]; then
-		vlan=1
-	fi
-
-	# 3. Bridge
-	if [ -d /sys/module/qca_nss_bridge_mgr ] || [ -d /sys/module/nss_bridge_mgr ]; then
-		bridge=2
-	elif [ -f /lib/modules/*/qca-nss-bridge-mgr.ko ] || [ -f /lib/modules/*/nss-bridge-mgr.ko ]; then
-		bridge=1
-	fi
-
-	# 4. Qdisc
-	if [ -d /sys/module/qca_nss_qdisc ]; then
-		qdisc=2
-	elif [ -f /lib/modules/*/qca-nss-qdisc.ko ]; then
-		qdisc=1
-	fi
-
-	# 5. Crypto
-	if [ -d /sys/module/qca_nss_crypto ] || [ -d /sys/module/qca_nss_eip197 ] || [ -d /sys/module/eip197 ]; then
-		crypto=2
-	elif [ -f /lib/modules/*/qca-nss-crypto.ko ] || [ -f /lib/modules/*/qca-nss-eip197.ko ] || [ -f /lib/modules/*/eip197.ko ]; then
-		crypto=1
-	fi
-
-	printf '{"pppoe":%d,"vlan":%d,"bridge":%d,"qdisc":%d,"crypto":%d}' \
-		"$pppoe" "$vlan" "$bridge" "$qdisc" "$crypto"
-}
+. /usr/libexec/rpcd/nss_dashboard.common.sh
 
 ensure_profile() {
 	if [ ! -s "$PROFILE_JSON" ]; then
@@ -62,158 +12,51 @@ ensure_profile() {
 
 get_profile() {
 	ensure_profile
-	local modules_json
-	modules_json=$(sample_modules)
 	if [ -s "$PROFILE_JSON" ]; then
-		sed "s/\"modules\":{[^}]*}/\"modules\":$modules_json/" "$PROFILE_JSON" 2>/dev/null || cat "$PROFILE_JSON"
+		cat "$PROFILE_JSON"
 	else
-		echo '{"soc":"IPQ8074","cores":2,"fw_version":"NSS.FW.12.5-210-HK.R","fw_mask":"0x36","nss_freq":"1478.4 MHz","modules":'"$modules_json"'}'
+		json_init
+		json_add_string "soc" "$(probe_soc)"
+		json_add_int "cores" "$(probe_npu_cores)"
+		json_add_string "fw_version" "$(probe_fw_version)"
+		json_add_string "fw_mask" "$(probe_fw_mask)"
+		json_add_string "nss_freq" "$(probe_nss_freq)"
+		json_add_int "sqm" "$(probe_sqm)"
+		add_modules_object
+		json_dump
 	fi
 }
 
 get_metrics() {
-	# 1. NPU loads (dynamic regex match per core, robust across IPQ807x/IPQ60xx)
-	local core0_load=0 core1_load="null"
-	if [ -r /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi ]; then
-		eval "$(awk '/^Core [0-9]+:/ { c=$2; sub(":","",c) } /%/ { gsub("%",""); print "core" c "_load=" $2 }' /sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi 2>/dev/null)"
-	fi
-
-	# 2. Heartbeat packets/s (physically authentic non-blocking delta rate, zero sleep, sub-second safe)
-	local heartbeat=0
-	if [ -r /sys/kernel/debug/qca-nss-drv/stats/n2h ]; then
-		local now_ts cur_pkts
-		now_ts=$(date +%s)
-		cur_pkts=$(awk '$1 == "n2h_rx_pkts" { s += $3 } END { print s + 0 }' /sys/kernel/debug/qca-nss-drv/stats/n2h 2>/dev/null || echo 0)
-		if [ -f /tmp/nss_heartbeat.tmp ]; then
-			local last_ts last_pkts last_rate
-			read -r last_ts last_pkts last_rate < /tmp/nss_heartbeat.tmp 2>/dev/null
-			local dt=$(( now_ts - ${last_ts:-0} ))
-			if [ "$dt" -gt 0 ] && [ "$cur_pkts" -ge "${last_pkts:-0}" ]; then
-				heartbeat=$(( (cur_pkts - last_pkts) / dt ))
-				echo "$now_ts $cur_pkts $heartbeat" > /tmp/nss_heartbeat.tmp 2>/dev/null
-			elif [ "$dt" -eq 0 ] && [ "${last_rate:-0}" -gt 0 ]; then
-				heartbeat="$last_rate"
-			else
-				echo "$now_ts $cur_pkts 0" > /tmp/nss_heartbeat.tmp 2>/dev/null
-			fi
-		else
-			echo "$now_ts $cur_pkts 0" > /tmp/nss_heartbeat.tmp 2>/dev/null
-		fi
-	fi
-
-	# 3. CPU Temperature (Pure shell math, 0 fork)
-	local cpu_temp="0.0"
-	if [ -r /sys/class/thermal/thermal_zone0/temp ]; then
-		local raw_temp
-		read -r raw_temp < /sys/class/thermal/thermal_zone0/temp 2>/dev/null
-		if [ -n "$raw_temp" ] && [ "$raw_temp" -gt 0 ] 2>/dev/null; then
-			cpu_temp="$(( raw_temp / 1000 )).$(( (raw_temp % 1000) / 100 ))"
-		fi
-	fi
-
-	# 4. Dynamic Wireless Sensors (phy* enumeration, zero hardcoded bands, 0 fork)
-	local radios_json=""
-	for p in /sys/class/ieee80211/phy*; do
-		[ -d "$p" ] || continue
-		local phy_name=$(basename "$p")
-		local hwmon_temp="0.0"
-		for tfile in "$p"/hwmon*/temp1_input "$p"/device/hwmon/hwmon*/temp1_input; do
-			if [ -r "$tfile" ]; then
-				local raw_wtemp
-				read -r raw_wtemp < "$tfile" 2>/dev/null
-				if [ -n "$raw_wtemp" ] && [ "$raw_wtemp" -gt 0 ] 2>/dev/null; then
-					hwmon_temp="$(( raw_wtemp / 1000 )).$(( (raw_wtemp % 1000) / 100 ))"
-				fi
-				break
-			fi
-		done
-
-		[ -n "$radios_json" ] && radios_json="${radios_json},"
-		radios_json="${radios_json}{\"id\":\"${phy_name}\",\"temp\":${hwmon_temp}}"
-	done
-
-	# 5. ECM hardware flow counts (Atomic O(1) reads from sysfs + protocol breakdown)
-	local ecm_v4=0 ecm_v6=0 ecm_total=0
-	for f in /sys/kernel/debug/ecm/ecm_*_ipv4/accelerated_count; do
-		if [ -r "$f" ]; then
-			read -r ecm_v4 < "$f" 2>/dev/null
-			break
-		fi
-	done
-	for f in /sys/kernel/debug/ecm/ecm_*_ipv6/accelerated_count; do
-		if [ -r "$f" ]; then
-			read -r ecm_v6 < "$f" 2>/dev/null
-			break
-		fi
-	done
-
-	local ecm_tcp=0 ecm_udp=0 ecm_other=0 ecm_simple_total=0
-	if [ -r /sys/kernel/debug/ecm/ecm_db/connection_count_simple ]; then
-		read -r _ ecm_tcp _ ecm_udp _ ecm_other _ ecm_simple_total < /sys/kernel/debug/ecm/ecm_db/connection_count_simple 2>/dev/null
-	fi
-
-	ecm_total=$(( ${ecm_v4:-0} + ${ecm_v6:-0} ))
-	[ "$ecm_total" -eq 0 ] && [ "${ecm_simple_total:-0}" -gt 0 ] && ecm_total="$ecm_simple_total"
-
-	# 6. Wi-Fi Datapath offload status
-	local wifi_offload=0
-	[ -d /sys/kernel/debug/ath11k ] && wifi_offload=1
-
-	# 7. Check for conflicting flow offloading setting
-	local conflict=0
-	local flow_off=$(uci -q get network.@device[0].flow_offloading || echo 0)
-	[ "$flow_off" = "1" ] && conflict=1
-
-	# 8. Host CPU raw ticks from /proc/stat & NSS hardware accelerated bytes
-	local cpu_ticks="[]"
-	if [ -r /proc/stat ]; then
-		local _cpu u n s id io irq sirq st
-		read -r _cpu u n s id io irq sirq st _ < /proc/stat 2>/dev/null
-		[ -n "$u" ] && cpu_ticks="[${u:-0},${n:-0},${s:-0},${id:-0},${io:-0},${irq:-0},${sirq:-0},${st:-0}]"
-	fi
-
-	local nss_bytes=0
-	if [ -r /sys/kernel/debug/qca-nss-drv/stats/ipv4 ]; then
-		nss_bytes=$(awk '$1 == "ipv4_tx_bytes" || $1 == "ipv6_tx_bytes" { s += $3 } END { printf "%.0f", s + 0 }' \
-			/sys/kernel/debug/qca-nss-drv/stats/ipv4 /sys/kernel/debug/qca-nss-drv/stats/ipv6 2>/dev/null || echo 0)
-	fi
-
-	local cur_freq=""
-	if [ -f /tmp/nss_profile.env ]; then
-		cur_freq=$(grep '^nss_freq=' /tmp/nss_profile.env 2>/dev/null | cut -d"'" -f2)
-	fi
-	[ -z "$cur_freq" ] && cur_freq=$(uci -q get nss_dashboard.clock.frequency || echo "1478.4 MHz")
-
-	local modules_json
-	modules_json=$(sample_modules)
-
-	printf '{"heartbeat":%d,"nss_bytes":%s,"nss_freq":"%s","core0_load":%s,"core1_load":%s,"cpu_temp":%s,"cpu_ticks":%s,"radios":[%s],"ecm_total":%d,"ecm_v4":%d,"ecm_v6":%d,"ecm_tcp":%d,"ecm_udp":%d,"ecm_other":%d,"wifi_offload":%d,"conflict_detected":%d,"modules":%s}\n' \
-		"${heartbeat:-0}" "${nss_bytes:-0}" "${cur_freq:-1478.4 MHz}" "${core0_load:-0}" "${core1_load:-null}" "${cpu_temp:-0.0}" "${cpu_ticks}" "${radios_json}" \
-		"${ecm_total:-0}" "${ecm_v4:-0}" "${ecm_v6:-0}" "${ecm_tcp:-0}" "${ecm_udp:-0}" "${ecm_other:-0}" \
-		"$wifi_offload" "$conflict" "$modules_json"
+	json_init
+	add_dynamic_metrics
+	json_dump
 }
 
 get_status() {
 	ensure_profile
 
-	local soc="IPQ8074" cores=2 fw_ver="NSS.FW.12.5-210-HK.R" fw_mask="0x36" nss_freq="1478.4 MHz" sqm_state=0
-	if [ -f /tmp/nss_profile.env ]; then
-		. /tmp/nss_profile.env
-	elif [ -s "$PROFILE_JSON" ]; then
-		soc=$(grep -o '"soc":"[^"]*"' "$PROFILE_JSON" 2>/dev/null | cut -d'"' -f4)
-		cores=$(grep -o '"cores":[0-9]*' "$PROFILE_JSON" 2>/dev/null | cut -d':' -f2)
-		fw_ver=$(grep -o '"fw_version":"[^"]*"' "$PROFILE_JSON" 2>/dev/null | cut -d'"' -f4)
-		fw_mask=$(grep -o '"fw_mask":"[^"]*"' "$PROFILE_JSON" 2>/dev/null | cut -d':' -f4)
-		nss_freq=$(grep -o '"nss_freq":"[^"]*"' "$PROFILE_JSON" 2>/dev/null | cut -d'"' -f4)
-		sqm_state=$(grep -o '"sqm":[0-9-]*' "$PROFILE_JSON" 2>/dev/null | cut -d':' -f2)
+	local soc cores fw_ver fw_mask nss_freq sqm_state
+	if [ -f "$PROFILE_ENV" ]; then
+		. "$PROFILE_ENV"
 	fi
 
-	local metrics_json
-	metrics_json=$(get_metrics)
+	[ -z "$soc" ] && soc=$(probe_soc)
+	[ -z "$cores" ] && cores=$(probe_npu_cores "$soc")
+	[ -z "$fw_ver" ] && fw_ver=$(probe_fw_version)
+	[ -z "$fw_mask" ] && fw_mask=$(probe_fw_mask)
+	[ -z "$nss_freq" ] && nss_freq=$(probe_nss_freq)
+	[ -z "$sqm_state" ] && sqm_state=$(probe_sqm)
 
-	printf '{"soc":"%s","cores":%d,"fw_version":"%s","fw_mask":"%s","nss_freq":"%s","sqm":%d,%s' \
-		"${soc:-IPQ8074}" "${cores:-2}" "${fw_ver:-12.5}" "${fw_mask:-0x36}" "${nss_freq:-1478.4 MHz}" "${sqm_state:-0}" \
-		"${metrics_json#\{}"
+	json_init
+	json_add_string "soc" "$soc"
+	json_add_int "cores" "$cores"
+	json_add_string "fw_version" "$fw_ver"
+	json_add_string "fw_mask" "$fw_mask"
+	json_add_string "nss_freq" "$nss_freq"
+	json_add_int "sqm" "$sqm_state"
+	add_dynamic_metrics
+	json_dump
 }
 
 get_ports() {
@@ -340,7 +183,16 @@ get_flows() {
 
 get_audit() {
 	if [ ! -x /usr/sbin/nlbw ]; then
-		printf '{"installed":0,"message":"未安装 nlbwmon 流量审计组件","audit":{"columns":[],"data":[]}}\n'
+		json_init
+		json_add_int "installed" 0
+		json_add_string "message" "未安装 nlbwmon 流量审计组件"
+		json_add_object "audit"
+		json_add_array "columns"
+		json_close_array
+		json_add_array "data"
+		json_close_array
+		json_close_object
+		json_dump
 		return
 	fi
 
@@ -350,25 +202,21 @@ get_audit() {
 }
 
 get_settings() {
-	local enabled crypto freq auto_block
-	enabled=$(uci -q get nss_dashboard.general.enabled || echo "1")
-	crypto=$(uci -q get nss_dashboard.crypto.enabled || echo "0")
-	freq=$(uci -q get nss_dashboard.clock.frequency || echo "1478.4 MHz")
-	auto_block=$(uci -q get nss_dashboard.security.auto_block || echo "1")
-
-	printf '{"enabled":%d,"crypto":%d,"frequency":"%s","auto_block":%d}\n' \
-		"${enabled:-1}" "${crypto:-0}" "${freq:-1478.4 MHz}" "${auto_block:-1}"
+	json_init
+	json_add_int "enabled" "$(uci -q get nss_dashboard.general.enabled || echo 1)"
+	json_add_int "crypto" "$(uci -q get nss_dashboard.crypto.enabled || echo 0)"
+	json_add_string "frequency" "$(uci -q get nss_dashboard.clock.frequency || echo '1478.4 MHz')"
+	json_add_int "auto_block" "$(uci -q get nss_dashboard.security.auto_block || echo 1)"
+	json_dump
 }
 
 set_settings() {
-	local input
 	read -r input
-
-	local enabled crypto freq auto_block
-	enabled=$(echo "$input" | grep -o '"enabled":[0-9]*' | cut -d':' -f2)
-	crypto=$(echo "$input" | grep -o '"crypto":[0-9]*' | cut -d':' -f2)
-	freq=$(echo "$input" | grep -o '"frequency":"[^"]*"' | cut -d'"' -f4)
-	auto_block=$(echo "$input" | grep -o '"auto_block":[0-9]*' | cut -d':' -f2)
+	json_load "$input"
+	json_get_var enabled "enabled"
+	json_get_var crypto "crypto"
+	json_get_var freq "frequency"
+	json_get_var auto_block "auto_block"
 
 	[ -n "$enabled" ] && uci -q set nss_dashboard.general.enabled="$enabled"
 	[ -n "$crypto" ] && uci -q set nss_dashboard.crypto.enabled="$crypto"
@@ -395,7 +243,9 @@ set_settings() {
 		fi
 	fi
 
-	echo '{"success":true}'
+	json_init
+	json_add_boolean "success" 1
+	json_dump
 }
 
 case "$1" in

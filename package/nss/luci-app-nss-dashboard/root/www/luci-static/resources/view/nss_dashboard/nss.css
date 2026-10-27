@@ -73,8 +73,7 @@
 	padding: 0 2px;
 }
 
-.nss-dashboard-spa .fit-unit,
-#nss-sticky-telemetry-bar .fit-unit {
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-unit {
 	height: 24px;
 	min-height: 24px;
 	max-height: 24px;
@@ -95,8 +94,7 @@
 	width: 100%;
 }
 
-.nss-dashboard-spa .fit-unit-bar,
-#nss-sticky-telemetry-bar .fit-unit-bar {
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-unit-bar {
 	border: 1px solid var(--border-color-medium);
 	background: var(--background-color-medium);
 	color: var(--text-color-high);
@@ -107,8 +105,7 @@
 	justify-content: center;
 }
 
-.nss-dashboard-spa .fit-bar-label,
-#nss-sticky-telemetry-bar .fit-bar-label {
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-bar-label {
 	font-size: 10px;
 	font-weight: 700;
 	color: var(--text-color-medium);
@@ -157,8 +154,7 @@
 }
 
 /* 2. Pure Design Tokens Badges (Pure CSS Variables, Zero Hardcoded Hex) */
-.nss-dashboard-spa .badge,
-#nss-status-table .badge {
+:is(.nss-dashboard-spa, #nss-status-table) .badge {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -178,8 +174,7 @@
 	box-sizing: border-box;
 }
 
-.nss-dashboard-spa .badge-dot,
-#nss-status-table .badge-dot {
+:is(.nss-dashboard-spa, #nss-status-table) .badge-dot {
 	display: inline-block;
 	width: 6px;
 	height: 6px;
@@ -188,36 +183,31 @@
 	flex-shrink: 0;
 }
 
-.nss-dashboard-spa .badge.badge-success,
-#nss-status-table .badge.badge-success {
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-success {
 	background: color-mix(in srgb, var(--success-color-high, #00ac59) 15%, transparent);
 	border-color: color-mix(in srgb, var(--success-color-high, #00ac59) 45%, transparent);
 	color: var(--success-color-high, #00ac59);
 }
 
-.nss-dashboard-spa .badge.badge-info,
-#nss-status-table .badge.badge-info {
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-info {
 	background: color-mix(in srgb, var(--primary-color-high, #1976d2) 15%, transparent);
 	border-color: color-mix(in srgb, var(--primary-color-high, #1976d2) 45%, transparent);
 	color: var(--primary-color-high, #1976d2);
 }
 
-.nss-dashboard-spa .badge.badge-warning,
-#nss-status-table .badge.badge-warning {
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-warning {
 	background: color-mix(in srgb, var(--warn-color-high, #efbd0b) 15%, transparent);
 	border-color: color-mix(in srgb, var(--warn-color-high, #efbd0b) 45%, transparent);
 	color: var(--warn-color-high, #efbd0b);
 }
 
-.nss-dashboard-spa .badge.badge-danger,
-#nss-status-table .badge.badge-danger {
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-danger {
 	background: color-mix(in srgb, var(--error-color-high, #f62b12) 15%, transparent);
 	border-color: color-mix(in srgb, var(--error-color-high, #f62b12) 45%, transparent);
 	color: var(--error-color-high, #f62b12);
 }
 
-.nss-dashboard-spa .badge.badge-neutral,
-#nss-status-table .badge.badge-neutral {
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-neutral {
 	background: var(--background-color-medium, rgba(255, 255, 255, 0.06));
 	border-color: var(--border-color-medium, rgba(128, 128, 128, 0.25));
 	color: var(--text-color-medium, #888);
@@ -238,8 +228,7 @@
 	white-space: nowrap;
 }
 
-.nss-dashboard-spa .th-hint,
-#nss-status-table .th-hint {
+:is(.nss-dashboard-spa, #nss-status-table) .th-hint {
 	border-bottom: 1px dotted var(--text-color-low, rgba(255, 255, 255, 0.3));
 	cursor: help;
 }
@@ -423,8 +412,7 @@
 }
 
 /* 8. Action Button & Loading Animation */
-.nss-dashboard-spa button#btn-force-refresh,
-#nss-sticky-telemetry-bar button#btn-force-refresh {
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) button#btn-force-refresh {
 	height: 24px;
 	min-height: 24px;
 	max-height: 24px;
@@ -438,8 +426,7 @@
 	user-select: none;
 }
 
-.nss-dashboard-spa button#btn-force-refresh:disabled,
-#nss-sticky-telemetry-bar button#btn-force-refresh:disabled {
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) button#btn-force-refresh:disabled {
 	opacity: 0.6;
 	cursor: not-allowed;
 }
@@ -484,23 +471,16 @@
 	border: none;
 }
 
-.nss-bar-fill {
-	background: var(--primary-color-medium, #1976d2);
-	height: 100%;
-	border-radius: 999px;
-}
-
-.nss-bar-warn {
-	background: var(--warn-color-high, #efbd0b);
-	height: 100%;
-	border-radius: 999px;
-}
-
+.nss-bar-fill,
+.nss-bar-warn,
 .nss-bar-danger {
-	background: var(--error-color-high, #f62b12);
 	height: 100%;
 	border-radius: 999px;
 }
+
+.nss-bar-fill { background: var(--primary-color-medium, #1976d2); }
+.nss-bar-warn { background: var(--warn-color-high, #efbd0b); }
+.nss-bar-danger { background: var(--error-color-high, #f62b12); }
 
 .nss-bar-disabled {
 	background: var(--background-color-low, rgba(255, 255, 255, 0.05));

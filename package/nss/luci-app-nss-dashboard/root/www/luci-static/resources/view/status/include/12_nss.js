@@ -49,7 +49,7 @@ return baseclass.extend({
 			]),
 			E('div', {
 				'style': 'font-size:11px; color:var(--text-color-medium); line-height:1.4;',
-				'title': spec.rawFw + (spec.fwMask ? ' (fw_mask: ' + spec.fwMask + ')' : '')
+				'title': spec.rawFw + ((spec.fwMask && spec.fwMask !== '0x0') ? ' (fw_mask: ' + spec.fwMask + ')' : '')
 			}, [
 				fwDisplay + ' • ' + _('心跳') + ': ' + heartbeatStr
 			])

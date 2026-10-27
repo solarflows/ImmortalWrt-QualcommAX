@@ -119,6 +119,56 @@ function traceFlowByIp(targetIp) {
 	}
 }
 
+/* 地址池区块：IPv4/IPv6 共用一套"逐 IP 卡片 + 复制/反查按钮"渲染，
+   差异全部通过 opts 注入（note 判定、容器布局、code 样式、标题前缀）。 */
+function renderIpPool(list, opts) {
+	if (!list || !list.length) return null;
+
+	var items = list.map(function(ip) {
+		var disp = opts.display ? opts.display(ip) : ip;
+		var note = opts.note(disp);
+		var noteBadge = note ? E('span', {
+			'class': 'badge ' + ((note === _('主IP')) ? 'badge-info' : 'badge-neutral'),
+			'style': 'font-size: 9px; padding: 0 4px; line-height: 14px; height: 14px;'
+		}, [ note ]) : '';
+
+		return E('div', {
+			'style': 'display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; background: var(--background-color-medium, rgba(255,255,255,0.05)); border: 1px solid var(--border-color-low, rgba(255,255,255,0.08)); border-radius: 4px;' + (opts.itemExtra || '')
+		}, [
+			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 6px; min-width: 0;' }, [
+				E('code', { 'style': 'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px;' + (opts.codeExtra || '') }, [ disp ]),
+				noteBadge
+			]),
+			E('div', { 'style': 'display: inline-flex; gap: 3px; flex-shrink: 0;' }, [
+				E('button', {
+					'class': 'ip-action-btn',
+					'title': opts.copyPrefix + disp,
+					'click': function(ev) {
+						ev.stopPropagation();
+						copyTextToClipboard(disp, this, 'OK');
+					}
+				}, [ '📋' ]),
+				E('button', {
+					'class': 'ip-action-btn',
+					'title': _('在流表中查寻此 IP 流量: ') + disp,
+					'click': function(ev) {
+						ev.stopPropagation();
+						traceFlowByIp(disp);
+					}
+				}, [ '🎯' ])
+			])
+		]);
+	});
+
+	return E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px;' }, [
+		E('div', { 'style': 'font-size: 11px; font-weight: 700; color: var(--text-color-medium); display: flex; align-items: center; gap: 6px;' }, [
+			E('span', { 'class': 'badge-dot', 'style': 'width:5px; height:5px; background:' + opts.dotColor + ';' }),
+			opts.label.format(list.length)
+		]),
+		E('div', { 'style': opts.wrapStyle }, items)
+	]);
+}
+
 function renderItemExpandPanel(clientObj, onToggle) {
 	var ipv4List = clientObj.ipv4List || [];
 	var ipv6List = clientObj.ipv6List || [];
@@ -204,98 +254,30 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	}, metricsItems);
 
 	// 3. IPv4 地址池区域
-	var v4Section = null;
-	if (ipv4List.length > 0) {
-		var v4Items = ipv4List.map(function(ip) {
-			var note = (ip === '127.0.0.1') ? 'Loopback' : (ip.indexOf('100.') === 0) ? 'WAN' : (ip === clientObj.ip ? _('主IP') : '');
-			var noteBadge = note ? E('span', {
-				'class': 'badge ' + (note === _('主IP') ? 'badge-info' : 'badge-neutral'),
-				'style': 'font-size: 9px; padding: 0 4px; line-height: 14px; height: 14px;'
-			}, [ note ]) : '';
-
-			return E('div', {
-				'style': 'display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; background: var(--background-color-medium, rgba(255,255,255,0.05)); border: 1px solid var(--border-color-low, rgba(255,255,255,0.08)); border-radius: 4px; min-width: 190px;'
-			}, [
-				E('div', { 'style': 'display: inline-flex; align-items: center; gap: 6px;' }, [
-					E('code', { 'style': 'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; font-weight: 500;' }, [ ip ]),
-					noteBadge
-				]),
-				E('div', { 'style': 'display: inline-flex; gap: 3px;' }, [
-					E('button', {
-						'class': 'ip-action-btn',
-						'title': _('复制此 IPv4 地址: ') + ip,
-						'click': function(ev) {
-							ev.stopPropagation();
-							copyTextToClipboard(ip, this, 'OK');
-						}
-					}, [ '📋' ]),
-					E('button', {
-						'class': 'ip-action-btn',
-						'title': _('在流表中查寻此 IP 流量: ') + ip,
-						'click': function(ev) {
-							ev.stopPropagation();
-							traceFlowByIp(ip);
-						}
-					}, [ '🎯' ])
-				])
-			]);
-		});
-		v4Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px;' }, [
-			E('div', { 'style': 'font-size: 11px; font-weight: 700; color: var(--text-color-medium); display: flex; align-items: center; gap: 6px;' }, [
-				E('span', { 'class': 'badge-dot', 'style': 'width:5px; height:5px; background:var(--primary-color-high);' }),
-				_('IPv4 地址池 (%d 个):').format(ipv4List.length)
-			]),
-			E('div', { 'style': 'display: flex; flex-wrap: wrap; gap: 6px;' }, v4Items)
-		]);
-	}
+	var v4Section = renderIpPool(ipv4List, {
+		label: _('IPv4 地址池 (%d 个):'),
+		dotColor: 'var(--primary-color-high)',
+		wrapStyle: 'display: flex; flex-wrap: wrap; gap: 6px;',
+		itemExtra: ' min-width: 190px;',
+		codeExtra: ' font-weight: 500;',
+		copyPrefix: _('复制此 IPv4 地址: '),
+		note: function(ip) {
+			return (ip === '127.0.0.1') ? 'Loopback' : (ip.indexOf('100.') === 0) ? 'WAN' : (ip === clientObj.ip ? _('主IP') : '');
+		}
+	});
 
 	// 4. IPv6 地址池区域
-	var v6Section = null;
-	if (ipv6List.length > 0) {
-		var v6Grid = E('div', { 'style': 'display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 6px;' });
-		ipv6List.forEach(function(ip6) {
-			var norm = compressIPv6(ip6);
-			var note = (norm === '::1') ? 'Loopback' : (ip6.indexOf('fe80:') === 0) ? 'Link-Local' : '';
-			var noteBadge = note ? E('span', {
-				'class': 'badge badge-neutral',
-				'style': 'font-size: 9px; padding: 0 4px; line-height: 14px; height: 14px;'
-			}, [ note ]) : '';
-
-			v6Grid.appendChild(E('div', {
-				'style': 'display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; background: var(--background-color-medium, rgba(255,255,255,0.05)); border: 1px solid var(--border-color-low, rgba(255,255,255,0.08)); border-radius: 4px;'
-			}, [
-				E('div', { 'style': 'display: inline-flex; align-items: center; gap: 6px; min-width: 0;' }, [
-					E('code', { 'style': 'font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; word-break: break-all;' }, [ norm ]),
-					noteBadge
-				]),
-				E('div', { 'style': 'display: inline-flex; gap: 3px; flex-shrink: 0;' }, [
-					E('button', {
-						'class': 'ip-action-btn',
-						'title': _('复制此 IPv6 地址: ') + norm,
-						'click': function(ev) {
-							ev.stopPropagation();
-							copyTextToClipboard(norm, this, 'OK');
-						}
-					}, [ '📋' ]),
-					E('button', {
-						'class': 'ip-action-btn',
-						'title': _('在流表中查寻此 IP 流量: ') + norm,
-						'click': function(ev) {
-							ev.stopPropagation();
-							traceFlowByIp(norm);
-						}
-					}, [ '🎯' ])
-				])
-			]));
-		});
-		v6Section = E('div', { 'style': 'display: flex; flex-direction: column; gap: 5px;' }, [
-			E('div', { 'style': 'font-size: 11px; font-weight: 700; color: var(--text-color-medium); display: flex; align-items: center; gap: 6px;' }, [
-				E('span', { 'class': 'badge-dot', 'style': 'width:5px; height:5px; background:var(--success-color-high);' }),
-				_('IPv6 地址池 (%d 个):').format(ipv6List.length)
-			]),
-			v6Grid
-		]);
-	}
+	var v6Section = renderIpPool(ipv6List, {
+		label: _('IPv6 地址池 (%d 个):'),
+		dotColor: 'var(--success-color-high)',
+		wrapStyle: 'display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 6px;',
+		codeExtra: ' word-break: break-all;',
+		copyPrefix: _('复制此 IPv6 地址: '),
+		display: compressIPv6,
+		note: function(ip) {
+			return (ip === '::1') ? 'Loopback' : (ip.indexOf('fe80:') === 0) ? 'Link-Local' : '';
+		}
+	});
 
 	var panel = E('div', {
 		'class': 'client-tree-panel'
@@ -356,6 +338,48 @@ function moduleChip(name, state, customLabel, customTitle) {
 }
 
 // ── 1. 顶置常驻遥测总线状态栏 (路子 A：三仓等高对称分栏，响应式铺满无死黑) ──
+/* 轮询档位徽章状态表：still = 不可点击（后台休眠态）；dot = true 默认圆点，'success' 绿色圆点 */
+var POLL_BADGE_DEFS = {
+	paused:  { cls: 'badge-warning', icon: '⏸ ', text: _('已暂停'),      title: _('当前档位：已手动暂停轮询。点击切换至「4s 实时更新 (自适应)」') },
+	hovered: { cls: 'badge-warning', icon: '⏸ ', text: _('移入挂起'),    title: _('鼠标正在表格内浏览，已自动挂起刷新以防打断；移出表格自动恢复，或点击切换轮询档位') },
+	keep:    { cls: 'badge-info',    dot: true,   text: _('保持 4s 更新'), title: _('当前档位：保持 4s 更新（常亮盯盘模式，禁用空闲退避与失焦降频）。点击切换至「暂停轮询」') },
+	hidden:  { cls: 'badge-neutral', text: _('后台休眠'), still: true },
+	idle:    { cls: 'badge-neutral', icon: '⏱️ ', text: _('挂机省电'),    title: _('当前处于挂机省电模式（24s 轮询）。移动鼠标立即唤醒，或点击切换至「保持 4s 更新 (不休眠)」') },
+	active:  { cls: 'badge-neutral', dot: 'success', text: _('4s 实时更新'), title: _('当前档位：4s 实时更新（自适应省电）。点击切换至「保持 4s 更新 (不休眠)」') }
+};
+
+function renderPollBadge(onRefreshToggle) {
+	/* 判定优先级与旧版 if 链严格一致：paused > 悬停 > keep > 后台 > 挂机 > active */
+	var key = (pollMode === 'paused') ? 'paused'
+		: isTableHovered ? 'hovered'
+		: (pollMode === 'keep') ? 'keep'
+		: (!isPageVisible) ? 'hidden'
+		: isIdleBackoff ? 'idle'
+		: 'active';
+	var def = POLL_BADGE_DEFS[key];
+
+	var children = [];
+	if (def.dot === true) {
+		children.push(E('span', { 'class': 'badge-dot' }));
+	} else if (def.dot === 'success') {
+		children.push(E('span', { 'class': 'badge-dot', 'style': 'background:var(--success-color-high, #00ac59);' }));
+	}
+	children.push((def.icon || '') + def.text);
+
+	var attrs = {
+		'class': 'badge ' + def.cls + ' fit-unit',
+		'style': def.still ? 'height:24px;' : 'cursor:pointer; height:24px;'
+	};
+	if (def.title) attrs.title = def.title;
+	if (!def.still) {
+		attrs.click = function(ev) {
+			ev.stopPropagation();
+			cyclePollMode(onRefreshToggle);
+		};
+	}
+	return E('span', attrs, children);
+}
+
 function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 	var spec = chips.buildSpec(d, p);
 	var t = spec.temp;
@@ -373,69 +397,7 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 	var header = document.querySelector('header');
 	var navHeight = header ? header.offsetHeight : 40;
 
-	var refreshBadge;
-	if (pollMode === 'paused') {
-		refreshBadge = E('span', {
-			'class': 'badge badge-warning fit-unit',
-			'style': 'cursor:pointer; height:24px;',
-			'title': _('当前档位：已手动暂停轮询。点击切换至「4s 实时更新 (自适应)」'),
-			'click': function(ev) {
-				ev.stopPropagation();
-				cyclePollMode(onRefreshToggle);
-			}
-		}, [ '⏸ ' + _('已暂停') ]);
-	} else if (isTableHovered) {
-		refreshBadge = E('span', {
-			'class': 'badge badge-warning fit-unit',
-			'style': 'cursor:pointer; height:24px;',
-			'title': _('鼠标正在表格内浏览，已自动挂起刷新以防打断；移出表格自动恢复，或点击切换轮询档位'),
-			'click': function(ev) {
-				ev.stopPropagation();
-				cyclePollMode(onRefreshToggle);
-			}
-		}, [ '⏸ ' + _('移入挂起') ]);
-	} else if (pollMode === 'keep') {
-		refreshBadge = E('span', {
-			'class': 'badge badge-info fit-unit',
-			'style': 'cursor:pointer; height:24px;',
-			'title': _('当前档位：保持 4s 更新（常亮盯盘模式，禁用空闲退避与失焦降频）。点击切换至「暂停轮询」'),
-			'click': function(ev) {
-				ev.stopPropagation();
-				cyclePollMode(onRefreshToggle);
-			}
-		}, [
-			E('span', { 'class': 'badge-dot' }),
-			_('保持 4s 更新')
-		]);
-	} else if (!isPageVisible) {
-		refreshBadge = E('span', {
-			'class': 'badge badge-neutral fit-unit',
-			'style': 'height:24px;'
-		}, [ _('后台休眠') ]);
-	} else if (isIdleBackoff) {
-		refreshBadge = E('span', {
-			'class': 'badge badge-neutral fit-unit',
-			'style': 'cursor:pointer; height:24px;',
-			'title': _('当前处于挂机省电模式（24s 轮询）。移动鼠标立即唤醒，或点击切换至「保持 4s 更新 (不休眠)」'),
-			'click': function(ev) {
-				ev.stopPropagation();
-				cyclePollMode(onRefreshToggle);
-			}
-		}, [ _('⏱️ 挂机省电') ]);
-	} else {
-		refreshBadge = E('span', {
-			'class': 'badge badge-neutral fit-unit',
-			'style': 'cursor:pointer; height:24px;',
-			'title': _('当前档位：4s 实时更新（自适应省电）。点击切换至「保持 4s 更新 (不休眠)」'),
-			'click': function(ev) {
-				ev.stopPropagation();
-				cyclePollMode(onRefreshToggle);
-			}
-		}, [
-			E('span', { 'class': 'badge-dot', 'style': 'background:var(--success-color-high, #00ac59);' }),
-			_('4s 实时更新')
-		]);
-	}
+	var refreshBadge = renderPollBadge(onRefreshToggle);
 
 	var forceRefreshBtn = E('button', {
 		'class': 'btn cbi-button cbi-button-action fit-unit',
@@ -584,6 +546,16 @@ function renderConflictBanner(d) {
 }
 
 // ── 3. 子卡 A：状态总览 (Status) ──
+/* 状态页两栏行：左列 th-hint 标签（悬停提示），右列内容 */
+function statusRow(label, hint, content) {
+	return E('tr', { 'class': 'tr' }, [
+		E('td', { 'class': 'td left nss-status-label', 'title': hint }, [
+			E('span', { 'class': 'th-hint' }, [ label ])
+		]),
+		E('td', { 'class': 'td left' }, [ content ])
+	]);
+}
+
 function renderStatusCard(d, p) {
 	var mods = (d && d.modules) ? d.modules : ((p && p.modules) ? p.modules : {});
 	var spec = chips.buildSpec(d, p);
@@ -616,10 +588,10 @@ function renderStatusCard(d, p) {
 			'class': 'badge badge-neutral badge-tile-112',
 			'title': _('NSS 硬件加速微码版本: ') + rawFw
 		}, [ E('strong', {}, [ 'FW:' ]), fwShort ]),
-		E('span', {
+		(fwMask && fwMask !== '0x0') ? E('span', {
 			'class': 'badge badge-neutral badge-tile-112',
 			'title': _('微码特性掩码 (fw_mask)')
-		}, [ E('strong', {}, [ _('掩码:') ]), fwMask ]),
+		}, [ E('strong', {}, [ _('掩码:') ]), fwMask ]) : '',
 		E('span', {
 			'class': 'badge badge-success badge-tile-112',
 			'title': _('NPU 微码与内核驱动每秒高频心跳包采样 (pkts/s)')
@@ -705,30 +677,15 @@ function renderStatusCard(d, p) {
 			}, [ npuLabel + ' @ ' + freqVal ]),
 			E('span', {
 				'class': 'badge badge-success',
-				'title': rawFw + (fwMask ? ' (fw_mask: ' + fwMask + ')' : '')
+				'title': rawFw + ((fwMask && fwMask !== '0x0') ? ' (fw_mask: ' + fwMask + ')' : '')
 			}, [ fwDisplay ])
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [
 			E('table', { 'class': 'table nss-status-table' }, [
 				E('tbody', {}, [
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left nss-status-label', 'title': _('高通独立网络子系统架构规格、NPU 频率与微码版本') }, [
-							E('span', { 'class': 'th-hint' }, [ _('协处理器') ])
-						]),
-						E('td', { 'class': 'td left' }, [ specView ])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left nss-status-label', 'title': _('Linux 主机通用处理器 (usr/sys/sirq) 与 NSS 协处理器独立算力负载') }, [
-							E('span', { 'class': 'th-hint' }, [ _('核心负载') ])
-						]),
-						E('td', { 'class': 'td left' }, [ computeLoadView ])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left nss-status-label', 'title': _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)') }, [
-							E('span', { 'class': 'th-hint' }, [ _('模块状态') ])
-						]),
-						E('td', { 'class': 'td left' }, [ modulesView ])
-					])
+					statusRow(_('协处理器'), _('高通独立网络子系统架构规格、NPU 频率与微码版本'), specView),
+					statusRow(_('核心负载'), _('Linux 主机通用处理器 (usr/sys/sirq) 与 NSS 协处理器独立算力负载'), computeLoadView),
+					statusRow(_('模块状态'), _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)'), modulesView)
 				])
 			])
 		])
@@ -780,34 +737,16 @@ function renderStatusCard(d, p) {
 		E('div', { 'class': 'cbi-section-node' }, [
 			E('table', { 'class': 'table nss-status-table' }, [
 				E('tbody', {}, [
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left nss-status-label', 'title': _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流数与 v4/v6 概况') }, [
-							E('span', { 'class': 'th-hint' }, [ _('流表状态') ])
-						]),
-						E('td', { 'class': 'td left' }, [
-							E('div', { 'class': 'nss-grid-3x112' }, [
-								ecmTotalChip,
-								ecmDistChip,
-								badge('badge-success badge-tile-112', _('硬件直通中'), true)
-							])
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left nss-status-label', 'title': _('当前经由 NSS 硬件卸载的 IPv4 / IPv6 及 TCP / UDP 活跃连接流详细分布') }, [
-							E('span', { 'class': 'th-hint' }, [ _('协议分布') ])
-						]),
-						E('td', { 'class': 'td left' }, [
-							E('div', { 'class': 'nss-grid-3x112' }, flowChips)
-						])
-					]),
-					E('tr', { 'class': 'tr' }, [
-						E('td', { 'class': 'td left nss-status-label', 'title': _('路由器 SoC 物理结温与 Wi-Fi 射频芯片温度实时监控') }, [
-							E('span', { 'class': 'th-hint' }, [ _('硬件结温') ])
-						]),
-						E('td', { 'class': 'td left' }, [
-							E('div', { 'class': 'nss-grid-3x112' }, tempElements)
-						])
-					])
+					statusRow(_('流表状态'), _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流数与 v4/v6 概况'),
+						E('div', { 'class': 'nss-grid-3x112' }, [
+							ecmTotalChip,
+							ecmDistChip,
+							badge('badge-success badge-tile-112', _('硬件直通中'), true)
+						])),
+					statusRow(_('协议分布'), _('当前经由 NSS 硬件卸载的 IPv4 / IPv6 及 TCP / UDP 活跃连接流详细分布'),
+						E('div', { 'class': 'nss-grid-3x112' }, flowChips)),
+					statusRow(_('硬件结温'), _('路由器 SoC 物理结温与 Wi-Fi 射频芯片温度实时监控'),
+						E('div', { 'class': 'nss-grid-3x112' }, tempElements))
 				])
 			])
 		])
@@ -1161,7 +1100,21 @@ var DSCP_NAMES = {
 	40: 'CS5', 44: 'VA', 46: 'EF', 48: 'CS6', 56: 'CS7'
 };
 
-
+/* DSCP 业务分级 → [badge cls, icon, 分类文案]；未命中走非标标记回落 */
+var DSCP_CATS = {
+	voip:  [ 'badge-danger',  '📞', _('VoIP 实时语音') ],
+	video: [ 'badge-warning', '🎬', _('流媒体视频') ],
+	af:    [ 'badge-info',    '💼', _('关键事务交互') ],
+	ctrl:  [ 'badge-success', '🛡️', _('网络协议控制') ],
+	scav:  [ 'badge-neutral', '🔽', _('低优清道夫') ]
+};
+var DSCP_CAT_OF = {
+	44: 'voip', 46: 'voip',
+	26: 'video', 28: 'video', 30: 'video', 32: 'video', 34: 'video', 36: 'video', 38: 'video', 40: 'video',
+	10: 'af', 12: 'af', 14: 'af', 16: 'af', 18: 'af', 20: 'af', 22: 'af', 24: 'af',
+	48: 'ctrl', 56: 'ctrl',
+	1: 'scav', 8: 'scav'
+};
 
 var fmtRate = util.fmtRate.bind(util);
 var fmtPps = util.fmtPps.bind(util);
@@ -1171,43 +1124,18 @@ function getDscpMeta(mark) {
 		return { dscp: 0, name: 'CS0', label: '— #CS0', cls: 'badge-neutral', icon: '', category: _('尽力而为') };
 	}
 	var d = (mark & 0x80) ? (mark & 0x7f) : (mark <= 63 ? mark : 0);
-	var name = DSCP_NAMES[d] || ('0x' + d.toString(16).toUpperCase());
-
-	var cls = 'badge-neutral';
-	var icon = '🏷️';
-	var category = _('非标标记');
-
-	if (d === 46 || d === 44) {
-		cls = 'badge-danger';
-		icon = '📞';
-		category = _('VoIP 实时语音');
-	} else if (d === 34 || d === 36 || d === 38 || d === 26 || d === 28 || d === 30 || d === 32 || d === 40) {
-		cls = 'badge-warning';
-		icon = '🎬';
-		category = _('流媒体视频');
-	} else if (d === 18 || d === 20 || d === 22 || d === 10 || d === 12 || d === 14 || d === 16 || d === 24) {
-		cls = 'badge-info';
-		icon = '💼';
-		category = _('关键事务交互');
-	} else if (d === 48 || d === 56) {
-		cls = 'badge-success';
-		icon = '🛡️';
-		category = _('网络协议控制');
-	} else if (d === 1 || d === 8) {
-		cls = 'badge-neutral';
-		icon = '🔽';
-		category = _('低优清道夫');
-	} else if (d === 0) {
+	if (d === 0) {
 		return { dscp: 0, name: 'CS0', label: '— #CS0', cls: 'badge-neutral', icon: '', category: _('尽力而为') };
 	}
-
+	var name = DSCP_NAMES[d] || ('0x' + d.toString(16).toUpperCase());
+	var m = DSCP_CATS[DSCP_CAT_OF[d]] || [ 'badge-neutral', '🏷️', _('非标标记') ];
 	return {
 		dscp: d,
 		name: name,
 		label: '#' + name,
-		cls: cls,
-		icon: icon,
-		category: category
+		cls: m[0],
+		icon: m[1],
+		category: m[2]
 	};
 }
 
@@ -1911,26 +1839,21 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 	var processed = processFlowsData(flowsData, hostHintsData);
 	if (!processed.isInstalled) return;
 
+	var summaryText = {
+		'flows-total-conns': processed.rawFlows.length + ' ' + _('条并发流'),
+		'flows-global-rate': fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : ''),
+		'flows-proto-dist': 'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount,
+		'flows-stack-dist': 'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count,
+		'flows-active-clients': processed.clientsList.length + ' ' + _('台设备'),
+		'flows-total-pkts-bytes': processed.totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', processed.totalBytes) + ')'
+	};
+	for (var sid in summaryText) {
+		var el = subCardContainer.querySelector('#' + sid);
+		if (el) el.textContent = summaryText[sid];
+	}
+
 	var badgeEl = subCardContainer.querySelector('#flows-summary-badge');
 	if (badgeEl) dom.content(badgeEl, [ badge('badge-info', processed.rawFlows.length + ' ' + _('活动流')) ]);
-
-	var connsEl = subCardContainer.querySelector('#flows-total-conns');
-	if (connsEl) connsEl.textContent = processed.rawFlows.length + ' ' + _('条并发流');
-
-	var rateEl = subCardContainer.querySelector('#flows-global-rate');
-	if (rateEl) rateEl.textContent = fmtRate(processed.globalRateBps) + (processed.globalPps > 0 ? (' (' + fmtPps(processed.globalPps) + ')') : '');
-
-	var protoEl = subCardContainer.querySelector('#flows-proto-dist');
-	if (protoEl) protoEl.textContent = 'TCP: ' + processed.tcpCount + ' · UDP: ' + processed.udpCount;
-
-	var stackEl = subCardContainer.querySelector('#flows-stack-dist');
-	if (stackEl) stackEl.textContent = 'IPv4: ' + processed.v4Count + ' · IPv6: ' + processed.v6Count;
-
-	var clientsEl = subCardContainer.querySelector('#flows-active-clients');
-	if (clientsEl) clientsEl.textContent = processed.clientsList.length + ' ' + _('台设备');
-
-	var pktsBytesEl = subCardContainer.querySelector('#flows-total-pkts-bytes');
-	if (pktsBytesEl) pktsBytesEl.textContent = processed.totalPkts.toLocaleString() + ' pkts (' + String.format('%1024.1mB', processed.totalBytes) + ')';
 
 	var mainSection = subCardContainer.querySelector('.cbi-section') || subCardContainer;
 	if (flowSubTab === 'clients') {

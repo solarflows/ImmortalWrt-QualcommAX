@@ -261,19 +261,6 @@
 	padding: 0 5px !important;
 }
 
-.badge-tile-102 {
-	width: 102px !important;
-	min-width: 102px !important;
-	max-width: 102px !important;
-	height: 21px !important;
-	justify-content: center !important;
-	box-sizing: border-box !important;
-	text-align: center !important;
-	font-variant-numeric: tabular-nums !important;
-	overflow: hidden !important;
-	margin: 0 !important;
-}
-
 .badge-tile-64 {
 	width: 64px !important;
 	min-width: 64px !important;

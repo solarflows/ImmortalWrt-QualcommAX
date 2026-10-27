@@ -4,6 +4,8 @@
 'require poll';
 'require dom';
 'require ui';
+'require view.nss_dashboard.lib.util as util';
+'require view.nss_dashboard.lib.chips as chips';
 
 var callGetProfile = rpc.declare({
 	object: 'luci.nss_dashboard',
@@ -13,11 +15,6 @@ var callGetProfile = rpc.declare({
 var callGetMetrics = rpc.declare({
 	object: 'luci.nss_dashboard',
 	method: 'getMetrics'
-});
-
-var callGetStatus = rpc.declare({
-	object: 'luci.nss_dashboard',
-	method: 'getStatus'
 });
 
 var callGetSettings = rpc.declare({
@@ -57,53 +54,11 @@ var callGetAudit = rpc.declare({
 	method: 'getAudit'
 });
 
-function normIp(ip) {
-	if (!ip || ip.indexOf(':') === -1) return (ip || '').trim().toLowerCase();
-	var p = ip.trim().toLowerCase().split('::');
-	var l = p[0] ? p[0].split(':') : [], r = (p.length > 1 && p[1]) ? p[1].split(':') : [];
-	var mid = Array(Math.max(0, 8 - (l.length + r.length))).fill('0');
-	return l.concat(mid, r).map(function(h) { return parseInt(h || '0', 16).toString(16); }).join(':');
-}
-
-function compressIPv6(ip) {
-	if (!ip || ip.indexOf(':') === -1) return ip;
-	var words = normIp(ip).split(':');
-	var best = -1, bestLen = 0, cur = -1, curLen = 0;
-	words.forEach(function(w, i) {
-		if (w === '0') {
-			if (cur === -1) { cur = i; curLen = 1; } else { curLen++; }
-			if (curLen > bestLen) { best = cur; bestLen = curLen; }
-		} else { cur = -1; curLen = 0; }
-	});
-	if (bestLen < 2) return words.join(':');
-	return (words.slice(0, best).join(':') + '::' + words.slice(best + bestLen).join(':')).replace(/^:::/, '::').replace(/:::$/, '::');
-}
-
-function getSessionData(key) {
-	try {
-		var raw = sessionStorage.getItem(key);
-		return raw ? JSON.parse(raw) : null;
-	} catch (e) {
-		return null;
-	}
-}
-
-function setSessionData(key, val) {
-	try {
-		sessionStorage.setItem(key, JSON.stringify(val));
-	} catch (e) {}
-}
-
-function isPrivateIp(ip) {
-	if (!ip) return false;
-	if (ip.indexOf('192.168.') === 0 || ip.indexOf('10.') === 0 || ip.indexOf('127.') === 0) return true;
-	if (ip.indexOf('172.') === 0) {
-		var p = parseInt(ip.split('.')[1], 10);
-		return p >= 16 && p <= 31;
-	}
-	if (ip.indexOf('fe80:') === 0 || ip.indexOf('fd') === 0 || ip === '::1') return true;
-	return false;
-}
+var normIp = util.normIp.bind(util);
+var compressIPv6 = util.compressIPv6.bind(util);
+var getSessionData = util.getSessionData.bind(util);
+var setSessionData = util.setSessionData.bind(util);
+var isPrivateIp = util.isPrivateIp.bind(util);
 
 var isResolvingHints = false;
 var lastHintProbeTime = 0;
@@ -146,74 +101,13 @@ function cyclePollMode(onRefreshToggle) {
 }
 
 function makeScrollWrapAttrs(id, onRefreshToggle) {
-	return {
-		'id': id,
-		'style': 'overflow-x:auto; width:100%; -webkit-overflow-scrolling:touch;',
-		'mouseover': function(ev) {
-			if (ev.target.closest('thead')) {
-				if (isTableHovered) {
-					isTableHovered = false;
-					if (onRefreshToggle) onRefreshToggle();
-				}
-				return;
-			}
-			if (ev.target.closest('tbody')) {
-				if (!isTableHovered) {
-					isTableHovered = true;
-					if (onRefreshToggle) onRefreshToggle();
-				}
-			}
-		},
-		'mouseleave': function() {
-			if (isTableHovered) {
-				isTableHovered = false;
-				if (onRefreshToggle) onRefreshToggle();
-			}
-		}
-	};
+	return util.makeScrollWrapAttrs(id, function(hovered) {
+		isTableHovered = hovered;
+		if (onRefreshToggle) onRefreshToggle();
+	});
 }
 
-
-
-function copyTextToClipboard(text, btnElement, successMsg) {
-	if (!text) return Promise.resolve();
-	var doFeedback = function() {
-		if (btnElement) {
-			var origHtml = btnElement.innerHTML;
-			btnElement.innerHTML = '✓ ' + (successMsg || _('已复制'));
-			btnElement.style.color = 'var(--success-color-high, #00ac59)';
-			setTimeout(function() {
-				btnElement.innerHTML = origHtml;
-				btnElement.style.color = '';
-			}, 1200);
-		}
-	};
-
-	if (navigator.clipboard && window.isSecureContext) {
-		return navigator.clipboard.writeText(text).then(doFeedback).catch(function() {
-			fallbackCopy(text);
-			doFeedback();
-		});
-	} else {
-		fallbackCopy(text);
-		doFeedback();
-		return Promise.resolve();
-	}
-
-	function fallbackCopy(val) {
-		var ta = document.createElement('textarea');
-		ta.value = val;
-		ta.style.position = 'fixed';
-		ta.style.left = '-9999px';
-		ta.style.top = '-9999px';
-		ta.style.opacity = '0';
-		document.body.appendChild(ta);
-		ta.focus();
-		ta.select();
-		try { document.execCommand('copy'); } catch (err) {}
-		document.body.removeChild(ta);
-	}
-}
+var copyTextToClipboard = util.copyTextToClipboard.bind(util);
 
 function traceFlowByIp(targetIp) {
 	if (!targetIp) return;
@@ -421,135 +315,16 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	return panel;
 }
 
-function ensureCss() {
-	var id = 'luci-app-nss-dashboard-css';
-	var el = document.getElementById(id);
-	if (!el) {
-		document.head.appendChild(E('link', {
-			'id': id,
-			'rel': 'stylesheet',
-			'type': 'text/css',
-			'href': L.resource('view/nss_dashboard/nss.css') + '?v=261027i'
-		}));
-	} else if (el.href.indexOf('?v=261027i') === -1) {
-		el.href = L.resource('view/nss_dashboard/nss.css') + '?v=261027i';
-	}
-}
-
-var prevCpuTicks = null;
-var lastCpuTicksKey = '';
-var cachedCpuLoad = { total: 0, usr: 0, sys: 0, sirq: 0 };
-
-function calcCpuLoad(cpuTicks) {
-	if (!Array.isArray(cpuTicks) || cpuTicks.length < 7) {
-		return cachedCpuLoad;
-	}
-	var key = cpuTicks.join(',');
-	if (key === lastCpuTicksKey) {
-		return cachedCpuLoad;
-	}
-	lastCpuTicksKey = key;
-
-	var totalLoad = 0, usrRate = 0, sysRate = 0, sirqRate = 0;
-	if (prevCpuTicks && prevCpuTicks.length >= 7) {
-		var du = cpuTicks[0] - prevCpuTicks[0];
-		var dn = cpuTicks[1] - prevCpuTicks[1];
-		var ds = cpuTicks[2] - prevCpuTicks[2];
-		var did = cpuTicks[3] - prevCpuTicks[3];
-		var dio = cpuTicks[4] - prevCpuTicks[4];
-		var dirq = cpuTicks[5] - prevCpuTicks[5];
-		var dsirq = cpuTicks[6] - prevCpuTicks[6];
-		var dst = (cpuTicks[7] || 0) - (prevCpuTicks[7] || 0);
-		var dtot = du + dn + ds + did + dio + dirq + dsirq + dst;
-		if (dtot > 0) {
-			totalLoad = Math.max(0, Math.min(100, ((dtot - did - dio) / dtot) * 100));
-			usrRate = Math.max(0, Math.min(100, ((du + dn) / dtot) * 100));
-			sysRate = Math.max(0, Math.min(100, (ds / dtot) * 100));
-			sirqRate = Math.max(0, Math.min(100, (dsirq / dtot) * 100));
-		}
-	}
-	prevCpuTicks = cpuTicks.slice();
-	cachedCpuLoad = { total: totalLoad, usr: usrRate, sys: sysRate, sirq: sirqRate };
-	return cachedCpuLoad;
-}
-
-var prevMetricsNssBytes = null;
-var prevMetricsNssTime = 0;
-var nssMetricsRateBps = 0;
-
-function sampleMetricsRate(nssBytes) {
-	var curBytes = parseFloat(nssBytes);
-	if (isNaN(curBytes) || curBytes <= 0) return nssMetricsRateBps;
-
-	var now = Date.now();
-	if (prevMetricsNssBytes !== null && prevMetricsNssTime > 0) {
-		var dt = (now - prevMetricsNssTime) / 1000;
-		if (dt >= 0.4) {
-			if (curBytes > prevMetricsNssBytes) {
-				nssMetricsRateBps = ((curBytes - prevMetricsNssBytes) * 8) / dt;
-			} else if (curBytes === prevMetricsNssBytes && dt >= 3.0) {
-				nssMetricsRateBps = 0;
-			}
-			prevMetricsNssBytes = curBytes;
-			prevMetricsNssTime = now;
-		}
-	} else {
-		prevMetricsNssBytes = curBytes;
-		prevMetricsNssTime = now;
-	}
-	return nssMetricsRateBps;
-}
+var ensureCss = util.ensureCss.bind(util);
+var calcCpuLoad = chips.calcCpuLoad.bind(chips);
+var sampleMetricsRate = chips.sampleMetricsRate.bind(chips);
 
 function progressbar(value, max, label) {
-	if (value === null || value === undefined) {
-		return E('div', {
-			'class': 'nss-bar nss-bar-disabled',
-			'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
-			'title': label || _('待机 (无服务固件或未引导)')
-		}, [
-			E('span', { 'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:500; line-height:13px; color:var(--text-color-medium);' }, [
-				label || _('休眠待机')
-			])
-		]);
-	}
-	var vn = parseFloat(value) || 0,
-	    mn = parseFloat(max) || 100,
-	    pc = Math.min(100, Math.max(0, Math.floor((100 / mn) * vn)));
-
-	return E('div', {
-		'class': 'nss-bar',
-		'style': 'height:13px; min-width:80px; position:relative; overflow:hidden; margin:0;',
-		'title': '%s%%'.format(vn)
-	}, [
-		E('div', {
-			'style': 'width:%.2f%%; height:100%; transition:width 0.3s ease;'.format(pc),
-			'class': (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : ''
-		}),
-		label ? E('span', { 'style': 'position:absolute; top:0; left:0; width:100%; text-align:center; font-size:10px; font-weight:bold; line-height:13px; white-space:nowrap;' }, [
-			label
-		]) : ''
-	]);
+	return chips.bar({ value: value, max: max, label: label, height: 13 });
 }
 
 function hostCpuProgressbar(total, usr, sys, sirq) {
-	var vn = parseFloat(total) || 0;
-	var u = Math.max(0, parseFloat(usr) || 0);
-	var s = Math.max(0, parseFloat(sys) || 0);
-	var si = Math.max(0, parseFloat(sirq) || 0);
-	var label = 'usr: ' + u.toFixed(0) + '% • sys: ' + s.toFixed(0) + '% • sirq: ' + si.toFixed(0) + '%';
-
-	return E('div', {
-		'class': 'nss-bar nss-stacked',
-		'style': 'height:14px; min-width:80px; position:relative; overflow:hidden; margin:0; display:flex; border-radius:999px !important; border:none !important;',
-		'title': 'CPU: ' + vn.toFixed(1) + '% (usr: ' + u.toFixed(1) + '% sys: ' + s.toFixed(1) + '% sirq: ' + si.toFixed(1) + '%)'
-	}, [
-		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
-		E('span', {
-			'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:10px; font-weight:600; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.9);'
-		}, [ label ])
-	]);
+	return chips.stack({ total: total, usr: usr, sys: sys, sirq: sirq, height: 14 });
 }
 
 function miniCpuStackedBlock(cpu) {
@@ -557,132 +332,48 @@ function miniCpuStackedBlock(cpu) {
 	var u = Math.max(0, parseFloat(cpu.usr) || 0);
 	var s = Math.max(0, parseFloat(cpu.sys) || 0);
 	var si = Math.max(0, parseFloat(cpu.sirq) || 0);
-	var labelText = 'u:' + u.toFixed(0) + '% s:' + s.toFixed(0) + '% i:' + si.toFixed(0) + '%';
-
-	var barEl = E('div', {
-		'class': 'nss-bar nss-stacked',
-		'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; display:flex; border-radius:999px !important; border:none !important;'
-	}, [
-		E('div', { 'style': 'width:' + u.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--primary-color-medium, #1976d2); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + s.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--warn-color-high, #efbd0b); transition:width 0.3s ease;' }),
-		E('div', { 'style': 'width:' + si.toFixed(1) + '%; height:100%; border-radius:0 !important; background:var(--error-color-high, #f62b12); transition:width 0.3s ease;' }),
-		E('span', {
-			'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:700; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.95);'
-		}, [ labelText ])
-	]);
-
 	return E('div', {
 		'class': 'fit-unit fit-unit-bar',
 		'title': 'CPU 总占用: ' + vn.toFixed(1) + '% (usr 用户态: ' + u.toFixed(1) + '% • sys 内核态: ' + s.toFixed(1) + '% • sirq 软中断: ' + si.toFixed(1) + '%)'
 	}, [
 		E('span', { 'class': 'fit-bar-label' }, [ 'CPU' ]),
-		barEl
+		chips.stack({ total: cpu.total, usr: cpu.usr, sys: cpu.sys, sirq: cpu.sirq, compact: true, height: 14, style: 'flex:1; min-width:0;' })
 	]);
 }
 
 function miniBarBlock(label, value, isCpu, disabledText, titleText) {
-	var barEl;
-	if (value === null || value === undefined) {
-		barEl = E('div', {
-			'class': 'nss-bar nss-bar-disabled',
-			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:999px !important; border:none;'
-		}, [
-			E('span', {
-				'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:500; color:var(--text-color-medium);'
-			}, [ disabledText || _('待机') ])
-		]);
-	} else {
-		var vn = parseFloat(value) || 0;
-		var pc = Math.min(100, Math.max(0, vn));
-		var fillClass = (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : 'nss-bar-fill';
-		barEl = E('div', {
-			'class': 'nss-bar',
-			'style': 'flex:1; height:14px; min-width:0; position:relative; overflow:hidden; margin:0; border-radius:999px !important; border:none;'
-		}, [
-			E('div', {
-				'class': fillClass,
-				'style': 'width:' + pc.toFixed(1) + '%; height:100%; border-radius:999px; transition:width 0.3s ease;'
-			}),
-			E('span', {
-				'style': 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:1px; font-size:9px; font-weight:700; white-space:nowrap; text-shadow:0 0 2px rgba(0,0,0,0.95);'
-			}, [ (vn % 1 === 0 ? vn.toFixed(0) : vn.toFixed(1)) + '%' ])
-		]);
-	}
-
 	return E('div', {
 		'class': 'fit-unit fit-unit-bar',
 		'title': titleText || (label + ': ' + (value != null ? (value + '%') : (disabledText || _('待机'))))
 	}, [
 		E('span', { 'class': 'fit-bar-label' }, [ label ]),
-		barEl
+		chips.bar({ value: value, max: 100, disabledText: disabledText, title: titleText, height: 14, style: 'flex:1; min-width:0;' })
 	]);
 }
 
-function badge(cls, text, dot) {
-	var children = [];
-	if (dot) {
-		children.push(E('span', { 'class': 'badge-dot' }));
-	}
-	if (Array.isArray(text)) {
-		children = children.concat(text);
-	} else {
-		children.push(text);
-	}
-
-	return E('span', {
-		'class': 'badge ' + (cls || 'badge-neutral')
-	}, children);
-}
+var badge = chips.badge.bind(chips);
 
 function tempBadge(label, temp) {
-	var t = parseFloat(temp) || 0;
-	var cls = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
-
-	return E('span', {
-		'class': 'badge ' + cls + ' badge-tile-112',
-		'title': label + ': ' + t.toFixed(1) + '°C'
-	}, [
-		E('strong', {}, [ label + ':' ]),
-		' ' + t.toFixed(1) + '°C'
-	]);
+	return chips.tempBadge(label, temp, { tile: 'badge-tile-112' });
 }
 
 function moduleChip(name, state, customLabel, customTitle) {
-	var cls, label;
-	if (state === 2) {
-		cls = 'badge-success';
-		label = customLabel || _('运行中');
-	} else if (state === 1) {
-		cls = 'badge-info';
-		label = customLabel || _('就绪待命');
-	} else {
-		cls = 'badge-neutral';
-		label = customLabel || _('未安装');
-	}
-	return E('span', {
-		'class': 'badge ' + cls + ' badge-tile-112',
-		'title': customTitle || (name + ': ' + label)
-	}, [
-		(state === 2) ? E('span', { 'class': 'badge-dot' }) : '',
-		E('strong', {}, [ name + ':' ]),
-		' ' + label
-	]);
+	return chips.moduleChip(name, state, customLabel, customTitle, { tile: 'badge-tile-112' });
 }
 
 // ── 1. 顶置常驻遥测总线状态栏 (路子 A：三仓等高对称分栏，响应式铺满无死黑) ──
 function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
-	d = d || {};
-	p = p || {};
-	var t = parseFloat(d.cpu_temp) || 0;
+	var spec = chips.buildSpec(d, p);
+	var t = spec.temp;
 	var tempClass = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
-	var soc = p.soc || d.soc || 'IPQ8074';
-	var cores = p.cores || d.cores || 2;
-	var isDualNpu = (cores !== 1);
-	var freqFull = d.nss_freq || p.nss_freq || '1478.4 MHz';
-	var totalConns = (d.ecm_total != null) ? d.ecm_total : 0;
+	var soc = spec.soc;
+	var cores = spec.cores;
+	var isDualNpu = spec.isDualNpu;
+	var freqFull = spec.freq;
+	var totalConns = spec.conns;
 
-	var cpuLoad = calcCpuLoad(d.cpu_ticks);
-	var activeRateBps = (nssMetricsRateBps > 0) ? nssMetricsRateBps : (nssGlobalRateBps || 0);
+	var cpuLoad = calcCpuLoad(d ? d.cpu_ticks : null);
+	var activeRateBps = (chips.nssMetricsRateBps > 0) ? chips.nssMetricsRateBps : (nssGlobalRateBps || 0);
 	var throughputStr = fmtRate(activeRateBps);
 
 	var header = document.querySelector('header');
@@ -901,23 +592,25 @@ function renderConflictBanner(d) {
 // ── 3. 子卡 A：状态总览 (Status) ──
 function renderStatusCard(d, p) {
 	var mods = (d && d.modules) ? d.modules : ((p && p.modules) ? p.modules : {});
-	var totalConns = (d.ecm_total != null) ? d.ecm_total : 0;
-	var isDualNpu = (p.cores !== 1 && d.cores !== 1);
-	var npuLabel = isDualNpu ? 'NPU ×2' : 'NPU ×1';
-	var freqVal = d.nss_freq || p.nss_freq || '1478.4 MHz';
+	var spec = chips.buildSpec(d, p);
+	var mods = (d && d.modules) ? d.modules : ((p && p.modules) ? p.modules : {});
+	var totalConns = spec.conns;
+	var isDualNpu = spec.isDualNpu;
+	var npuLabel = spec.npuLabel;
+	var freqVal = spec.freq;
 
 	// 1. 协处理器与微码规格 (统一 3列 × 2行 112px 等宽卡片网格，突出 NPU 频率)
-	var rawFw = p.fw_version || d.fw_version || '12.5';
-	var fwMask = p.fw_mask || d.fw_mask || '0x36';
-	var fwShort = rawFw.replace(/^NSS\.(FW\.)?/, '');
-	var fwDisplay = 'FW ' + fwShort + (fwMask && fwMask !== '0x0' ? ' [' + fwMask + ']' : '');
-	var heartbeatNum = (d.heartbeat != null ? Number(d.heartbeat).toLocaleString() : '0');
+	var rawFw = spec.rawFw;
+	var fwMask = spec.fwMask;
+	var fwShort = spec.fwShort;
+	var fwDisplay = spec.fwDisplay;
+	var heartbeatNum = spec.heartbeat.toLocaleString();
 
 	var specView = E('div', { 'class': 'nss-grid-3x112' }, [
 		E('span', {
 			'class': 'badge badge-neutral badge-tile-112',
 			'title': _('高通网络子系统 (NSS) SoC 芯片型号')
-		}, [ E('strong', {}, [ 'SoC:' ]), p.soc || d.soc || 'IPQ8074' ]),
+		}, [ E('strong', {}, [ 'SoC:' ]), spec.soc ]),
 		E('span', {
 			'class': 'badge badge-info badge-tile-112',
 			'title': _('独立硬件网络协处理器核心拓扑')
@@ -1377,28 +1070,8 @@ function renderPortsCard(d, onRefreshToggle) {
 }
 
 // ── 6. 子卡 D：硬件流表与聚合 (Flows) ──
-var WELL_KNOWN_PORTS = {
-	'22': 'SSH',
-	'53': 'DNS',
-	'80': 'HTTP',
-	'443': 'HTTPS',
-	'123': 'NTP'
-};
-
-function formatEndpoint(ip, port) {
-	if (!ip) return '-';
-	var isIpv6 = (ip.indexOf(':') !== -1);
-	var pStr = '';
-	if (port) {
-		var service = WELL_KNOWN_PORTS[String(port)];
-		pStr = service ? (':' + port + '(' + service + ')') : (':' + port);
-	}
-	if (isIpv6) {
-		var dispIp = compressIPv6(ip);
-		return port ? ('[' + dispIp + ']' + pStr) : dispIp;
-	}
-	return ip + pStr;
-}
+var WELL_KNOWN_PORTS = util.WELL_KNOWN_PORTS;
+var formatEndpoint = util.formatEndpoint.bind(util);
 
 /* ── DataTable Core Primitives ── */
 function renderTableHeaders(cols, sortKey, sortDir, onSort) {
@@ -1603,19 +1276,8 @@ var DSCP_NAMES = {
 
 
 
-function fmtRate(bps) {
-	if (bps >= 1e9) return (bps / 1e9).toFixed(1) + ' Gbps';
-	if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mbps';
-	if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' Kbps';
-	return bps.toFixed(0) + ' bps';
-}
-
-function fmtPps(pps) {
-	if (!pps || pps <= 0) return '';
-	if (pps >= 1000) return (pps / 1000).toFixed(1) + 'k pps';
-	if (pps >= 1) return pps.toFixed(0) + ' pps';
-	return '<1 pps';
-}
+var fmtRate = util.fmtRate.bind(util);
+var fmtPps = util.fmtPps.bind(util);
 
 function getDscpMeta(mark) {
 	if (!mark || mark === 0) {

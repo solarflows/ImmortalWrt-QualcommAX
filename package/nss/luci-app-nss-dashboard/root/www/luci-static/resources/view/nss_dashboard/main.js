@@ -2169,6 +2169,7 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 // ── 8. SPA 统一主入口视图 ──
 return view.extend({
 	load: function() {
+		expandedClientsMap = {};
 		return Promise.all([
 			L.resolveDefault(callGetProfile(), {}),
 			L.resolveDefault(callGetMetrics(), {}),
@@ -2293,221 +2294,238 @@ return view.extend({
 			});
 		};
 
-		var subCardContainer = E('div', { 'id': 'nss-subcard-mount' });
+					var subCardContainer = E('div', { 'id': 'nss-subcard-mount' });
 
-		var subTabsDef = [
-			{ id: 'status',  label: _('状态总览') },
-			{ id: 'control', label: _('控制防御') },
-			{ id: 'ports',   label: _('端口线速') },
-			{ id: 'flows',   label: _('硬件流表') },
-			{ id: 'audit',   label: _('流量档案') }
-		];
-
-		var tabMenuContainer = E('ul', { 'class': 'cbi-tabmenu' });
-
-		function renderSubTabs() {
-			var items = subTabsDef.map(function(tDef) {
-				var isActive = (activeTab === tDef.id);
-				return E('li', {
-					'class': isActive ? 'cbi-tab' : 'cbi-tab-disabled',
-					'data-tab': tDef.id
-				}, [
-					E('a', {
-						'href': '#' + tDef.id,
-						'click': function(ev) {
-							ev.preventDefault();
-							if (activeTab === tDef.id) return;
-							activeTab = tDef.id;
-							window.location.hash = activeTab;
-							renderSubTabs();
-							renderActiveCard();
-						}
-					}, [ tDef.label ])
-				]);
-			});
-			dom.content(tabMenuContainer, items);
-		}
-
-		function refreshFlows(isIncremental) {
-			var curWrap = subCardContainer.querySelector('#flows-scroll-wrap');
-			var curScroll = curWrap ? curWrap.scrollLeft : 0;
-			var tbody = subCardContainer.querySelector('#flows-tbody');
-			var existingSubTab = tbody ? tbody.getAttribute('data-subtab') : null;
-
-			if (isIncremental && tbody && existingSubTab === flowSubTab) {
-				updateFlowsTable(subCardContainer, flowsData, hostHintsData, function() { refreshFlows(false); });
-			} else {
-				dom.content(subCardContainer, renderFlowsCard(flowsData, function() { refreshFlows(false); }, hostHintsData, renderSticky, function() {
-					dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在重检 nssqos 组件可用性…') ]));
-					Promise.all([
-						L.resolveDefault(callGetFlows(), {}),
-						L.resolveDefault(callHostHints(), {})
-					]).then(function(res) {
-						flowsData = res[0] || {};
-						hostHintsData = res[1] || {};
-						if (flowsData.installed === 0) {
-							sessionStorage.setItem('nss_flows_installed', '0');
-						} else {
-							sessionStorage.setItem('nss_flows_installed', '1');
-						}
-						refreshFlows(false);
-					});
-				}));
+			function loadFlows(callback) {
+				return Promise.all([
+					L.resolveDefault(callGetFlows(), {}),
+					L.resolveDefault(callHostHints(), {})
+				]).then(function(res) {
+					flowsData = res[0] || {};
+					hostHintsData = res[1] || {};
+					if (flowsData.installed === 0) {
+						sessionStorage.setItem('nss_flows_installed', '0');
+					} else {
+						sessionStorage.setItem('nss_flows_installed', '1');
+					}
+					if (callback) callback();
+				});
 			}
-			var afterWrap = subCardContainer.querySelector('#flows-scroll-wrap');
-			if (afterWrap && curScroll > 0) afterWrap.scrollLeft = curScroll;
-		}
 
-		function renderActiveCard() {
-			if (activeTab === 'status') {
-				dom.content(subCardContainer, renderStatusCard(metricsData, p));
-			} else if (activeTab === 'control') {
-				dom.content(subCardContainer, renderControlCard(settingsData, metricsData, p, renderSticky));
-			} else if (activeTab === 'ports') {
-				if (!portsData) {
-					dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取以太网物理端口数据…') ]));
-					callGetPorts().then(function(raw) {
-						return fetchPortStats(raw || {});
-					}).then(function(pData) {
-						portsData = pData;
-						dom.content(subCardContainer, renderPortsCard(portsData, renderSticky));
-					});
-				} else {
-					dom.content(subCardContainer, renderPortsCard(portsData, renderSticky));
-				}
-			} else if (activeTab === 'flows') {
-				var flowBreaker = sessionStorage.getItem('nss_flows_installed');
-				if (flowBreaker === '0' && flowsData && flowsData.installed === 0) {
-					refreshFlows(false);
-				} else if (!flowsData) {
-					dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取硬件流表与连接数据…') ]));
-					Promise.all([
-						L.resolveDefault(callGetFlows(), {}),
-						L.resolveDefault(callHostHints(), {})
-					]).then(function(res) {
-						flowsData = res[0] || {};
-						hostHintsData = res[1] || {};
-						if (flowsData.installed === 0) {
-							sessionStorage.setItem('nss_flows_installed', '0');
-						} else {
-							sessionStorage.setItem('nss_flows_installed', '1');
-						}
-						refreshFlows(false);
-					});
-				} else {
-					refreshFlows(false);
-				}
-			} else if (activeTab === 'audit') {
-				if (!auditData) {
-					dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取 nlbwmon 流量档案数据…') ]));
-					Promise.all([
-						L.resolveDefault(callGetAudit(), {}),
-						L.resolveDefault(callHostHints(), {})
-					]).then(function(res) {
-						auditData = res[0] || {};
-						hostHintsData = res[1] || {};
-						dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
-							dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
+			function refreshFlows(isIncremental) {
+				var tbody = subCardContainer.querySelector('#flows-tbody');
+				var existingSubTab = tbody ? tbody.getAttribute('data-subtab') : null;
+
+				util.preserveScroll('#flows-scroll-wrap', subCardContainer, function() {
+					if (isIncremental && tbody && existingSubTab === flowSubTab) {
+						updateFlowsTable(subCardContainer, flowsData, hostHintsData, function() { refreshFlows(false); });
+					} else {
+						dom.content(subCardContainer, renderFlowsCard(flowsData, function() { refreshFlows(false); }, hostHintsData, renderSticky, function() {
+							dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在重检 nssqos 组件可用性…') ]));
+							loadFlows(function() { refreshFlows(false); });
 						}));
-					});
-				} else {
-					dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
-						dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
-					}));
-				}
-			}
-		}
-
-		renderSubTabs();
-		renderActiveCard();
-
-		var forceUpdate = function() {
-			var tasks = [ callGetMetrics() ];
-			var flowBreaker = sessionStorage.getItem('nss_flows_installed');
-
-			if (activeTab === 'ports') {
-				tasks.push(callGetPorts());
-			} else if (activeTab === 'flows' && flowBreaker !== '0') {
-				tasks.push(callGetFlows());
-			} else if (activeTab === 'audit') {
-				tasks.push(callGetAudit());
-			}
-			return Promise.all(tasks).then(function(res) {
-				metricsData = res[0] || {};
-				sampleMetricsRate(metricsData.nss_bytes);
-				renderSticky();
-				dom.content(conflictContainer, renderConflictBanner(metricsData));
-
-				if (activeTab === 'status') {
-					dom.content(subCardContainer, renderStatusCard(metricsData, p));
-				} else if (activeTab === 'ports' && res[1]) {
-					return fetchPortStats(res[1]).then(function(pData) {
-						portsData = pData;
-						var oldWrap = subCardContainer.querySelector('#ports-scroll-wrap');
-						var prevScroll = oldWrap ? oldWrap.scrollLeft : 0;
-						dom.content(subCardContainer, renderPortsCard(portsData, renderSticky));
-						var newWrap = subCardContainer.querySelector('#ports-scroll-wrap');
-						if (newWrap && prevScroll > 0) newWrap.scrollLeft = prevScroll;
-					});
-				} else if (activeTab === 'flows' && res[1]) {
-					flowsData = res[1];
-					if (res[2]) {
-						hostHintsData = res[2];
-						setSessionData('nss_host_hints', hostHintsData);
 					}
-					refreshFlows(true);
-				} else if (activeTab === 'audit' && res[1]) {
-					auditData = res[1];
-					if (res[2]) {
-						hostHintsData = res[2];
-						setSessionData('nss_host_hints', hostHintsData);
-					}
-					var oldAuditWrap = subCardContainer.querySelector('#audit-scroll-wrap');
-					var prevAuditScroll = oldAuditWrap ? oldAuditWrap.scrollLeft : 0;
-					dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
-						dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
-					}));
-					var newAuditWrap = subCardContainer.querySelector('#audit-scroll-wrap');
-					if (newAuditWrap && prevAuditScroll > 0) newAuditWrap.scrollLeft = prevAuditScroll;
-				}
-			}).catch(function() {});
-		};
-
-		var lastFetchTimestamp = 0;
-		var isFetchRunning = false;
-		var update = function() {
-			var now = Date.now();
-
-			if (!isPageVisible || pollMode === 'paused' || isTableHovered) {
-				renderSticky();
-				return Promise.resolve();
+				});
 			}
 
-			if (pollMode === 'auto') {
-				var idleTime = now - lastUserActionTime;
-				if (idleTime > IDLE_TIMEOUT_MS && !isIdleBackoff) {
-					isIdleBackoff = true;
+			var TABS = [
+				{
+					id: 'status',
+					label: _('状态总览'),
+					render: function() {
+						dom.content(subCardContainer, renderStatusCard(metricsData, p));
+					}
+				},
+				{
+					id: 'control',
+					label: _('控制防御'),
+					render: function() {
+						dom.content(subCardContainer, renderControlCard(settingsData, metricsData, p, renderSticky));
+					}
+				},
+				{
+					id: 'ports',
+					label: _('端口线速'),
+					render: function() {
+						if (!portsData) {
+							dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取以太网物理端口数据…') ]));
+							callGetPorts().then(function(raw) {
+								return fetchPortStats(raw || {});
+							}).then(function(pData) {
+								portsData = pData;
+								dom.content(subCardContainer, renderPortsCard(portsData, renderSticky));
+							});
+						} else {
+							dom.content(subCardContainer, renderPortsCard(portsData, renderSticky));
+						}
+					}
+				},
+				{
+					id: 'flows',
+					label: _('硬件流表'),
+					render: function() {
+						var flowBreaker = sessionStorage.getItem('nss_flows_installed');
+						if (flowBreaker === '0' && flowsData && flowsData.installed === 0) {
+							refreshFlows(false);
+						} else if (!flowsData) {
+							dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取硬件流表与连接数据…') ]));
+							loadFlows(function() { refreshFlows(false); });
+						} else {
+							refreshFlows(false);
+						}
+					}
+				},
+				{
+					id: 'audit',
+					label: _('流量档案'),
+					render: function() {
+						if (!auditData) {
+							dom.content(subCardContainer, E('p', { 'class': 'spinning' }, [ _('正在按需拉取 nlbwmon 流量档案数据…') ]));
+							Promise.all([
+								L.resolveDefault(callGetAudit(), {}),
+								L.resolveDefault(callHostHints(), {})
+							]).then(function(res) {
+								auditData = res[0] || {};
+								hostHintsData = res[1] || {};
+								dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
+									dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
+								}));
+							});
+						} else {
+							dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
+								dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
+							}));
+						}
+					}
+				}
+			];
+
+			var tabMenuContainer = E('ul', { 'class': 'cbi-tabmenu' });
+
+			function renderSubTabs() {
+				var items = TABS.map(function(tDef) {
+					var isActive = (activeTab === tDef.id);
+					return E('li', {
+						'class': isActive ? 'cbi-tab' : 'cbi-tab-disabled',
+						'data-tab': tDef.id
+					}, [
+						E('a', {
+							'href': '#' + tDef.id,
+							'click': function(ev) {
+								ev.preventDefault();
+								if (activeTab === tDef.id) return;
+								activeTab = tDef.id;
+								window.location.hash = activeTab;
+								renderSubTabs();
+								renderActiveCard();
+							}
+						}, [ tDef.label ])
+					]);
+				});
+				dom.content(tabMenuContainer, items);
+			}
+
+			function renderActiveCard() {
+				var cur = TABS.find(function(t) { return t.id === activeTab; }) || TABS[0];
+				cur.render();
+			}
+
+			renderSubTabs();
+			renderActiveCard();
+
+			var forceUpdate = function() {
+				var tasks = [ callGetMetrics() ];
+				var flowBreaker = sessionStorage.getItem('nss_flows_installed');
+
+				if (activeTab === 'ports') {
+					tasks.push(callGetPorts());
+				} else if (activeTab === 'flows' && flowBreaker !== '0') {
+					tasks.push(callGetFlows());
+				} else if (activeTab === 'audit') {
+					tasks.push(callGetAudit());
+				}
+				return Promise.all(tasks).then(function(res) {
+					metricsData = res[0] || {};
+					sampleMetricsRate(metricsData.nss_bytes);
+					renderSticky();
+					dom.content(conflictContainer, renderConflictBanner(metricsData));
+
+					if (activeTab === 'status') {
+						dom.content(subCardContainer, renderStatusCard(metricsData, p));
+					} else if (activeTab === 'ports' && res[1]) {
+						return fetchPortStats(res[1]).then(function(pData) {
+							portsData = pData;
+							util.preserveScroll('#ports-scroll-wrap', subCardContainer, function() {
+								dom.content(subCardContainer, renderPortsCard(portsData, renderSticky));
+							});
+						});
+					} else if (activeTab === 'flows' && res[1]) {
+						flowsData = res[1];
+						if (res[2]) {
+							hostHintsData = res[2];
+							setSessionData('nss_host_hints', hostHintsData);
+						}
+						refreshFlows(true);
+					} else if (activeTab === 'audit' && res[1]) {
+						auditData = res[1];
+						if (res[2]) {
+							hostHintsData = res[2];
+							setSessionData('nss_host_hints', hostHintsData);
+						}
+						util.preserveScroll('#audit-scroll-wrap', subCardContainer, function() {
+							dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
+								dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
+							}));
+						});
+					}
+				}).catch(function() {});
+			};
+
+			var lastFetchTimestamp = 0;
+			var isFetchRunning = false;
+			var update = function() {
+				if (!document.getElementById('nss-subcard-mount')) {
+					if (poll && poll.remove) {
+						try { poll.remove(update); } catch (e) {}
+					}
+					if (window._nssCleanupListeners) {
+						try { window._nssCleanupListeners(); } catch (e) {}
+					}
+					return Promise.resolve();
+				}
+
+				var now = Date.now();
+
+				if (!isPageVisible || pollMode === 'paused' || isTableHovered) {
+					renderSticky();
+					return Promise.resolve();
+				}
+
+				if (pollMode === 'auto') {
+					var idleTime = now - lastUserActionTime;
+					if (idleTime > IDLE_TIMEOUT_MS && !isIdleBackoff) {
+						isIdleBackoff = true;
+						renderSticky();
+					}
+				} else if (pollMode === 'keep' && isIdleBackoff) {
+					isIdleBackoff = false;
 					renderSticky();
 				}
-			} else if (pollMode === 'keep' && isIdleBackoff) {
-				isIdleBackoff = false;
-				renderSticky();
-			}
 
-			var targetIntervalMs = (pollMode === 'auto' && isIdleBackoff) ? (POLL_IDLE_INTERVAL * 1000) : (POLL_NORMAL_INTERVAL * 1000);
+				var targetIntervalMs = (pollMode === 'auto' && isIdleBackoff) ? (POLL_IDLE_INTERVAL * 1000) : (POLL_NORMAL_INTERVAL * 1000);
 
-			if (isFetchRunning || (now - lastFetchTimestamp < targetIntervalMs)) {
-				return Promise.resolve();
-			}
+				if (isFetchRunning || (now - lastFetchTimestamp < targetIntervalMs)) {
+					return Promise.resolve();
+				}
 
-			isFetchRunning = true;
-			return forceUpdate().finally(function() {
-				lastFetchTimestamp = Date.now();
-				isFetchRunning = false;
-			});
-		};
+				isFetchRunning = true;
+				return forceUpdate().finally(function() {
+					lastFetchTimestamp = Date.now();
+					isFetchRunning = false;
+				});
+			};
 
-		poll.add(update, 1);
+			poll.add(update, 1);
 
 		return E('div', { 'class': 'nss-dashboard-spa cbi-map' }, [
 			stickyBarContainer,

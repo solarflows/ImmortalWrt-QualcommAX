@@ -87,8 +87,11 @@ return baseclass.extend({
 			});
 		}
 
-		function patchRows(items) {
+		/* freeze=true（悬停冻结）：跳过排序、已有行原位 patch 不移动、
+		   新行追加表尾、消失行暂缓删除；移出后下一次 update 恢复排序并清理。 */
+		function patchRows(items, freeze) {
 			if (!items || !items.length) {
+				if (freeze && tbody.querySelector('tr[data-key]')) return;
 				dom.content(tbody, [
 					E('tr', { 'class': 'tr tr-empty-placeholder', 'data-empty': 'true' }, [
 						E('td', {
@@ -118,10 +121,11 @@ return baseclass.extend({
 					if (cfg.patchRow) {
 						cfg.patchRow(row, item);
 					}
+					if (!freeze) tbody.appendChild(row);
 				} else {
 					row = cfg.renderRow(item);
+					tbody.appendChild(row);
 				}
-				tbody.appendChild(row);
 
 				if (cfg.renderExpandRow) {
 					var expandContent = cfg.renderExpandRow(item);
@@ -134,21 +138,24 @@ return baseclass.extend({
 							}, [
 								E('td', { 'colspan': String(colSpan) }, Array.isArray(expandContent) ? expandContent : [ expandContent ])
 							]);
+							row.insertAdjacentElement('afterend', expandRow);
 						} else {
 							var td = expandRow.querySelector('td');
 							if (td) dom.content(td, Array.isArray(expandContent) ? expandContent : [ expandContent ]);
+							if (!freeze) tbody.appendChild(expandRow);
 						}
-						tbody.appendChild(expandRow);
-					} else if (expandRow) {
+					} else if (expandRow && !freeze) {
 						if (expandRow.parentNode === tbody) expandRow.parentNode.removeChild(expandRow);
 					}
 				} else {
 					var existingExpand = tbody.querySelector('tr[data-expand-for="' + key + '"]');
-					if (existingExpand) {
+					if (existingExpand && !freeze) {
 						tbody.appendChild(existingExpand);
 					}
 				}
 			});
+
+			if (freeze) return;
 
 			Object.keys(existing).forEach(function(k) {
 				if (existing[k].parentNode === tbody) {
@@ -190,9 +197,9 @@ return baseclass.extend({
 				sortDir = dir;
 				updateHeaders();
 			},
-			update: function(items) {
-				var sorted = sortItems(items ? items.slice() : []);
-				patchRows(sorted);
+			update: function(items, freeze) {
+				var list = items ? items.slice() : [];
+				patchRows(freeze ? list : sortItems(list), !!freeze);
 			}
 		};
 	}

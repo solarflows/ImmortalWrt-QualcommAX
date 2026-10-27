@@ -219,7 +219,7 @@ function renderItemExpandPanel(clientObj, onToggle) {
 			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
 				E('span', { 'style': 'color: var(--text-color-medium);' }, [ _('实时速率:') ]),
 				E('strong', { 'style': (clientObj.totalBps > 1e6) ? 'color: var(--primary-color-high);' : 'color: var(--text-color-high); font-variant-numeric: tabular-nums;' }, [
-					(clientObj.totalBps > 0) ? fmtRate(clientObj.totalBps) : '—'
+					(clientObj.totalBps > 0) ? fmtRate(clientObj.totalBps) : (clientObj.sampled ? '0 bps' : '—')
 				])
 			]),
 			E('div', { 'style': 'display: inline-flex; align-items: center; gap: 4px;' }, [
@@ -341,7 +341,7 @@ function moduleChip(name, state, customLabel, customTitle) {
 /* 轮询档位徽章状态表：still = 不可点击（后台休眠态）；dot = true 默认圆点，'success' 绿色圆点 */
 var POLL_BADGE_DEFS = {
 	paused:  { cls: 'badge-warning', icon: '⏸ ', text: _('已暂停'),      title: _('当前档位：已手动暂停轮询。点击切换至「4s 实时更新 (自适应)」') },
-	hovered: { cls: 'badge-warning', icon: '⏸ ', text: _('移入挂起'),    title: _('鼠标正在表格内浏览，已自动挂起刷新以防打断；移出表格自动恢复，或点击切换轮询档位') },
+	hovered: { cls: 'badge-info', icon: '🔒 ', text: _('排序冻结'),    title: _('鼠标正在表格内浏览：行序已冻结、数据持续原位更新、新行追加表尾；移出表格恢复自动排序') },
 	keep:    { cls: 'badge-info',    dot: true,   text: _('保持 4s 更新'), title: _('当前档位：保持 4s 更新（常亮盯盘模式，禁用空闲退避与失焦降频）。点击切换至「暂停轮询」') },
 	hidden:  { cls: 'badge-neutral', text: _('后台休眠'), still: true },
 	idle:    { cls: 'badge-neutral', icon: '⏱️ ', text: _('挂机省电'),    title: _('当前处于挂机省电模式（24s 轮询）。移动鼠标立即唤醒，或点击切换至「保持 4s 更新 (不休眠)」') },
@@ -507,7 +507,7 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 				forceRefreshBtn
 			]),
 			E('div', { 'style': 'font-size:10px; color:var(--text-color-medium); text-align:center;' }, [
-				_('移入表格自动挂起 · 移出自动恢复')
+				_('移入表格冻结行序 · 数据持续更新')
 			])
 		])
 	]);
@@ -993,7 +993,7 @@ function renderPortsCard(d, onRefreshToggle) {
 	return E('div', {}, [
 		moduleBox,
 		E('div', { 'class': 'cbi-map-descr', 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:6px;' }, [
-			_('说明: “HW Pkts”代表由芯片固件硬件线速转发的数据包；“Host Pkts”代表建链首包握手、广播发现或路由器本机流量；HW % 接近 100% 表明硬件卸载完全生效。鼠标移入表格区域自动挂起轮询。')
+			_('说明: “HW Pkts”代表由芯片固件硬件线速转发的数据包；“Host Pkts”代表建链首包握手、广播发现或路由器本机流量；HW % 接近 100% 表明硬件卸载完全生效。鼠标移入表格区域冻结行序。')
 		])
 	]);
 }
@@ -1312,16 +1312,24 @@ function processFlowsData(d, hostHints) {
 	normalizedFlows.forEach(function(f) {
 		f.dscpMeta = getDscpMeta(f.mark);
 		var pf = prevFlowsCache[f.key];
-		f.bps = 0;
-		f.pps = 0;
+		/* null = 本帧无有效基线（首帧 / 计数器回绕），渲染为 —；
+		   0 = 已采样且确实无流量。区分"未知"与"为零"两种语义 */
+		f.bps = null;
+		f.pps = null;
 		if (pf && dt > 0.2) {
-			f.bps = Math.max(0, (f.bytes - pf.bytes) * 8 / dt);
-			f.pps = Math.max(0, (f.pkts - pf.pkts) / dt);
+			if (f.bytes >= pf.bytes && f.pkts >= pf.pkts) {
+				f.bps = Math.max(0, (f.bytes - pf.bytes) * 8 / dt);
+				f.pps = Math.max(0, (f.pkts - pf.pkts) / dt);
+			}
+			/* 计数器回绕（conntrack 条目重建后归零）：基线失效，本帧按未采样渲染 */
 		}
 		nextCache[f.key] = { bytes: f.bytes, pkts: f.pkts };
 	});
-	prevFlowsCache = nextCache;
-	prevFlowsTime = now;
+	/* dt <= 0.2（连续快速拉取）时不推进基线：该窗口流量并入下一帧差分，避免整帧归零 */
+	if (dt > 0.2 || !prevFlowsTime) {
+		prevFlowsCache = nextCache;
+		prevFlowsTime = now;
+	}
 
 	var unknownPrivateIpFound = false;
 	var calcGlobalRate = 0;
@@ -1370,6 +1378,7 @@ function processFlowsData(d, hostHints) {
 				totalBytes: 0,
 				totalBps: 0,
 				flowCount: 0,
+				sampled: false,
 				protos: {}
 			};
 		}
@@ -1377,6 +1386,7 @@ function processFlowsData(d, hostHints) {
 		clientMap[clientKey].totalBytes += f.bytes;
 		clientMap[clientKey].totalBps += (f.bps || 0);
 		clientMap[clientKey].flowCount++;
+		clientMap[clientKey].sampled = clientMap[clientKey].sampled || (f.bps !== null);
 		clientMap[clientKey].protos[f.proto] = true;
 	});
 	nssGlobalRateBps = calcGlobalRate;
@@ -1417,9 +1427,11 @@ function processFlowsData(d, hostHints) {
 }
 
 function renderClientRateContent(c) {
-	return (c.totalBps > 0)
-		? E('strong', { 'style': (c.totalBps > 1e6) ? 'color:var(--primary-color-high);' : '' }, [ fmtRate(c.totalBps) ])
-		: E('span', { 'style': 'color:var(--text-color-medium);' }, [ '—' ]);
+	if (c.totalBps > 0) {
+		return E('strong', { 'style': (c.totalBps > 1e6) ? 'color:var(--primary-color-high);' : '' }, [ fmtRate(c.totalBps) ]);
+	}
+	/* 已采样且确实无流量 → 0 bps；尚未建立基线 → —（与明细页口径一致） */
+	return E('span', { 'style': 'color:var(--text-color-medium);' }, [ c.sampled ? '0 bps' : '—' ]);
 }
 
 function renderClientRow(c, onToggleExpand) {
@@ -1470,6 +1482,9 @@ function renderFlowProtoContent(f) {
 }
 
 function renderFlowRateContent(f) {
+	if (f.bps == null) {
+		return [ E('span', { 'style': 'color:var(--text-color-medium);', 'title': _('首帧或基线重建，等待下一轮采样') }, [ '—' ]) ];
+	}
 	var rateText = fmtRate(f.bps || 0);
 	var ppsText = fmtPps(f.pps);
 	return [
@@ -1747,7 +1762,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 	var noticeBanner = E('div', { 'class': 'nss-notice-banner' }, [
 		E('div', {}, [
 			E('strong', {}, [ '💡 ' + _('实时调度说明：') ]),
-			_('鼠标移入下方表格任意区域自动挂起轮询刷新，移出表格自动恢复实时数据流；可点击常驻栏切换常亮或暂停档位。')
+			_('鼠标移入表格区域即冻结行序（数据仍实时原位更新，新行追加表尾），移出后恢复自动排序；可点击常驻栏切换轮询档位。')
 		]),
 		E('div', { 'style': 'font-weight:600; color:var(--text-color-high); white-space:nowrap;' }, [
 			isInstalled ? (_('全网共 %d 条活跃加速流').format(rawFlows.length)) : ''
@@ -1856,9 +1871,11 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 	if (badgeEl) dom.content(badgeEl, [ badge('badge-info', processed.rawFlows.length + ' ' + _('活动流')) ]);
 
 	var mainSection = subCardContainer.querySelector('.cbi-section') || subCardContainer;
+	// 悬停冻结：行序不动、单元格原位更新、新行追加表尾、消失行暂缓删除
+	var freeze = isTableHovered;
 	if (flowSubTab === 'clients') {
 		if (mainSection._clientTable) {
-			mainSection._clientTable.update(processed.clientsList);
+			mainSection._clientTable.update(processed.clientsList, freeze);
 		}
 	} else {
 		var filtered = getFilteredFlows(processed.normalizedFlows, flowSubTab, processed.hostnames);
@@ -1866,7 +1883,7 @@ function updateFlowsTable(subCardContainer, flowsData, hostHintsData, onSubTabSw
 		var flowsToRender = isTruncated ? filtered.slice(0, MAX_FLOWS_RENDER) : filtered;
 
 		if (mainSection._flowTable) {
-			mainSection._flowTable.update(flowsToRender);
+			mainSection._flowTable.update(flowsToRender, freeze);
 		}
 
 		var truncEl = subCardContainer.querySelector('#flows-truncation-bar');
@@ -2175,7 +2192,7 @@ return view.extend({
 		var onVisibilityChange = function() {
 			isPageVisible = !document.hidden;
 			renderSticky();
-			if (isPageVisible && pollMode !== 'paused' && !isTableHovered) {
+			if (isPageVisible && pollMode !== 'paused') {
 				update();
 			}
 		};
@@ -2192,7 +2209,7 @@ return view.extend({
 			if (isIdleBackoff) {
 				isIdleBackoff = false;
 				renderSticky();
-				if (isPageVisible && pollMode !== 'paused' && !isTableHovered) {
+				if (isPageVisible && pollMode !== 'paused') {
 					forceUpdate();
 				}
 			}
@@ -2429,7 +2446,9 @@ return view.extend({
 
 				var now = Date.now();
 
-				if (!isPageVisible || pollMode === 'paused' || isTableHovered) {
+				// 悬停仅在非流表页暂停轮询；流表页改为冻结行序、数据照常刷新
+				var hoverPause = isTableHovered && activeTab !== 'flows';
+				if (!isPageVisible || pollMode === 'paused' || hoverPause) {
 					renderSticky();
 					return Promise.resolve();
 				}

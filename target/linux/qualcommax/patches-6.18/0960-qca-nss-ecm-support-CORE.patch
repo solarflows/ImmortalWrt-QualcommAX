@@ -34,9 +34,9 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
 +					  struct sk_buff *skb,
 +					  unsigned int cookie);
 +extern void br_fdb_entry_refresh(struct net_device *dev, const char *addr, __u16 vid);
-+extern struct net_bridge_fdb_entry *br_fdb_has_entry(struct net_device *dev,
-+						     const char *addr,
-+						     __u16 vid);
++extern bool br_fdb_has_entry(struct net_device *dev,
++			     const char *addr,
++			     __u16 vid);
 +extern void br_fdb_update_register_notify(struct notifier_block *nb);
 +extern void br_fdb_update_unregister_notify(struct notifier_block *nb);
 +
@@ -386,11 +386,12 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  
  	/* some users want to always flood. */
  	if (hold_time(br) == 0)
-@@ -1028,6 +1100,12 @@ void br_fdb_update(struct net_bridge *br
+@@ -1028,6 +1100,13 @@ void br_fdb_update(struct net_bridge *br
  			if (unlikely(source != READ_ONCE(fdb->dst) &&
  				     !test_bit(BR_FDB_STICKY, &fdb->flags))) {
  				br_switchdev_fdb_notify(br, fdb, RTM_DELNEIGH);
 +				/* QCA NSS bridge-mgr support - Start */
++				memset(&fdb_event, 0, sizeof(fdb_event));
 +				ether_addr_copy(fdb_event.addr, addr);
 +				fdb_event.br = br;
 +				fdb_event.orig_dev = fdb->dst->dev;
@@ -412,7 +413,7 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  			}
  
  			if (unlikely(test_bit(BR_FDB_ADDED_BY_USER, &flags))) {
-@@ -1067,6 +1151,44 @@ void br_fdb_update(struct net_bridge *br
+@@ -1067,6 +1151,50 @@ void br_fdb_update(struct net_bridge *br
  	}
  }
  
@@ -421,12 +422,15 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
 +void br_fdb_entry_refresh(struct net_device *dev, const char *addr, __u16 vid)
 +{
 +	struct net_bridge_fdb_entry *fdb;
-+	struct net_bridge_port *p = br_port_get_rcu(dev);
-+
-+	if (!p || p->state == BR_STATE_DISABLED)
-+		return;
++	struct net_bridge_port *p;
 +
 +	rcu_read_lock();
++	p = br_port_get_rcu(dev);
++	if (!p || p->state == BR_STATE_DISABLED) {
++		rcu_read_unlock();
++		return;
++	}
++
 +	fdb = fdb_find_rcu(&p->br->fdb_hash_tbl, addr, vid);
 +	if (likely(fdb)) {
 +		fdb->updated = jiffies;
@@ -436,20 +440,23 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
 +EXPORT_SYMBOL_GPL(br_fdb_entry_refresh);
 +
 +/* Look up the MAC address in the device's bridge fdb table */
-+struct net_bridge_fdb_entry *br_fdb_has_entry(struct net_device *dev,
-+					      const char *addr, __u16 vid)
++bool br_fdb_has_entry(struct net_device *dev,
++		      const char *addr, __u16 vid)
 +{
-+	struct net_bridge_port *p = br_port_get_rcu(dev);
++	struct net_bridge_port *p;
 +	struct net_bridge_fdb_entry *fdb;
 +
-+	if (!p || p->state == BR_STATE_DISABLED)
-+		return NULL;
-+
 +	rcu_read_lock();
++	p = br_port_get_rcu(dev);
++	if (!p || p->state == BR_STATE_DISABLED) {
++		rcu_read_unlock();
++		return false;
++	}
++
 +	fdb = fdb_find_rcu(&p->br->fdb_hash_tbl, addr, vid);
 +	rcu_read_unlock();
 +
-+	return fdb;
++	return fdb != NULL;
 +}
 +EXPORT_SYMBOL_GPL(br_fdb_has_entry);
 +

@@ -21,17 +21,17 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
 + * Registration/Unregistration methods
 + * for PPP channel connect and disconnect event notifications.
 + */
-+RAW_NOTIFIER_HEAD(ppp_channel_connection_notifier_list);
++BLOCKING_NOTIFIER_HEAD(ppp_channel_connection_notifier_list);
 +
 +void ppp_channel_connection_register_notify(struct notifier_block *nb)
 +{
-+	raw_notifier_chain_register(&ppp_channel_connection_notifier_list, nb);
++	blocking_notifier_chain_register(&ppp_channel_connection_notifier_list, nb);
 +}
 +EXPORT_SYMBOL_GPL(ppp_channel_connection_register_notify);
 +
 +void ppp_channel_connection_unregister_notify(struct notifier_block *nb)
 +{
-+	raw_notifier_chain_unregister(&ppp_channel_connection_notifier_list, nb);
++	blocking_notifier_chain_unregister(&ppp_channel_connection_notifier_list, nb);
 +}
 +EXPORT_SYMBOL_GPL(ppp_channel_connection_unregister_notify);
 +
@@ -54,14 +54,15 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  	ppp_unlock(ppp);
  	ret = 0;
  
-@@ -3586,6 +3608,14 @@ ppp_connect_channel(struct channel *pch,
+@@ -3586,6 +3608,15 @@ ppp_connect_channel(struct channel *pch,
  	spin_unlock(&pch->upl);
   out:
++	if (notify)
++		dev_hold(ppp->dev);
  	mutex_unlock(&pn->all_ppp_mutex);
 +
 +	if (notify) {
-+		dev_hold(ppp->dev);
-+		raw_notifier_call_chain(&ppp_channel_connection_notifier_list,
++		blocking_notifier_call_chain(&ppp_channel_connection_notifier_list,
 +					PPP_CHANNEL_CONNECT, ppp->dev);
 +		dev_put(ppp->dev);
 +	}
@@ -74,7 +75,7 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  	spin_unlock(&pch->upl);
  	if (ppp) {
 +		dev_hold(ppp->dev);
-+		raw_notifier_call_chain(&ppp_channel_connection_notifier_list,
++		blocking_notifier_call_chain(&ppp_channel_connection_notifier_list,
 +					PPP_CHANNEL_DISCONNECT, ppp->dev);
 +		dev_put(ppp->dev);
 +

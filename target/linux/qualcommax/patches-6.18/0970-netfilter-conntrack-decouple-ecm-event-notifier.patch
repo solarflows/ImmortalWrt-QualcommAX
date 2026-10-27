@@ -59,7 +59,7 @@ index a330b0c..efc6b07 100644
  	rcu_assign_pointer(net->ct.nf_conntrack_event_cb, new);
  	mutex_unlock(&nf_ct_ecache_mutex);
  }
-@@ -292,6 +295,23 @@ void nf_conntrack_unregister_notifier(struct net *net)
+@@ -292,6 +295,24 @@ void nf_conntrack_unregister_notifier(struct net *net)
  }
  EXPORT_SYMBOL_GPL(nf_conntrack_unregister_notifier);
 
@@ -77,6 +77,7 @@ index a330b0c..efc6b07 100644
 +	mutex_lock(&nf_ct_ecache_mutex);
 +	RCU_INIT_POINTER(net->ct.nf_conntrack_ecm_cb, NULL);
 +	mutex_unlock(&nf_ct_ecache_mutex);
++	synchronize_rcu();
 +}
 +EXPORT_SYMBOL_GPL(nf_conntrack_unregister_ecm_notifier);
 +

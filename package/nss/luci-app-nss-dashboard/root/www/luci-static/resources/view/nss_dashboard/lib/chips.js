@@ -85,6 +85,21 @@ return baseclass.extend({
 
 	tempBadge: function(label, temp, opts) {
 		var t = parseFloat(temp) || 0;
+		var tileCls = (opts && opts.tile) ? (' ' + opts.tile) : '';
+		var style = (opts && opts.style) ? opts.style : '';
+
+		if (t <= 0) {
+			var disText = (opts && opts.disabledText) ? opts.disabledText : '待机';
+			return E('span', {
+				'class': 'badge badge-neutral' + tileCls,
+				'style': style,
+				'title': (opts && opts.disabledTitle) ? opts.disabledTitle : (label + ': ' + disText)
+			}, [
+				E('strong', {}, [ label + ':' ]),
+				' ' + disText
+			]);
+		}
+
 		var cls = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
 		var tileCls = (opts && opts.tile) ? (' ' + opts.tile) : '';
 		var style = (opts && opts.style) ? opts.style : '';

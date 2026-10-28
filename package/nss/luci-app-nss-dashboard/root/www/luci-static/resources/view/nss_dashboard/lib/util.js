@@ -2,7 +2,7 @@
 'require baseclass';
 
 return baseclass.extend({
-	CSS_VERSION: '261027k',
+	CSS_VERSION: '261028a',
 
 	normIp: function(ip) {
 		if (!ip || ip.indexOf(':') === -1) return (ip || '').trim().toLowerCase();

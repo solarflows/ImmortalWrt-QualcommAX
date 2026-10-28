@@ -9,6 +9,8 @@ var callNssStatus = rpc.declare({
 	method: 'getStatus'
 });
 
+var lastRadioTemps = {};
+
 function row(label, value, hint) {
 	var labelEl = hint ? E('span', {
 		'title': hint,
@@ -57,7 +59,10 @@ return baseclass.extend({
 
 		// 2. 模块状态
 		var mods = d.modules || {};
-		var chipOpts = { style: 'white-space:nowrap !important;' };
+		var chipOpts = {
+			tile: 'badge-tile-102',
+			style: 'width:102px; min-width:102px; max-width:102px; box-sizing:border-box; justify-content:center; text-align:center; white-space:nowrap !important;'
+		};
 		var wifiChip = (d.wifi_offload === 1)
 			? chips.moduleChip('Wi-Fi', 2, _('已加速'), _('ath11k wifili 硬件加速已就绪 (802.11s Mesh 支持)'), chipOpts)
 			: chips.moduleChip('Wi-Fi', 0, _('主机模式'), _('无线数据流未经 NSS 卸载'), chipOpts);
@@ -73,7 +78,7 @@ return baseclass.extend({
 			sqmChip = chips.moduleChip('SQM', 0, _('未安装'), _('未安装 sqm-scripts'), chipOpts);
 		}
 
-		var modulesView = E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:8px 6px; max-width:340px;' }, [
+		var modulesView = E('div', { 'style': 'display:inline-grid; grid-template-columns:repeat(3, 102px); gap:6px;' }, [
 			chips.moduleChip('Bridge', mods.bridge, null, null, chipOpts),
 			chips.moduleChip('PPPoE', mods.pppoe, null, null, chipOpts),
 			wifiChip,
@@ -125,11 +130,11 @@ return baseclass.extend({
 
 		var computeLoadView = E('div', { 'style': 'display:flex; flex-direction:column; gap:4px; max-width:280px;' }, computeLoadElements);
 
-		// 4. 硬件遥测
+		// 4. 硬件遥测 (温度独立成排，然后再是流；温度徽章使用防抖缓存彻底根除闪现)
 		var ecmTotalChip = E('span', {
-			'class': 'badge badge-info',
+			'class': 'badge badge-info badge-tile-102',
 			'title': _('当前经由高通增强连接管理器 (ECM) 卸载的硬件并发流总数'),
-			'style': 'white-space:nowrap !important;'
+			'style': 'width:102px; min-width:102px; max-width:102px; box-sizing:border-box; justify-content:center; text-align:center; white-space:nowrap !important;'
 		}, [
 			E('span', { 'class': 'badge-dot' }),
 			E('strong', {}, [ 'ECM:' ]),
@@ -137,9 +142,9 @@ return baseclass.extend({
 		]);
 
 		var ecmDistChip = E('span', {
-			'class': 'badge badge-neutral',
+			'class': 'badge badge-neutral badge-tile-102',
 			'title': 'IPv4: ' + (d.ecm_v4 || 0) + ' • IPv6: ' + (d.ecm_v6 || 0),
-			'style': 'white-space:nowrap !important;'
+			'style': 'width:102px; min-width:102px; max-width:102px; box-sizing:border-box; justify-content:center; text-align:center; white-space:nowrap !important;'
 		}, [
 			E('strong', {}, [ 'v4/v6:' ]),
 			' ' + (d.ecm_v4 || 0) + '/' + (d.ecm_v6 || 0)
@@ -151,13 +156,29 @@ return baseclass.extend({
 
 		var radios = d.radios || [];
 		for (var i = 0; i < radios.length; i++) {
-			if (radios[i].temp && parseFloat(radios[i].temp) > 0)
-				tempElements.push(chips.tempBadge(radios[i].id, radios[i].temp, chipOpts));
+			var rId = radios[i].id;
+			var rTemp = radios[i].temp;
+			// 射频传感器瞬时抖动防闪现平滑：若瞬时为 0 优先沿用上一帧有效读数
+			if (!rTemp || parseFloat(rTemp) <= 0) {
+				rTemp = lastRadioTemps[rId];
+			} else {
+				lastRadioTemps[rId] = rTemp;
+			}
+			if (rTemp && parseFloat(rTemp) > 0)
+				tempElements.push(chips.tempBadge(rId, rTemp, chipOpts));
 		}
 
+		var tempRow = E('div', {
+			'style': 'display:flex; flex-wrap:wrap; gap:6px; align-items:center;'
+		}, tempElements);
+
+		var flowRow = E('div', {
+			'style': 'display:flex; flex-wrap:wrap; gap:6px; align-items:center;'
+		}, [ ecmTotalChip, ecmDistChip ]);
+
 		var telemetryView = E('div', {
-			'style': 'display:flex; flex-wrap:wrap; gap:8px 6px; max-width:340px;'
-		}, [ ecmTotalChip, ecmDistChip ].concat(tempElements));
+			'style': 'display:flex; flex-direction:column; gap:6px;'
+		}, [ tempRow, flowRow ]);
 
 		return E('table', { 'id': 'nss-status-table', 'class': 'table' }, [
 			row(_('协处理器'), specView, _('高通网络子系统 (NSS) 硬件卸载协处理器，内置独立双核/单核与硬件转发管线，微码执行物理层线速转发')),

@@ -130,7 +130,19 @@ return baseclass.extend({
 
 		var computeLoadView = E('div', { 'style': 'display:flex; flex-direction:column; gap:4px; max-width:280px;' }, computeLoadElements);
 
-		// 4. 硬件遥测 (温度独立成排，然后再是流；温度徽章使用防抖缓存彻底根除闪现)
+		// 4. 硬件遥测 (固定核心排：CPU温度 + ECM流 + v4/v6；无线射频排：物理插槽全量对齐，未启用状态降级)
+		var cpuTempNum = parseFloat(d.cpu_temp) || 0;
+		var cpuChip = (cpuTempNum > 0)
+			? chips.tempBadge('CPU', cpuTempNum, chipOpts)
+			: E('span', {
+				'class': 'badge badge-neutral badge-tile-102',
+				'style': chipOpts.style,
+				'title': 'CPU: ' + _('待机')
+			}, [
+				E('strong', {}, [ 'CPU:' ]),
+				' ' + _('待机')
+			]);
+
 		var ecmTotalChip = E('span', {
 			'class': 'badge badge-info badge-tile-102',
 			'title': _('当前经由高通增强连接管理器 (ECM) 卸载的硬件并发流总数'),
@@ -150,35 +162,42 @@ return baseclass.extend({
 			' ' + (d.ecm_v4 || 0) + '/' + (d.ecm_v6 || 0)
 		]);
 
-		var tempElements = [];
-		if (d.cpu_temp && parseFloat(d.cpu_temp) > 0)
-			tempElements.push(chips.tempBadge('CPU', d.cpu_temp, chipOpts));
-
+		var radioChips = [];
 		var radios = d.radios || [];
 		for (var i = 0; i < radios.length; i++) {
 			var rId = radios[i].id;
-			var rTemp = radios[i].temp;
-			// 射频传感器瞬时抖动防闪现平滑：若瞬时为 0 优先沿用上一帧有效读数
-			if (!rTemp || parseFloat(rTemp) <= 0) {
-				rTemp = lastRadioTemps[rId];
-			} else {
-				lastRadioTemps[rId] = rTemp;
+			var rawT = parseFloat(radios[i].temp) || 0;
+			if (rawT <= 0 && lastRadioTemps[rId] && lastRadioTemps[rId] > 0) {
+				rawT = lastRadioTemps[rId];
+			} else if (rawT > 0) {
+				lastRadioTemps[rId] = rawT;
 			}
-			if (rTemp && parseFloat(rTemp) > 0)
-				tempElements.push(chips.tempBadge(rId, rTemp, chipOpts));
+
+			if (rawT > 0) {
+				radioChips.push(chips.tempBadge(rId, rawT, chipOpts));
+			} else {
+				radioChips.push(E('span', {
+					'class': 'badge badge-neutral badge-tile-102',
+					'style': chipOpts.style,
+					'title': rId + ': ' + _('射频未启用或处于省电休眠')
+				}, [
+					E('strong', {}, [ rId + ':' ]),
+					' ' + _('待机')
+				]));
+			}
 		}
 
-		var tempRow = E('div', {
+		var fixedRow = E('div', {
 			'style': 'display:flex; flex-wrap:wrap; gap:6px; align-items:center;'
-		}, tempElements);
+		}, [ cpuChip, ecmTotalChip, ecmDistChip ]);
 
-		var flowRow = E('div', {
+		var radioRow = E('div', {
 			'style': 'display:flex; flex-wrap:wrap; gap:6px; align-items:center;'
-		}, [ ecmTotalChip, ecmDistChip ]);
+		}, radioChips.length ? radioChips : [ chips.tempBadge('Wi-Fi', 0, Object.assign({}, chipOpts, { disabledText: _('无射频') })) ]);
 
 		var telemetryView = E('div', {
 			'style': 'display:flex; flex-direction:column; gap:6px;'
-		}, [ tempRow, flowRow ]);
+		}, [ fixedRow, radioRow ]);
 
 		return E('table', { 'id': 'nss-status-table', 'class': 'table' }, [
 			row(_('协处理器'), specView, _('高通网络子系统 (NSS) 硬件卸载协处理器，内置独立双核/单核与硬件转发管线，微码执行物理层线速转发')),

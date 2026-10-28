@@ -249,8 +249,9 @@
 }
 
 /* Merged Tile Primitives */
-.nss-dashboard-spa .badge-tile-112,
-.nss-dashboard-spa .badge-tile-64 {
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-102,
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-112,
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-64 {
 	justify-content: center;
 	box-sizing: border-box;
 	text-align: center;
@@ -259,7 +260,15 @@
 	margin: 0;
 }
 
-.nss-dashboard-spa .badge-tile-112 {
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-102 {
+	width: 102px;
+	min-width: 102px;
+	max-width: 102px;
+	height: 22px;
+	padding: 0 4px;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-112 {
 	width: 112px;
 	min-width: 112px;
 	max-width: 112px;
@@ -267,7 +276,7 @@
 	padding: 0 5px;
 }
 
-.nss-dashboard-spa .badge-tile-64 {
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-64 {
 	width: 64px;
 	min-width: 64px;
 	max-width: 64px;

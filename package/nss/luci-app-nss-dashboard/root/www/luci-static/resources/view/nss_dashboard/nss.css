@@ -37,7 +37,7 @@
 #nss-sticky-telemetry-bar .bay-title-bar {
 	font-size: 11px;
 	font-weight: 700;
-	color: var(--text-color-medium);
+	color: var(--text-color-medium, #888);
 	padding-bottom: 5px;
 	margin-bottom: 6px;
 	border-bottom: 1px solid var(--border-color-low, rgba(255, 255, 255, 0.06));
@@ -54,7 +54,7 @@
 }
 
 #nss-sticky-telemetry-bar .bay-divider-right {
-	border-right: 1px solid var(--border-color-medium);
+	border-right: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
 	padding-right: 16px;
 }
 
@@ -95,9 +95,9 @@
 }
 
 :is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-unit-bar {
-	border: 1px solid var(--border-color-medium);
-	background: var(--background-color-medium);
-	color: var(--text-color-high);
+	border: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.06));
+	color: var(--text-color-high, #adbac7);
 	padding: 0 5px;
 	gap: 5px;
 	display: inline-flex;
@@ -108,7 +108,7 @@
 :is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-bar-label {
 	font-size: 10px;
 	font-weight: 700;
-	color: var(--text-color-medium);
+	color: var(--text-color-medium, #888);
 	width: 24px;
 	min-width: 24px;
 	max-width: 24px;
@@ -131,7 +131,7 @@
 	}
 	#nss-sticky-telemetry-bar .bay-card.control-bay {
 		grid-column: 1 / -1;
-		border-top: 1px solid var(--border-color-medium);
+		border-top: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
 		padding-top: 10px;
 	}
 	#nss-sticky-telemetry-bar .control-panel-fixed {
@@ -148,7 +148,7 @@
 	#nss-sticky-telemetry-bar .bay-divider-right {
 		border-right: none;
 		padding-right: 0;
-		border-bottom: 1px solid var(--border-color-medium);
+		border-bottom: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
 		padding-bottom: 10px;
 	}
 }
@@ -290,7 +290,7 @@
 
 /* 4. Pre-Constrained Table Column Widths & Anti-Jitter Numeric Pipeline */
 .nss-dashboard-spa .table th.sorted {
-	color: var(--primary-color-high);
+	color: var(--primary-color-high, #1976d2);
 }
 
 .nss-dashboard-spa .nss-fixed-table {
@@ -347,7 +347,7 @@
 	padding: 6px 12px;
 	margin-bottom: 6px;
 	font-size: 11px;
-	color: var(--text-color-medium);
+	color: var(--text-color-medium, #888);
 }
 
 .nss-dashboard-spa .nss-scroll-proxy {
@@ -410,7 +410,7 @@
 	border-radius: 2px;
 	border: 1px solid var(--border-color-medium, rgba(255, 255, 255, 0.15));
 	background: var(--background-color-low, transparent);
-	color: var(--text-color-medium);
+	color: var(--text-color-medium, #888);
 	user-select: none;
 	line-height: 1.3;
 }
@@ -469,7 +469,7 @@
 }
 
 /* 10. Self-Contained Meter Bars (Zero Theme Collisions, Zero cbi-progressbar Hijack) */
-.nss-bar {
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar {
 	height: 14px;
 	border-radius: 999px;
 	background: var(--background-color-medium, rgba(255, 255, 255, 0.08));
@@ -480,35 +480,35 @@
 	border: none;
 }
 
-.nss-bar-fill,
-.nss-bar-warn,
-.nss-bar-danger {
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-fill,
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-warn,
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-danger {
 	height: 100%;
 	border-radius: 999px;
 }
 
-.nss-bar-fill { background: var(--primary-color-medium, #1976d2); }
-.nss-bar-warn { background: var(--warn-color-high, #efbd0b); }
-.nss-bar-danger { background: var(--error-color-high, #f62b12); }
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-fill { background: var(--primary-color-medium, #1976d2); }
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-warn { background: var(--warn-color-high, #efbd0b); }
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-danger { background: var(--error-color-high, #f62b12); }
 
-.nss-bar-disabled {
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-disabled {
 	background: var(--background-color-low, rgba(255, 255, 255, 0.05));
 	border: 1px dashed var(--border-color-medium, rgba(255, 255, 255, 0.2));
 	opacity: 0.8;
 }
 
-.nss-stacked {
+:is(.nss-dashboard-spa, #nss-status-table) .nss-stacked {
 	display: flex;
 }
 
-.nss-stacked > div {
+:is(.nss-dashboard-spa, #nss-status-table) .nss-stacked > div {
 	border-radius: 0;
 	height: 100%;
 	margin-right: -0.5px;
 }
 
 /* 11. Horizontal Scroll Container */
-[id$="-scroll-wrap"] {
+.nss-dashboard-spa [id$="-scroll-wrap"] {
 	overflow-x: auto;
 	width: 100%;
 	max-width: 100%;
@@ -518,11 +518,11 @@
 	display: block;
 }
 
-[id$="-scroll-wrap"]::-webkit-scrollbar {
+.nss-dashboard-spa [id$="-scroll-wrap"]::-webkit-scrollbar {
 	height: 6px;
 }
 
-[id$="-scroll-wrap"]::-webkit-scrollbar-thumb {
+.nss-dashboard-spa [id$="-scroll-wrap"]::-webkit-scrollbar-thumb {
 	background: var(--border-color-medium, rgba(255, 255, 255, 0.2));
 	border-radius: 3px;
 }
@@ -550,7 +550,7 @@
 	min-width: 140px;
 	text-align: right;
 	font-weight: 600;
-	color: var(--text-color-high);
+	color: var(--text-color-high, #adbac7);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -566,7 +566,7 @@
 	width: 130px;
 	min-width: 130px;
 	font-weight: 700;
-	color: var(--text-color-medium);
+	color: var(--text-color-medium, #888);
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
 }

@@ -10,6 +10,8 @@ var callNssStatus = rpc.declare({
 });
 
 var lastRadioTemps = {};
+/* 连续 N 个轮询周期读不到有效温度才降级"待机"：容忍传感器瞬时抖动，真实反映长期休眠 */
+var RADIO_TEMP_TTL = 3;
 
 function row(label, value, hint) {
 	var labelEl = hint ? E('span', {
@@ -28,13 +30,13 @@ return baseclass.extend({
 
 	load: function() {
 		return Promise.all([
-			L.resolveDefault(callNssStatus(), {})
+			L.resolveDefault(callNssStatus(), {}),
+			util.fetchCssText()
 		]);
 	},
 
 	render: function(data) {
-		util.ensureCss();
-
+		var cssText = data[1] || '';
 		var d = data[0] || {};
 		if (!d.soc)
 			return null;
@@ -59,10 +61,7 @@ return baseclass.extend({
 
 		// 2. 模块状态
 		var mods = d.modules || {};
-		var chipOpts = {
-			tile: 'badge-tile-102',
-			style: 'width:102px; min-width:102px; max-width:102px; box-sizing:border-box; justify-content:center; text-align:center; white-space:nowrap !important;'
-		};
+		var chipOpts = { tile: 'badge-tile-102' };
 		var wifiChip = (d.wifi_offload === 1)
 			? chips.moduleChip('Wi-Fi', 2, _('已加速'), _('ath11k wifili 硬件加速已就绪 (802.11s Mesh 支持)'), chipOpts)
 			: chips.moduleChip('Wi-Fi', 0, _('主机模式'), _('无线数据流未经 NSS 卸载'), chipOpts);
@@ -130,23 +129,15 @@ return baseclass.extend({
 
 		var computeLoadView = E('div', { 'style': 'display:flex; flex-direction:column; gap:4px; max-width:280px;' }, computeLoadElements);
 
-		// 4. 硬件遥测 (固定核心排：CPU温度 + ECM流 + v4/v6；无线射频排：物理插槽全量对齐，未启用状态降级)
+		// 4. 硬件遥测 (固定核心排：CPU温度 + ECM流 + v4/v6；无线射频排：物理插槽全量对齐，TTL 降级)
 		var cpuTempNum = parseFloat(d.cpu_temp) || 0;
-		var cpuChip = (cpuTempNum > 0)
-			? chips.tempBadge('CPU', cpuTempNum, chipOpts)
-			: E('span', {
-				'class': 'badge badge-neutral badge-tile-102',
-				'style': chipOpts.style,
-				'title': 'CPU: ' + _('待机')
-			}, [
-				E('strong', {}, [ 'CPU:' ]),
-				' ' + _('待机')
-			]);
+		var cpuChip = chips.tempBadge('CPU', cpuTempNum, Object.assign({}, chipOpts, {
+			disabledText: _('待机')
+		}));
 
 		var ecmTotalChip = E('span', {
 			'class': 'badge badge-info badge-tile-102',
-			'title': _('当前经由高通增强连接管理器 (ECM) 卸载的硬件并发流总数'),
-			'style': 'width:102px; min-width:102px; max-width:102px; box-sizing:border-box; justify-content:center; text-align:center; white-space:nowrap !important;'
+			'title': _('当前经由高通增强连接管理器 (ECM) 卸载的硬件并发流总数')
 		}, [
 			E('span', { 'class': 'badge-dot' }),
 			E('strong', {}, [ 'ECM:' ]),
@@ -155,8 +146,7 @@ return baseclass.extend({
 
 		var ecmDistChip = E('span', {
 			'class': 'badge badge-neutral badge-tile-102',
-			'title': 'IPv4: ' + (d.ecm_v4 || 0) + ' • IPv6: ' + (d.ecm_v6 || 0),
-			'style': 'width:102px; min-width:102px; max-width:102px; box-sizing:border-box; justify-content:center; text-align:center; white-space:nowrap !important;'
+			'title': 'IPv4: ' + (d.ecm_v4 || 0) + ' • IPv6: ' + (d.ecm_v6 || 0)
 		}, [
 			E('strong', {}, [ 'v4/v6:' ]),
 			' ' + (d.ecm_v4 || 0) + '/' + (d.ecm_v6 || 0)
@@ -167,24 +157,24 @@ return baseclass.extend({
 		for (var i = 0; i < radios.length; i++) {
 			var rId = radios[i].id;
 			var rawT = parseFloat(radios[i].temp) || 0;
-			if (rawT <= 0 && lastRadioTemps[rId] && lastRadioTemps[rId] > 0) {
-				rawT = lastRadioTemps[rId];
-			} else if (rawT > 0) {
-				lastRadioTemps[rId] = rawT;
+			if (rawT > 0) {
+				lastRadioTemps[rId] = { temp: rawT, miss: 0 };
+			} else {
+				var cached = lastRadioTemps[rId];
+				if (cached && cached.miss < RADIO_TEMP_TTL) {
+					cached.miss++;
+					rawT = cached.temp;
+				} else {
+					delete lastRadioTemps[rId];
+				}
 			}
 
-			if (rawT > 0) {
-				radioChips.push(chips.tempBadge(rId, rawT, chipOpts));
-			} else {
-				radioChips.push(E('span', {
-					'class': 'badge badge-neutral badge-tile-102',
-					'style': chipOpts.style,
-					'title': rId + ': ' + _('射频未启用或处于省电休眠')
-				}, [
-					E('strong', {}, [ rId + ':' ]),
-					' ' + _('待机')
-				]));
-			}
+			radioChips.push((rawT > 0)
+				? chips.tempBadge(rId, rawT, chipOpts)
+				: chips.tempBadge(rId, 0, Object.assign({}, chipOpts, {
+					disabledText: _('待机'),
+					disabledTitle: rId + ': ' + _('射频未启用或处于省电休眠')
+				})));
 		}
 
 		var fixedRow = E('div', {
@@ -199,11 +189,14 @@ return baseclass.extend({
 			'style': 'display:flex; flex-direction:column; gap:6px;'
 		}, [ fixedRow, radioRow ]);
 
-		return E('table', { 'id': 'nss-status-table', 'class': 'table' }, [
-			row(_('协处理器'), specView, _('高通网络子系统 (NSS) 硬件卸载协处理器，内置独立双核/单核与硬件转发管线，微码执行物理层线速转发')),
-			row(_('模块状态'), modulesView, _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)')),
-			row(_('核心负载'), computeLoadView, _('Linux 主机通用处理器 (usr/sys/sirq) 与 NSS 硬件协处理器独立运算负载')),
-			row(_('硬件遥测'), telemetryView, _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流数与芯片温度监测'))
+		return E('div', {}, [
+			E('style', {}, [ cssText ]),
+			E('table', { 'id': 'nss-status-table', 'class': 'table' }, [
+				row(_('协处理器'), specView, _('高通网络子系统 (NSS) 硬件卸载协处理器，内置独立双核/单核与硬件转发管线，微码执行物理层线速转发')),
+				row(_('模块状态'), modulesView, _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)')),
+				row(_('核心负载'), computeLoadView, _('Linux 主机通用处理器 (usr/sys/sirq) 与 NSS 硬件协处理器独立运算负载')),
+				row(_('硬件遥测'), telemetryView, _('当前经由高通增强连接管理器 (ECM) 卸载到硬件层线速转发的活跃流数与芯片温度监测'))
+			])
 		]);
 	}
 });

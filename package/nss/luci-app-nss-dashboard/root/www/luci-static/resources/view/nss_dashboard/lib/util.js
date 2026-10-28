@@ -2,7 +2,38 @@
 'require baseclass';
 
 return baseclass.extend({
-	CSS_VERSION: '261028a',
+	CSS_VERSION: '261028b',
+
+	cssTextCache: null,
+
+	/* View-scoped stylesheet: fetch the CSS text once per page session and
+	 * let each view mount it as a <style> inside its own DOM subtree (#view).
+	 * Never inject into document.head: theme sheet sandboxes (e.g. Footstrap
+	 * fs-sheets.js) watch head/body mutations and disable foreign <link>s
+	 * while their CSS is still loading, which breaks rendering after theme
+	 * switches. Inside #view the sheet is exempt (outlives the page = false)
+	 * and dies with the view, leaving no global residue. */
+	fetchCssText: function() {
+		if (this.cssTextCache !== null)
+			return Promise.resolve(this.cssTextCache);
+
+		var self = this;
+		return fetch(L.resource('view/nss_dashboard/nss.css') + '?v=' + this.CSS_VERSION)
+			.then(function(res) {
+				if (!res.ok)
+					throw new Error('HTTP ' + res.status + ' for nss.css');
+				return res.text();
+			})
+			.then(function(text) {
+				self.cssTextCache = text;
+				return text;
+			})
+			.catch(function(e) {
+				/* no cache on failure: the next load() retries */
+				console.warn('nss-dashboard: stylesheet unavailable, rendering unstyled: ' + e);
+				return '';
+			});
+	},
 
 	normIp: function(ip) {
 		if (!ip || ip.indexOf(':') === -1) return (ip || '').trim().toLowerCase();
@@ -154,21 +185,5 @@ return baseclass.extend({
 		fn();
 		var cur = parent.querySelector(sel);
 		if (cur && left > 0) cur.scrollLeft = left;
-	},
-
-	ensureCss: function() {
-		var id = 'luci-app-nss-dashboard-css';
-		var el = document.getElementById(id);
-		var url = L.resource('view/nss_dashboard/nss.css') + '?v=' + this.CSS_VERSION;
-		if (!el) {
-			document.head.appendChild(E('link', {
-				'id': id,
-				'rel': 'stylesheet',
-				'type': 'text/css',
-				'href': url
-			}));
-		} else if (el.href.indexOf('?v=' + this.CSS_VERSION) === -1) {
-			el.href = url;
-		}
 	}
 });

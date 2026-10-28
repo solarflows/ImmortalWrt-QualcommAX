@@ -101,8 +101,6 @@ return baseclass.extend({
 		}
 
 		var cls = (t >= 75) ? 'badge-danger' : (t >= 60) ? 'badge-warning' : 'badge-success';
-		var tileCls = (opts && opts.tile) ? (' ' + opts.tile) : '';
-		var style = (opts && opts.style) ? opts.style : '';
 
 		return E('span', {
 			'class': 'badge ' + cls + tileCls,

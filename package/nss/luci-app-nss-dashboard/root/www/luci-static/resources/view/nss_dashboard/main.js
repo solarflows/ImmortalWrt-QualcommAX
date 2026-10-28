@@ -279,7 +279,6 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	return panel;
 }
 
-var ensureCss = util.ensureCss.bind(util);
 var calcCpuLoad = chips.calcCpuLoad.bind(chips);
 var sampleMetricsRate = chips.sampleMetricsRate.bind(chips);
 
@@ -2091,12 +2090,13 @@ return view.extend({
 		return Promise.all([
 			L.resolveDefault(callGetProfile(), {}),
 			L.resolveDefault(callGetMetrics(), {}),
-			L.resolveDefault(callGetSettings(), {})
+			L.resolveDefault(callGetSettings(), {}),
+			util.fetchCssText()
 		]);
 	},
 
 	render: function(initData) {
-		ensureCss();
+		var cssText = initData[3] || '';
 
 		var profileData   = initData[0] || {};
 		var metricsData   = initData[1] || {};
@@ -2453,6 +2453,7 @@ return view.extend({
 			poll.add(update, 1);
 
 		return E('div', { 'class': 'nss-dashboard-spa cbi-map' }, [
+			E('style', {}, [ cssText ]),
 			stickyBarContainer,
 			conflictContainer,
 			E('div', { 'class': 'cbi-section' }, [

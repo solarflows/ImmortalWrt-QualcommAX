@@ -279,6 +279,54 @@ function renderItemExpandPanel(clientObj, onToggle) {
 	return panel;
 }
 
+/**
+ * 微秒级就地展开/收起终端详情面板 (零整表重绘、零排序、零 DOM 拔除)。
+ * 与 DataTable.patchRows 的展开子行结构 (tr.client-expand-row[data-expand-for])
+ * 完全兼容：轮询增量 patch 时 renderExpandRow 按 expandedClientsMap 自动保持展开。
+ */
+function toggleClientExpand(rowEl, clientObj, key, colSpan) {
+	var isExp = !expandedClientsMap[key];
+	expandedClientsMap[key] = isExp;
+
+	// 1. 同步主行高亮状态与提示
+	rowEl.classList.toggle('expanded', isExp);
+	rowEl.title = isExp ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池');
+
+	// 2. 同步主行触发器微标与箭头
+	var triggerBox = rowEl.querySelector('.client-trigger-box');
+	if (triggerBox) {
+		triggerBox.classList.toggle('no-hover', isExp);
+		triggerBox.title = isExp ? _('点击收起详情面板') : _('点击展开该终端地址池');
+		var badgeEl = triggerBox.querySelector('.client-expand-badge');
+		if (badgeEl) {
+			badgeEl.className = 'badge ' + (isExp ? 'badge-info' : 'badge-neutral') + ' client-expand-badge';
+			var arrowSpan = badgeEl.querySelector('span');
+			if (arrowSpan) arrowSpan.textContent = isExp ? '▾' : '▸';
+		}
+	}
+
+	// 3. 就地插入或移除展开子行 (Accordion Sub-Row)
+	var next = rowEl.nextElementSibling;
+	var isSubRow = (next && next.classList.contains('client-expand-row') && next.getAttribute('data-expand-for') === key);
+
+	if (isExp) {
+		if (!isSubRow) {
+			var panel = renderItemExpandPanel(clientObj, function() {
+				toggleClientExpand(rowEl, clientObj, key, colSpan);
+			});
+			var subRow = E('tr', {
+				'class': 'client-expand-row',
+				'data-expand-for': key
+			}, [
+				E('td', { 'colspan': String(colSpan || 5) }, [ panel ])
+			]);
+			rowEl.insertAdjacentElement('afterend', subRow);
+		}
+	} else if (isSubRow) {
+		next.remove();
+	}
+}
+
 var calcCpuLoad = chips.calcCpuLoad.bind(chips);
 var sampleMetricsRate = chips.sampleMetricsRate.bind(chips);
 
@@ -1413,7 +1461,7 @@ function renderClientRateContent(c) {
 	return E('span', { 'style': 'color:var(--text-color-medium);' }, [ c.sampled ? '0 bps' : '—' ]);
 }
 
-function renderClientRow(c, onToggleExpand) {
+function renderClientRow(c) {
 	var isExpanded = !!expandedClientsMap[c.key];
 	var protoBadges = Object.keys(c.protos).sort().map(function(pr) {
 		var protoCls = (pr === 'TCP') ? 'badge-info' : (pr === 'UDP') ? 'badge-warning' : 'badge-neutral';
@@ -1426,11 +1474,10 @@ function renderClientRow(c, onToggleExpand) {
 		'title': isExpanded ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池'),
 		'click': function(ev) {
 			if (ev.target.closest('button, a, input')) return;
-			expandedClientsMap[c.key] = !isExpanded;
-			if (onToggleExpand) onToggleExpand();
+			toggleClientExpand(this, c, c.key, 6);
 		}
 	}, [
-		E('td', { 'class': 'td' }, [ renderClientCell(c, c.key, onToggleExpand) ]),
+		E('td', { 'class': 'td' }, [ renderClientCell(c, c.key) ]),
 		E('td', { 'class': 'td nss-num-cell', 'data-col': 'rate' }, [ renderClientRateContent(c) ]),
 		E('td', { 'class': 'td nss-num-cell', 'data-col': 'conns' }, [ c.flowCount + ' ' + _('条连接') ]),
 		E('td', { 'class': 'td nss-num-cell', 'data-col': 'pkts' }, [ c.totalPkts.toLocaleString() + ' pkts' ]),
@@ -1659,7 +1706,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		emptyText: _('当前暂无活跃的客户端硬件加速流'),
 		getKey: function(c) { return c.key; },
 		renderRow: function(c) {
-			return renderClientRow(c, onSubTabSwitch);
+			return renderClientRow(c);
 		},
 		patchRow: function(row, c) {
 			patchClientRow(row, c);
@@ -1667,8 +1714,12 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 		renderExpandRow: function(c) {
 			if (!expandedClientsMap[c.key]) return null;
 			return renderItemExpandPanel(c, function() {
-				expandedClientsMap[c.key] = false;
-				if (onSubTabSwitch) onSubTabSwitch();
+				var rowEl = clientTable.tbody.querySelector('tr[data-key="' + c.key + '"]');
+				if (rowEl) {
+					toggleClientExpand(rowEl, c, c.key, 6);
+				} else {
+					expandedClientsMap[c.key] = false;
+				}
 			});
 		}
 	});
@@ -1903,24 +1954,7 @@ function renderAuditRankBars(topClients, grandTotal) {
 	}));
 }
 
-function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch) {
-	if (!auditData || auditData.installed === 0) {
-		return E('div', { 'class': 'cbi-section' }, [
-			E('h3', { 'class': 'cbi-section-title' }, [
-				E('span', {}, [ _('流量档案与长期审计') ]),
-				badge('badge-neutral', _('未运行 nlbwmon'))
-			]),
-			E('div', { 'class': 'cbi-section-node' }, [
-				E('div', { 'class': 'alert-message notice', 'style': 'margin:14px; text-align:center; padding:18px;' }, [
-					E('strong', { 'style': 'font-size:14px; display:block; margin-bottom:8px;' }, [ _('提示：当前固件未安装或未运行 nlbwmon 流量审计组件') ]),
-					E('p', { 'style': 'margin-top:6px; color:var(--text-color-medium); font-size:12px; line-height:1.6;' }, [
-						_('流量档案依赖系统 nlbwmon 核心提供内存级 (-Z 零闪存磨损) 长期会话流量归档。若需启用此子卡，可在系统中配置启用 nlbwmon。')
-					])
-				])
-			])
-		]);
-	}
-
+function parseAuditData(auditData, hostHintsData) {
 	var raw = auditData.audit || {};
 	var cols = raw.columns || [];
 	var data = raw.data || [];
@@ -1977,7 +2011,39 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 		if (chartCol.num) return ((va || 0) - (vb || 0)) * auditSortDir;
 		return String(va || '').localeCompare(String(vb || '')) * auditSortDir;
 	});
-	var topClients = sortedForChart.slice(0, 5);
+
+	return {
+		clientAuditList: clientAuditList,
+		totalRx: totalRx,
+		totalTx: totalTx,
+		totalConns: totalConns,
+		grandTotal: grandTotal,
+		topClients: sortedForChart.slice(0, 5)
+	};
+}
+
+function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch) {
+	if (!auditData || auditData.installed === 0) {
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', { 'class': 'cbi-section-title' }, [
+				E('span', {}, [ _('流量档案与长期审计') ]),
+				badge('badge-neutral', _('未运行 nlbwmon'))
+			]),
+			E('div', { 'class': 'cbi-section-node' }, [
+				E('div', { 'class': 'alert-message notice', 'style': 'margin:14px; text-align:center; padding:18px;' }, [
+					E('strong', { 'style': 'font-size:14px; display:block; margin-bottom:8px;' }, [ _('提示：当前固件未安装或未运行 nlbwmon 流量审计组件') ]),
+					E('p', { 'style': 'margin-top:6px; color:var(--text-color-medium); font-size:12px; line-height:1.6;' }, [
+						_('流量档案依赖系统 nlbwmon 核心提供内存级 (-Z 零闪存磨损) 长期会话流量归档。若需启用此子卡，可在系统中配置启用 nlbwmon。')
+					])
+				])
+			])
+		]);
+	}
+
+	var parsed = parseAuditData(auditData, hostHintsData);
+	var clientAuditList = parsed.clientAuditList;
+	var grandTotal = parsed.grandTotal;
+	var topClients = parsed.topClients;
 
 	var auditTable = DataTable.create({
 		wrapId: 'audit-scroll-wrap',
@@ -2005,11 +2071,10 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 				'title': isExpanded ? _('点击收起此终端详情') : _('点击展开此终端详情与地址池'),
 				'click': function(ev) {
 					if (ev.target.closest('button, a, input')) return;
-					expandedClientsMap['audit_' + c.mac] = !isExpanded;
-					if (onSortSwitch) onSortSwitch();
+					toggleClientExpand(this, c, 'audit_' + c.mac, 5);
 				}
 			}, [
-				E('td', { 'class': 'td' }, [ renderClientCell(c, 'audit_' + c.mac, onSortSwitch) ]),
+				E('td', { 'class': 'td' }, [ renderClientCell(c, 'audit_' + c.mac) ]),
 				E('td', { 'class': 'td nss-num-cell' }, [
 					String.format('%1024.1mB', c.rx),
 					E('span', { 'style': 'font-size:10px; color:var(--text-color-medium); margin-left:4px;' }, [ '(' + rxPct + '%)' ])
@@ -2024,8 +2089,12 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 		renderExpandRow: function(c) {
 			if (!expandedClientsMap['audit_' + c.mac]) return null;
 			return renderItemExpandPanel(c, function() {
-				expandedClientsMap['audit_' + c.mac] = false;
-				if (onSortSwitch) onSortSwitch();
+				var rowEl = auditTable.tbody.querySelector('tr[data-key="' + c.key + '"]');
+				if (rowEl) {
+					toggleClientExpand(rowEl, c, 'audit_' + c.mac, 5);
+				} else {
+					expandedClientsMap['audit_' + c.mac] = false;
+				}
 			});
 		}
 	});
@@ -2042,15 +2111,15 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 				E('tbody', {}, [
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('审计周期总流量') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'style': 'width:25%; font-weight:bold;' }, [ String.format('%1024.1mB', grandTotal) ]),
+						E('td', { 'id': 'audit-total-bytes', 'class': 'td left nss-num-cell', 'style': 'width:25%; font-weight:bold;' }, [ String.format('%1024.1mB', parsed.grandTotal) ]),
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('累计下行 / 累计上行') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'style': 'width:25%;' }, [
-							String.format('%1024.1mB', totalRx) + ' / ' + String.format('%1024.1mB', totalTx)
+						E('td', { 'id': 'audit-rxtx-bytes', 'class': 'td left nss-num-cell', 'style': 'width:25%;' }, [
+							String.format('%1024.1mB', parsed.totalRx) + ' / ' + String.format('%1024.1mB', parsed.totalTx)
 						])
 					]),
 					E('tr', { 'class': 'tr' }, [
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('追踪会话总数') ]),
-						E('td', { 'class': 'td left nss-num-cell', 'style': 'width:25%;' }, [ totalConns.toLocaleString() + ' ' + _('条会话') ]),
+						E('td', { 'id': 'audit-total-conns', 'class': 'td left nss-num-cell', 'style': 'width:25%;' }, [ parsed.totalConns.toLocaleString() + ' ' + _('条会话') ]),
 						E('td', { 'class': 'td left', 'style': 'width:25%; font-weight:600;' }, [ _('统计引擎') ]),
 						E('td', { 'class': 'td left', 'style': 'width:25%;' }, [
 							badge('badge-info', 'nlbwmon (tmpfs 内存级零磨损)')
@@ -2065,12 +2134,12 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('Top 5 终端用量分布') ])
 		]),
-		E('div', { 'class': 'cbi-section-node', 'style': 'padding:12px 14px;' }, [
-			renderAuditRankBars(topClients, grandTotal)
+		E('div', { 'id': 'audit-rank-container', 'class': 'cbi-section-node', 'style': 'padding:12px 14px;' }, [
+			renderAuditRankBars(topClients, parsed.grandTotal)
 		])
 	]) : E('div');
 
-	var tableSec = E('div', { 'class': 'cbi-section' }, [
+	var tableSec = E('div', { 'class': 'cbi-section', 'id': 'audit-table-sec' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
 			E('span', {}, [ _('终端长期流量明细账单') ])
 		]),
@@ -2079,8 +2148,34 @@ function renderAuditCard(auditData, hostHintsData, onRefreshToggle, onSortSwitch
 			_('说明: 流量档案数据直接映射自 nlbwmon 内存驻留数据库 (-Z)，无闪存擦写开销；点击设备单元格可展开对应终端的多网卡与地址池。')
 		])
 	]);
+	tableSec._auditTable = auditTable;
 
 	return E('div', {}, [ summarySec, chartSec, tableSec ]);
+}
+
+/* 4s 轮询增量刷新流量档案：局部更新汇总文案与 Top5 榜单，DataTable 增量 patch
+   复用已有 DOM 行并自动保持展开状态；未挂载实例时返回 false 走全量渲染兜底。 */
+function updateAuditTable(subCardContainer, auditData, hostHintsData) {
+	var tableSec = subCardContainer.querySelector('#audit-table-sec');
+	if (!tableSec || !tableSec._auditTable) return false;
+
+	var parsed = parseAuditData(auditData, hostHintsData);
+
+	var totalEl = subCardContainer.querySelector('#audit-total-bytes');
+	if (totalEl) totalEl.textContent = String.format('%1024.1mB', parsed.grandTotal);
+	var rxTxEl = subCardContainer.querySelector('#audit-rxtx-bytes');
+	if (rxTxEl) rxTxEl.textContent = String.format('%1024.1mB', parsed.totalRx) + ' / ' + String.format('%1024.1mB', parsed.totalTx);
+	var connsEl = subCardContainer.querySelector('#audit-total-conns');
+	if (connsEl) connsEl.textContent = parsed.totalConns.toLocaleString() + ' ' + _('条会话');
+
+	var rankContainer = subCardContainer.querySelector('#audit-rank-container');
+	if (rankContainer) {
+		dom.content(rankContainer, [ renderAuditRankBars(parsed.topClients, parsed.grandTotal) ]);
+	}
+
+	/* 悬停冻结：行序不动、单元格原位更新、展开子行保持（与 flows 表一致） */
+	tableSec._auditTable.update(parsed.clientAuditList, isTableHovered);
+	return true;
 }
 
 // ── 8. SPA 统一主入口视图 ──
@@ -2306,18 +2401,20 @@ return view.extend({
 							]).then(function(res) {
 								auditData = res[0] || {};
 								hostHintsData = res[1] || {};
-								dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
-									dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
-								}));
+								renderAuditCardInto();
 							});
 						} else {
-							dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
-								dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
-							}));
+							renderAuditCardInto();
 						}
 					}
 				}
 			];
+
+			/* 自引用渲染：排序切换 (onSortSwitch) 触发的整卡重建永远携带自身，
+			   修复旧匿名递归漏传第 4 参导致的排序/收起二阶交互断链 */
+			function renderAuditCardInto() {
+				dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, renderAuditCardInto));
+			}
 
 			var tabMenuContainer = E('ul', { 'class': 'cbi-tabmenu' });
 
@@ -2391,11 +2488,9 @@ return view.extend({
 							hostHintsData = res[2];
 							setSessionData('nss_host_hints', hostHintsData);
 						}
-						util.preserveScroll('#audit-scroll-wrap', subCardContainer, function() {
-							dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky, function() {
-								dom.content(subCardContainer, renderAuditCard(auditData, hostHintsData, renderSticky));
-							}));
-						});
+						if (!updateAuditTable(subCardContainer, auditData, hostHintsData)) {
+							util.preserveScroll('#audit-scroll-wrap', subCardContainer, renderAuditCardInto);
+						}
 					}
 				}).catch(function() {});
 			};

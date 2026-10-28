@@ -446,6 +446,17 @@
 	border-collapse: collapse;
 }
 
+/* Neutralize theme sticky headers (e.g. Footstrap .fs-dt): our tables live in
+ * overflow-x scroll wrappers, which become the sticky containing block, so a
+ * themed top offset (46px) permanently pushes the thead down over the first
+ * data row. Unlayered + mirrored specificity beats the layered theme rule
+ * without any !important. */
+.nss-dashboard-spa .table th,
+.nss-dashboard-spa .table.fs-dt:not(.fs-stacked) .tr.table-titles .th {
+	position: static;
+	top: auto;
+}
+
 .nss-dashboard-spa .table td[data-title]::before,
 .nss-dashboard-spa .table td::before {
 	display: none;

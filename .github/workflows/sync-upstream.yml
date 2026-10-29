@@ -223,7 +223,8 @@ jobs:
       defaults_repo:                      'solarflows/AutoWorkFlows'
       defaults_ref:                       'main'
       config_path:                        'configs'
-      version_prefix:                     'Canary-V'
+      matrix_firmware_release_tag_prefix: ${{ matrix.tag_prefix }}
+      version_prefix:                     'canary-V'
       cache_variant:                      'canary'
       require_signing:                    ${{ needs.sync_rolling.outputs.require_signing == 'true' }}
       collect_packages:                   'luci-app-passwall, luci-app-passwall2, luci-app-homeproxy, luci-i18n-passwall-zh-cn, luci-i18n-passwall2-zh-cn, luci-i18n-homeproxy-zh-cn, chinadns-ng, dns2socks, geoview, haproxy, hysteria, ipt2socks, microsocks, naiveproxy, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver, shadowsocksr-libev, simple-obfs, shadow-tls, sing-box, tcping, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core'
@@ -329,8 +330,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TARGET="${{ matrix.target }}"
-          VERSION="V$(TZ='Asia/Shanghai' date +'%y%m%d')"
-          RELEASE_TAG="${TARGET}-canary-${VERSION}"
+          # 严格以 AutoWorkFlows 的 build-info.json 导出 Tag 为单一真理源，绝不自行计算
+          RELEASE_TAG=""
+          if [ -f "artifacts/build-info/build-info.json" ]; then
+            RELEASE_TAG=$(jq -r '.release_tag // empty' artifacts/build-info/build-info.json 2>/dev/null || true)
+          fi
+          [ -n "$RELEASE_TAG" ] || RELEASE_TAG="${TARGET}-canary-V$(TZ='Asia/Shanghai' date +'%y%m%d')"
           PASSWALL_TAG="packages-${TARGET}-canary"
           REPO="${{ github.repository }}"
 
@@ -372,8 +377,17 @@ jobs:
               --notes-file "$BODY_FILE"
           fi
 
-          # 逐文件上传固件资产
+          # 逐文件上传固件资产 (若 Release 已存在, 清理非本次构建的历史残留固件)
           if [ -d "/tmp/release-staging/firmware" ]; then
+            if gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
+              EXISTING_FIRMWARES=$(gh release view "$RELEASE_TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -E '^openwrt-.*-qualcommax-' || true)
+              for old_fw in $EXISTING_FIRMWARES; do
+                if [ ! -f "/tmp/release-staging/firmware/$old_fw" ]; then
+                  echo "🧹 清理非本次构建的历史残留固件: $old_fw"
+                  gh release delete-asset "$RELEASE_TAG" "$old_fw" --repo "$REPO" --yes 2>/dev/null || true
+                fi
+              done
+            fi
             find "/tmp/release-staging/firmware" -maxdepth 1 -type f -exec gh release upload "$RELEASE_TAG" {} --repo "$REPO" --clobber \;
           fi
 

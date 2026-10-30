@@ -52,13 +52,31 @@ endef
 $(eval $(call KernelPackage,nf-conncount))
 
 
+define KernelPackage/iptables
+  SUBMENU:=$(NF_MENU)
+  TITLE:=Iptables legacy
+  KCONFIG:= \
+	CONFIG_IP_NF_IPTABLES_LEGACY \
+	CONFIG_NETFILTER_XTABLES \
+	CONFIG_NETFILTER_XTABLES_LEGACY=y \
+	CONFIG_IP6_NF_IPTABLES_LEGACY \
+	CONFIG_BRIDGE_NF_EBTABLES_LEGACY
+  HIDDEN:=1
+  DEPENDS:=@!LINUX_6_12
+  FILES:= \
+	$(LINUX_DIR)/net/ipv4/netfilter/ip_tables.ko \
+	$(LINUX_DIR)/net/netfilter/x_tables.ko
+  AUTOLOAD:=$(call AutoProbe,$(notdir ip_tables x_tables))
+endef
+
+$(eval $(call KernelPackage,iptables))
+
+
 define KernelPackage/nf-ipt
   SUBMENU:=$(NF_MENU)
   TITLE:=Iptables core
-  KCONFIG:= \
-	$(KCONFIG_NF_IPT) \
-	CONFIG_IP_NF_IPTABLES_LEGACY \
-	CONFIG_NETFILTER_XTABLES_LEGACY=y
+  KCONFIG:=$(KCONFIG_NF_IPT)
+  DEPENDS:=+!LINUX_6_12:kmod-iptables
   FILES:=$(foreach mod,$(NF_IPT-m),$(LINUX_DIR)/net/$(mod).ko)
   AUTOLOAD:=$(call AutoProbe,$(notdir $(NF_IPT-m)))
 endef
@@ -69,12 +87,10 @@ $(eval $(call KernelPackage,nf-ipt))
 define KernelPackage/nf-ipt6
   SUBMENU:=$(NF_MENU)
   TITLE:=Ip6tables core
-  KCONFIG:= \
-	$(KCONFIG_NF_IPT6) \
-	CONFIG_IP6_NF_IPTABLES_LEGACY
+  KCONFIG:=$(KCONFIG_NF_IPT6)
   FILES:=$(foreach mod,$(NF_IPT6-m),$(LINUX_DIR)/net/$(mod).ko)
   AUTOLOAD:=$(call AutoProbe,$(notdir $(NF_IPT6-m)))
-  DEPENDS:=+kmod-nf-ipt +kmod-nf-log
+  DEPENDS:=+kmod-nf-ipt +kmod-nf-log6
 endef
 
 $(eval $(call KernelPackage,nf-ipt6))
@@ -153,6 +169,18 @@ endef
 $(eval $(call KernelPackage,nf-log))
 
 
+define KernelPackage/nf-log6
+  SUBMENU:=$(NF_MENU)
+  TITLE:=Netfilter IPV6 Logging
+  KCONFIG:=$(KCONFIG_NF_LOG6)
+  DEPENDS:=@IPV6 +kmod-nf-log
+  FILES:=$(foreach mod,$(NF_LOG6-m),$(LINUX_DIR)/net/$(mod).ko)
+  AUTOLOAD:=$(call AutoProbe,$(notdir $(NF_LOG6-m)))
+endef
+
+$(eval $(call KernelPackage,nf-log6))
+
+
 define KernelPackage/nf-nat
   SUBMENU:=$(NF_MENU)
   TITLE:=Netfilter NAT
@@ -182,7 +210,8 @@ define KernelPackage/nf-flow
   TITLE:=Netfilter flowtable support
   KCONFIG:= \
 	CONFIG_NETFILTER_INGRESS=y \
-	CONFIG_NF_FLOW_TABLE
+	CONFIG_NF_FLOW_TABLE \
+	CONFIG_NF_FLOW_TABLE_HW
   DEPENDS:=+kmod-nf-conntrack +kmod-nft-core
   FILES:= $(LINUX_DIR)/net/netfilter/nf_flow_table.ko
   AUTOLOAD:=$(call AutoProbe,nf_flow_table nf_flow_table_hw)
@@ -309,6 +338,7 @@ $(eval $(call KernelPackage,ipt-offload))
 define KernelPackage/ipt-ipopt
   TITLE:=Modules for matching/changing IP packet options
   KCONFIG:=$(KCONFIG_IPT_IPOPT)
+  DEPENDS:=+PACKAGE_kmod-nf-conntrack:kmod-nf-conntrack
   FILES:=$(foreach mod,$(IPT_IPOPT-m),$(LINUX_DIR)/net/$(mod).ko)
   AUTOLOAD:=$(call AutoProbe,$(notdir $(IPT_IPOPT-m)))
   $(call AddDepends/ipt)
@@ -421,7 +451,7 @@ IPVS_MODULES:= \
 define KernelPackage/nf-ipvs
   SUBMENU:=Netfilter Extensions
   TITLE:=IP Virtual Server modules
-  DEPENDS:=@IPV6 +kmod-ipt-conntrack +kmod-nf-conntrack
+  DEPENDS:=@IPV6 +LINUX_6_12:kmod-lib-crc32c +kmod-ipt-conntrack +kmod-nf-conntrack
   KCONFIG:= \
 	CONFIG_IP_VS \
 	CONFIG_IP_VS_IPV6=y \
@@ -1070,9 +1100,7 @@ define KernelPackage/ebtables
   TITLE:=Bridge firewalling modules
   DEPENDS:=+kmod-ipt-core
   FILES:=$(foreach mod,$(EBTABLES-m),$(LINUX_DIR)/net/$(mod).ko)
-  KCONFIG:= \
-	$(KCONFIG_EBTABLES) \
-	CONFIG_BRIDGE_NF_EBTABLES_LEGACY
+  KCONFIG:=$(KCONFIG_EBTABLES)
   AUTOLOAD:=$(call AutoProbe,$(notdir $(EBTABLES-m)))
 endef
 
@@ -1282,7 +1310,7 @@ $(eval $(call KernelPackage,ipt-rpfilter))
 define KernelPackage/nft-core
   SUBMENU:=$(NF_MENU)
   TITLE:=Netfilter nf_tables support
-  DEPENDS:=+kmod-nfnetlink +kmod-nf-reject +IPV6:kmod-nf-reject6 +kmod-nf-nat +kmod-nf-log
+  DEPENDS:=+kmod-nfnetlink +kmod-nf-reject +IPV6:kmod-nf-reject6 +kmod-nf-nat +kmod-nf-log +IPV6:kmod-nf-log6 +LINUX_6_12:kmod-lib-crc32c
   FILES:=$(foreach mod,$(NFT_CORE-m),$(LINUX_DIR)/net/$(mod).ko)
   AUTOLOAD:=$(call AutoProbe,$(notdir $(NFT_CORE-m)))
   KCONFIG:= \

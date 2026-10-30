@@ -1,0 +1,97 @@
+#!/bin/sh
+# 98-nss-dashboard-profile: NSS hardware state discovery & profile initialization
+# Executed on firstboot or boot to reconcile UCI configuration with actual hardware state.
+# Read-before-write principle: probe physical/kernel reality before touching settings.
+
+. /usr/libexec/rpcd/nss_dashboard.common.sh
+
+# 1. Probe static hardware specifications
+soc=$(probe_soc)
+cores=$(probe_npu_cores "$soc")
+fw_ver=$(probe_fw_version)
+fw_mask=$(probe_fw_mask)
+cur_freq=$(probe_nss_freq)
+probe_modules_state
+sqm_state=$(probe_sqm "$mod_qdisc")
+
+# 2. Collect router self hostname and interface assets
+router_host=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "czw")
+
+# 3. Assemble and persist static profile JSON via jshn
+mkdir -p /tmp
+
+json_init
+json_add_string "soc" "$soc"
+json_add_int "cores" "$cores"
+json_add_string "fw_version" "$fw_ver"
+json_add_string "fw_mask" "$fw_mask"
+json_add_string "nss_freq" "$cur_freq"
+json_add_int "sqm" "$sqm_state"
+
+add_modules_object
+
+json_add_object "router"
+json_add_string "hostname" "$router_host"
+json_add_array "ips"
+local_ips=$(ip -o addr show 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}')
+if [ -n "$local_ips" ]; then
+	for ip in $local_ips; do
+		json_add_string "" "$ip"
+	done
+else
+	json_add_string "" "127.0.0.1"
+	json_add_string "" "::1"
+fi
+json_close_array
+json_close_object
+
+json_dump > "$PROFILE_JSON"
+
+cat > "$PROFILE_ENV" <<-EOF
+soc='$soc'
+cores=$cores
+fw_ver='$fw_ver'
+fw_mask='$fw_mask'
+nss_freq='$cur_freq'
+sqm_state=$sqm_state
+mod_pppoe=$mod_pppoe
+mod_vlan=$mod_vlan
+mod_bridge=$mod_bridge
+mod_qdisc=$mod_qdisc
+mod_crypto=$mod_crypto
+EOF
+
+# 4. State discovery & UCI reconciliation (only initialize if not already set by user)
+[ -f /etc/config/nss_dashboard ] || touch /etc/config/nss_dashboard
+
+if ! uci -q get nss_dashboard.general >/dev/null; then
+	uci -q batch <<-EOF
+		set nss_dashboard.general=nss_dashboard
+		set nss_dashboard.crypto=nss_dashboard
+		set nss_dashboard.clock=nss_dashboard
+		set nss_dashboard.security=nss_dashboard
+	EOF
+
+	# Probe NSS driver state
+	if [ -d /sys/module/qca_nss_drv ] || [ -d /sys/kernel/debug/qca-ppe-nss ]; then
+		uci -q set nss_dashboard.general.enabled='1'
+	else
+		uci -q set nss_dashboard.general.enabled='0'
+	fi
+
+	# Probe EIP-197 crypto state
+	if [ -d /sys/module/qca_nss_crypto ] || [ -f /lib/firmware/ifpp.bin ]; then
+		[ -d /sys/module/qca_nss_crypto ] && uci -q set nss_dashboard.crypto.enabled='1' || uci -q set nss_dashboard.crypto.enabled='0'
+	else
+		uci -q set nss_dashboard.crypto.enabled='0'
+	fi
+
+	uci -q set nss_dashboard.clock.frequency="$cur_freq"
+
+	# Security auto-block defaults to on
+	uci -q set nss_dashboard.security.auto_block='1'
+
+	uci -q commit nss_dashboard
+fi
+
+exit 0

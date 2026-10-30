@@ -43,7 +43,7 @@ index 2fbae59..84b0cf2 100644
 @@ -4418,6 +4423,19 @@ void __ieee80211_subif_start_xmit(struct sk_buff *skb,
  	if (IS_ERR(sta))
  		sta = NULL;
-
+ 
 +	if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN) {
 +		ap_sdata = container_of(sdata->bss,
 +					struct ieee80211_sub_if_data, u.ap);
@@ -57,7 +57,6 @@ index 2fbae59..84b0cf2 100644
 +		}
 +	}
 +
- 	skb_set_queue_mapping(skb, ieee80211_select_queue(sdata, sta, skb,
- 							   &ctrl_flags));
+ 	skb_set_queue_mapping(skb, ieee80211_select_queue(sdata, sta, skb));
  	ieee80211_aggr_check(sdata, sta, skb);
  

@@ -1,0 +1,30 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] nss_qdisc: use usleep_range_idle() for stats sync pacing
+
+nss_qdisc_stats_sync_process_work() runs in a workqueue and paces the
+NSS stats sync requests with usleep_range(4900, 5000). usleep_range()
+sleeps in TASK_UNINTERRUPTIBLE, and while qdisc statistics sync is
+active the work runs at a high rate, so the 5s loadavg sampler
+frequently catches the kworker in D-state, inflating the load average
+despite mostly idle CPUs.
+
+usleep_range_idle() (available since kernel 5.16) sleeps in TASK_IDLE
+(TASK_UNINTERRUPTIBLE | TASK_NOLOAD): identical semantics for a
+kworker (which never receives signals), but excluded from load average
+accounting.
+
+This mirrors the same change already applied to the qca-nss-ecm stats
+sync workers.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+--- a/nss_qdisc/nss_qdisc_stats.c
++++ b/nss_qdisc/nss_qdisc_stats.c
+@@ -534,7 +534,7 @@ static void nss_qdisc_stats_sync_process_work(struct work_struct *work)
+ 	 * to space the sync command requests to NSS and also ease the workload
+ 	 * on the CPU
+ 	 */
+-	usleep_range(NSS_QDISC_STATS_SYNC_MANY_UDELAY - 100, NSS_QDISC_STATS_SYNC_MANY_UDELAY);
++	usleep_range_idle(NSS_QDISC_STATS_SYNC_MANY_UDELAY - 100, NSS_QDISC_STATS_SYNC_MANY_UDELAY);
+ 
+ 	spin_lock_bh(&nss_qdisc_stats_list_lock);
+ 	if (list_empty(&nss_qdisc_stats_list)) {

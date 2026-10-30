@@ -1,0 +1,246 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-ecm: decouple conntrack notifier, fix tail packet accounting, and modernize workqueue sleeping
+
+1. In ecm_conntrack_notifier.c:
+   - Call dedicated nf_conntrack_register_ecm_notifier() and
+     nf_conntrack_unregister_ecm_notifier() instead of clobbering ctnetlink.
+2. In frontends/nss/ecm_nss_ipv4.c and frontends/nss/ecm_nss_ipv6.c:
+   - Initialize delta_jiffies = 0 to prevent stack wild value additions.
+   - When !ci or elapsed < 0 with non-zero residual traffic counts, jump to
+     sync_conntrack to account tail packets into Linux conntrack acct before exit.
+   - Guard ct->timeout updates with if (delta_jiffies && ...) so tail packet
+     accounting never artificially extends defunct connection timeouts.
+   - Replace msleep_interruptible(4) with high-resolution usleep_range_idle(3800, 4000).
+     usleep_range() puts the worker in TASK_UNINTERRUPTIBLE, and since the NSS
+     stats sync paces at ~100Hz, the 5s loadavg sampler almost always sees
+     exactly one D-state task, pinning load average at 1.0 despite ~97% idle
+     CPU. usleep_range_idle() (available since kernel 5.16, verified on 6.18)
+     sleeps in TASK_IDLE (TASK_UNINTERRUPTIBLE | TASK_NOLOAD): identical
+     uninterruptible semantics for a kworker, but excluded from load
+     average accounting.
+   - In periodic stats sync, replace msleep_interruptible blocking inside the
+     workqueue with non-blocking queue_delayed_work() rescheduling.
+   - In ecm_nss_ipv4.c and ecm_nss_ipv6.c, relax stats sync timeout from 5000ms
+     to 10000ms to eliminate firmware multi-batch scan cascade timeouts.
+3. In frontends/sfe/ecm_sfe_ipv4.c and frontends/sfe/ecm_sfe_ipv6.c:
+   - Replace msleep blocking inside workqueue with queue_delayed_work() rescheduling.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/ecm_conntrack_notifier.c
++++ b/ecm_conntrack_notifier.c
+@@ -44,7 +44,13 @@
+ #include <net/netfilter/nf_conntrack_l4proto.h>
+ #include <net/netfilter/nf_conntrack_zones.h>
+ #include <net/netfilter/nf_conntrack_core.h>
++#include <net/netfilter/nf_conntrack_ecache.h>
+ #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
++
++#ifndef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
++extern void nf_conntrack_register_ecm_notifier(struct net *net, const struct nf_ct_event_notifier *nb);
++extern void nf_conntrack_unregister_ecm_notifier(struct net *net);
++#endif
+ #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
+
+ /*
+@@ -521,7 +527,7 @@ int ecm_conntrack_notifier_init(struct dentry *dentry)
+ 		goto init_cleanup_1;
+ 	}
+ #else
+-	nf_conntrack_register_notifier(&init_net, &ecm_conntrack_notifier);
++	nf_conntrack_register_ecm_notifier(&init_net, &ecm_conntrack_notifier);
+ #endif
+
+ 	/*
+@@ -549,7 +555,7 @@ init_cleanup_2:
+ #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
+ 	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
+ #else
+-	nf_conntrack_unregister_notifier(&init_net);
++	nf_conntrack_unregister_ecm_notifier(&init_net);
+ #endif
+
+ init_cleanup_1:
+@@ -577,7 +583,7 @@ void ecm_conntrack_notifier_exit(void)
+ #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
+ 	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
+ #else
+-	nf_conntrack_unregister_notifier(&init_net);
++	nf_conntrack_unregister_ecm_notifier(&init_net);
+ #endif
+ #endif
+ 	/*
+--- a/frontends/nss/ecm_nss_ipv4.c
++++ b/frontends/nss/ecm_nss_ipv4.c
+@@ -92,7 +92,7 @@
+ 
+ #define ECM_NSS_IPV4_STATS_SYNC_PERIOD msecs_to_jiffies(1000)
+ #define ECM_NSS_IPV4_STATS_SYNC_UDELAY 4000	/* Delay for 4 ms */
+-#define ECM_NSS_IPV4_STATS_SYNC_TIMEOUT msecs_to_jiffies(5000)	/* Give up on an unanswered request */
++#define ECM_NSS_IPV4_STATS_SYNC_TIMEOUT msecs_to_jiffies(10000)	/* Give up on an unanswered request */
+ 
+ int ecm_nss_ipv4_no_action_limit_default = 250;		/* Default no-action limit. */
+ int ecm_nss_ipv4_driver_fail_limit_default = 250;		/* Default driver fail limit. */
+@@ -218,7 +218,7 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
+ 	struct ecm_classifier_rule_sync class_sync;
+ 	int flow_dir;
+ 	int return_dir;
+-	unsigned long int delta_jiffies;
++	unsigned long int delta_jiffies = 0;
+ 	int elapsed;
+
+ 	/*
+@@ -263,6 +263,9 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
+ #endif
+ 	if (!ci) {
+ 		DEBUG_TRACE("%px: NSS Sync: no connection\n", sync);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+
+@@ -303,6 +306,9 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
+ 	elapsed = ecm_db_connection_elapsed_defunct_timer(ci);
+ 	if (elapsed < 0) {
+ 		ecm_db_connection_deref(ci);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+ 	DEBUG_TRACE("%px: elapsed: %d\n", ci, elapsed);
+@@ -524,7 +530,7 @@ sync_conntrack:
+ 	 * Only update if this is not a fixed timeout
+ 	 * delta_jiffies is the elapsed time since the last sync of this connection.
+ 	 */
+-	if (!test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
++	if (delta_jiffies && !test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
+ 		spin_lock_bh(&ct->lock);
+ 		ct->timeout += delta_jiffies;
+ 		spin_unlock_bh(&ct->lock);
+@@ -728,11 +734,11 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+ 	}
+ 	spin_unlock_bh(&ecm_nss_ipv4_lock);
+
+-	msleep_interruptible(ECM_NSS_IPV4_STATS_SYNC_UDELAY / 1000);
++	usleep_range_idle(ECM_NSS_IPV4_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV4_STATS_SYNC_UDELAY);
+
+ 	/*
+ 	 * If index is 0, we are starting a new round, but if we still have time remain
+-	 * in this round, sleep until it ends
++	 * in this round, reschedule delayed work until it ends without blocking the worker thread.
+ 	 */
+ 	if (nicsm_req->index == 0) {
+ 		current_jiffies = jiffies;
+@@ -742,7 +748,9 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+ 		}
+
+ 		if (time_after(ecm_nss_ipv4_next_req_time, current_jiffies)) {
+-			msleep_interruptible(jiffies_to_msecs(ecm_nss_ipv4_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_nss_ipv4_workqueue, &ecm_nss_ipv4_work,
++					   ecm_nss_ipv4_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_nss_ipv4_roll_check_jiffies = jiffies;
+ 		ecm_nss_ipv4_next_req_time = ecm_nss_ipv4_roll_check_jiffies + ECM_NSS_IPV4_STATS_SYNC_PERIOD;
+--- a/frontends/nss/ecm_nss_ipv6.c
++++ b/frontends/nss/ecm_nss_ipv6.c
+@@ -94,7 +94,7 @@
+
+ #define ECM_NSS_IPV6_STATS_SYNC_PERIOD msecs_to_jiffies(1000)
+ #define ECM_NSS_IPV6_STATS_SYNC_UDELAY 4000	/* Delay for 4ms */
+-#define ECM_NSS_IPV6_STATS_SYNC_TIMEOUT msecs_to_jiffies(5000)	/* Give up on an unanswered request */
++#define ECM_NSS_IPV6_STATS_SYNC_TIMEOUT msecs_to_jiffies(10000)	/* Give up on an unanswered request */
+
+ int ecm_nss_ipv6_no_action_limit_default = 250;		/* Default no-action limit. */
+ int ecm_nss_ipv6_driver_fail_limit_default = 250;		/* Default driver fail limit. */
+@@ -219,7 +219,7 @@ static inline void ecm_nss_ipv6_process_one_conn_sync_msg(struct nss_ipv6_conn_s
+ 	struct ecm_classifier_rule_sync class_sync;
+ 	int flow_dir;
+ 	int return_dir;
+-	unsigned long int delta_jiffies;
++	unsigned long int delta_jiffies = 0;
+ 	int elapsed;
+
+ 	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
+@@ -242,6 +242,9 @@ static inline void ecm_nss_ipv6_process_one_conn_sync_msg(struct nss_ipv6_conn_s
+ 	ci = ecm_db_connection_find_and_ref_hash_first(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
+ 	if (!ci) {
+ 		DEBUG_TRACE("%px: NSS Sync: no connection\n", sync);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+
+@@ -282,6 +285,9 @@ static inline void ecm_nss_ipv6_process_one_conn_sync_msg(struct nss_ipv6_conn_s
+ 	elapsed = ecm_db_connection_elapsed_defunct_timer(ci);
+ 	if (elapsed < 0) {
+ 		ecm_db_connection_deref(ci);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+ 	delta_jiffies = elapsed * HZ;
+@@ -501,7 +507,7 @@ sync_conntrack:
+ 	 * Only update if this is not a fixed timeout
+ 	 * delta_jiffies is the elapsed time since the last sync of this connection.
+ 	 */
+-	if (!test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
++	if (delta_jiffies && !test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
+ 		spin_lock_bh(&ct->lock);
+ 		ct->timeout += delta_jiffies;
+ 		spin_unlock_bh(&ct->lock);
+@@ -704,11 +710,11 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+ 	}
+ 	spin_unlock_bh(&ecm_nss_ipv6_lock);
+
+-	msleep_interruptible(ECM_NSS_IPV6_STATS_SYNC_UDELAY / 1000);
++	usleep_range_idle(ECM_NSS_IPV6_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV6_STATS_SYNC_UDELAY);
+
+ 	/*
+ 	 * If index is 0, we are starting a new round, but if we still have time remain
+-	 * in this round, sleep until it ends
++	 * in this round, reschedule delayed work until it ends without blocking the worker thread.
+ 	 */
+ 	if (nicsm_req->index == 0) {
+ 		current_jiffies = jiffies;
+@@ -718,7 +724,9 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+ 		}
+
+ 		if (time_after(ecm_nss_ipv6_next_req_time, current_jiffies)) {
+-			msleep_interruptible(jiffies_to_msecs(ecm_nss_ipv6_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_nss_ipv6_workqueue, &ecm_nss_ipv6_work,
++					   ecm_nss_ipv6_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_nss_ipv6_roll_check_jiffies = jiffies;
+ 		ecm_nss_ipv6_next_req_time = ecm_nss_ipv6_roll_check_jiffies + ECM_NSS_IPV6_STATS_SYNC_PERIOD;
+--- a/frontends/sfe/ecm_sfe_ipv4.c
++++ b/frontends/sfe/ecm_sfe_ipv4.c
+@@ -779,7 +779,9 @@ static void ecm_sfe_ipv4_stats_sync_req_work(struct work_struct *work)
+ 		}
+
+ 		if (time_after(ecm_sfe_ipv4_next_req_time, current_jiffies)) {
+-			msleep(jiffies_to_msecs(ecm_sfe_ipv4_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_sfe_ipv4_workqueue, &ecm_sfe_ipv4_work,
++					   ecm_sfe_ipv4_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_sfe_ipv4_roll_check_jiffies = jiffies;
+ 		ecm_sfe_ipv4_next_req_time = ecm_sfe_ipv4_roll_check_jiffies + ECM_SFE_IPV4_STATS_SYNC_PERIOD;
+--- a/frontends/sfe/ecm_sfe_ipv6.c
++++ b/frontends/sfe/ecm_sfe_ipv6.c
+@@ -788,7 +788,9 @@ static void ecm_sfe_ipv6_stats_sync_req_work(struct work_struct *work)
+ 		}
+
+ 		if (time_after(ecm_sfe_ipv6_next_req_time, current_jiffies)) {
+-			msleep(jiffies_to_msecs(ecm_sfe_ipv6_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_sfe_ipv6_workqueue, &ecm_sfe_ipv6_work,
++					   ecm_sfe_ipv6_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_sfe_ipv6_roll_check_jiffies = jiffies;
+ 		ecm_sfe_ipv6_next_req_time = ecm_sfe_ipv6_roll_check_jiffies + ECM_SFE_IPV6_STATS_SYNC_PERIOD;

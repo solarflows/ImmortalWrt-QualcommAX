@@ -1,0 +1,17 @@
+{
+	"luci-app-nss-dashboard": {
+		"description": "Grant access to the NSS hardware accelerator dashboard and controls",
+		"read": {
+			"ubus": {
+				"luci.nss_dashboard": [ "getProfile", "getMetrics", "getStatus", "getPorts", "getFlows", "getAudit", "getSettings" ]
+			},
+			"uci": [ "nss_dashboard", "network" ]
+		},
+		"write": {
+			"ubus": {
+				"luci.nss_dashboard": [ "setSettings" ]
+			},
+			"uci": [ "nss_dashboard" ]
+		}
+	}
+}

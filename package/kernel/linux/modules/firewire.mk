@@ -43,7 +43,9 @@ define KernelPackage/firewire-ohci
   TITLE:=Support for OHCI-1394 controllers
   DEPENDS:=kmod-firewire
   KCONFIG:= \
-	CONFIG_FIREWIRE_OHCI
+	CONFIG_FIREWIRE_OHCI \
+	CONFIG_FIREWIRE_OHCI_DEBUG=n \
+	CONFIG_FIREWIRE_OHCI_REMOTE_DMA=n
   FILES:=$(LINUX_DIR)/drivers/firewire/firewire-ohci.ko
   AUTOLOAD:=$(call AutoProbe,firewire-ohci)
 endef

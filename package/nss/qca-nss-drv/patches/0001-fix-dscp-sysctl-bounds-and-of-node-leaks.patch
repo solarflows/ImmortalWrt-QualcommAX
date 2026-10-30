@@ -1,0 +1,54 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-drv: fix dscp_map sysctl out-of-bounds pointer and of_node refcount leaks
+
+1. In nss_ipv4.c and nss_ipv6.c, the ctl_table entry for dscp_map pointed
+   to &mapping[NSS_DSCP_MAP_ARRAY_SIZE], which is 1 element past the end of
+   the 64-element array. Fix it to &mapping[0].
+2. In nss_core.c (nss_soc_mem_info) and nss_cmn.c (nss_cmn_get_nss_enabled),
+   device tree nodes retrieved via of_find_compatible_node/of_find_node_by_name
+   held unbalanced refcounts. Add paired of_node_put() calls.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/nss_cmn.c
++++ b/nss_cmn.c
+@@ -336,6 +336,7 @@ bool nss_cmn_get_nss_enabled(void)
+ 		nss_info_always("nss is not enabled on this platform\n");
+ 		return false;
+ 	}
++	of_node_put(cmn);
+ 	return true;
+ }
+ EXPORT_SYMBOL(nss_cmn_get_nss_enabled);
+--- a/nss_core.c
++++ b/nss_core.c
+@@ -528,6 +528,7 @@ static uint32_t nss_soc_mem_info(void)
+ 	memory_node = of_parse_phandle(common_node, "memory-region", 0);
+ 	if (!memory_node) {
+ 		nss_info_always("NSS reserved-memory node not found!\n");
++		of_node_put(common_node);
+ 		goto err_use_default_memsize;
+ 	}
+
+--- a/nss_ipv4.c
++++ b/nss_ipv4.c
+@@ -717,7 +717,7 @@ static struct ctl_table nss_ipv4_table[] = {
+ 	},
+ 	{
+ 		.procname	= "ipv4_dscp_map",
+-		.data		= &mapping[NSS_DSCP_MAP_ARRAY_SIZE],
++		.data		= &mapping[0],
+ 		.maxlen		= sizeof(struct nss_dscp_map_entry),
+ 		.mode		= 0644,
+ 		.proc_handler	= &nss_ipv4_dscp_map_cfg_handler,
+--- a/nss_ipv6.c
++++ b/nss_ipv6.c
+@@ -720,7 +720,7 @@ static struct ctl_table nss_ipv6_table[] = {
+ 	},
+ 	{
+ 		.procname		= "ipv6_dscp_map",
+-		.data			= &mapping[NSS_DSCP_MAP_ARRAY_SIZE],
++		.data			= &mapping[0],
+ 		.maxlen			= sizeof(struct nss_dscp_map_entry),
+ 		.mode			= 0644,
+ 		.proc_handler		= &nss_ipv6_dscp_map_cfg_handler,

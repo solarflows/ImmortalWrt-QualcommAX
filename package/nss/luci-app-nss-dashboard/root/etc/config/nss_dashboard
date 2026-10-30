@@ -1,0 +1,11 @@
+config nss_dashboard 'general'
+	option enabled '1'
+
+config nss_dashboard 'crypto'
+	option enabled '0'
+
+config nss_dashboard 'clock'
+	option frequency '1478.4 MHz'
+
+config nss_dashboard 'security'
+	option auto_block '1'

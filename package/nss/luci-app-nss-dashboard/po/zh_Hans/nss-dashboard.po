@@ -1,0 +1,22 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: zh_Hans\n"
+
+msgid "NSS Dashboard"
+msgstr "NSS 硬件网络加速"
+
+msgid "Status"
+msgstr "状态总览"
+
+msgid "Controls"
+msgstr "控制与防御"
+
+msgid "Ports"
+msgstr "端口线速"
+
+msgid "Flows"
+msgstr "硬件流表"
+
+msgid "NSS 硬件网络加速"
+msgstr "NSS 硬件网络加速"

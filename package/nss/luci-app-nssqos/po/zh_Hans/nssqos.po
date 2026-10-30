@@ -1,0 +1,133 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: zh_Hans\n"
+
+msgid "QoS Marking (NSS)"
+msgstr "NSS QoS 标记"
+
+msgid "NSS Connections"
+msgstr "NSS 实时连接"
+
+msgid "NSS QoS Marking"
+msgstr "NSS QoS 流量标记"
+
+msgid "DSCP marking and prioritization for the NSS-accelerated SQM. Each rule marks both directions of matching connections; the NSS firmware applies the mark to accelerated (offloaded) traffic as well. Fast-laned flows bypass the SQM queues entirely — mark sparse traffic only (games, calls, DNS), never bulk transfers."
+msgstr "针对 NSS 硬件加速 SQM 的 DSCP 标记与优先级调度。每条规则同时对匹配连接的双向流量生效；NSS 固件也会将标记应用于已卸载的加速流量。快速通道流将彻底旁路 SQM 队列直接放行 — 仅建议标记低延迟稀疏流量（如电竞游戏、语音通话、DNS），切勿用于大文件传输。"
+
+msgid "Global"
+msgstr "全局设置"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Master switch for all marking rules."
+msgstr "所有标记规则的总开关。"
+
+msgid "Wash ingress DSCP"
+msgstr "重置入站 DSCP (Wash Ingress)"
+
+msgid "Reset untrusted DSCP on packets arriving from the ISP to CS0. Marking rules below still re-mark what they match."
+msgstr "将来自运营商 (ISP) 的不可信入站数据包 DSCP 重置为 CS0。下方的标记规则仍会重新标记匹配的流量。"
+
+msgid "Wash egress DSCP"
+msgstr "重置出站 DSCP (Wash Egress)"
+
+msgid "Send all traffic to the ISP as CS0. Fast-lane prioritization is unaffected — it rides the internal priority mark, not the wire DSCP."
+msgstr "向运营商发送的所有流量均标为 CS0。快速通道优先级不受影响 — 其依赖内部优先级标记，而非物理报文 DSCP。"
+
+msgid "Rules"
+msgstr "流控标记规则"
+
+msgid "Enabled"
+msgstr "已启用"
+
+msgid "Name"
+msgstr "规则名称"
+
+msgid "Protocol"
+msgstr "协议"
+
+msgid "Source IP"
+msgstr "源 IP 地址"
+
+msgid "Hosts or CIDRs, space-separated, IPv4 and/or IPv6. Empty matches any."
+msgstr "主机 IP 或 CIDR 网段，空格分隔，支持 IPv4 与 IPv6。留空匹配任意。"
+
+msgid "Source ports"
+msgstr "源端口"
+
+msgid "One port or range per entry, e.g. '443' or '27015-27030'."
+msgstr "每行一个端口或范围，例如 '443' 或 '27015-27030'。"
+
+msgid "Destination IP"
+msgstr "目标 IP 地址"
+
+msgid "Destination domain"
+msgstr "目标域名"
+
+msgid "DNS names, re-resolved periodically on the router. A CDN whose per-stream subdomains share the zone's front-end addresses is covered by its apex name. Combines with Destination IP (either matches)."
+msgstr "域名由路由器定期重新解析。子域名共享前端节点 IP 的 CDN 服务可直接使用根域名。可与目标 IP 组合生效（任一匹配即生效）。"
+
+msgid "Destination ports"
+msgstr "目标端口"
+
+msgid "DSCP class"
+msgstr "DSCP 优先级类别"
+
+msgid "Fast lane"
+msgstr "快速通道 (Fast Lane)"
+
+msgid "Strict-priority lane ahead of the SQM queues, both directions. 'Automatic' enables it for EF, VA and CS4–CS7."
+msgstr "位于 SQM 队列前方的双向绝对优先级通道。'自动' 模式下将自动为 EF、VA 与 CS4~CS7 激活。"
+
+msgid "Automatic"
+msgstr "自动"
+
+msgid "Always"
+msgstr "总是"
+
+msgid "Never"
+msgstr "从不"
+
+msgid "Proto"
+msgstr "协议"
+
+msgid "Source"
+msgstr "源地址"
+
+msgid "Destination"
+msgstr "目标地址"
+
+msgid "State"
+msgstr "连接状态"
+
+msgid "DSCP"
+msgstr "DSCP 标记"
+
+msgid "PPS"
+msgstr "包速率 (PPS)"
+
+msgid "Rate"
+msgstr "传输速率"
+
+msgid "Total"
+msgstr "累计流量"
+
+msgid "Click to sort"
+msgstr "点击排序"
+
+msgid "filter"
+msgstr "输入关键字过滤"
+
+msgid "No matching connections"
+msgstr "无匹配连接"
+
+msgid "Freeze"
+msgstr "暂停刷新"
+
+msgid "Resume"
+msgstr "恢复刷新"
+
+msgid "Live connection table with rates computed between polls — NSS-accelerated flows included (their counters are synced back from the firmware). The DSCP column shows classes applied by the QoS marking rules. Click a column header to sort; the row of boxes filters each column."
+msgstr "实时连接监控表，速率根据轮询间隔动态计算 — 包含已卸载的 NSS 硬件加速流（计数器由固件回步至内核 conntrack）。DSCP 列显示经 QoS 规则标记的优先级分类。点击表头可排序，输入框可对各列进行实时过滤。"

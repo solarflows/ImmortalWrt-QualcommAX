@@ -1,0 +1,272 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# rpcd backend provider for luci-app-nss-dashboard
+
+. /usr/libexec/rpcd/nss_dashboard.common.sh
+
+ensure_profile() {
+	if [ ! -s "$PROFILE_JSON" ]; then
+		/etc/uci-defaults/98-nss-dashboard-profile >/dev/null 2>&1
+	fi
+}
+
+get_profile() {
+	ensure_profile
+
+	# getProfile 仅在视图 load() 调用一次（非轮询路径），此处现取而非回放开机档案：
+	# 开机时 uci-defaults 执行过早，LAN 地址尚未就绪、hostname 可能仍为 "(none)"，
+	# 而流表页的"路由器本机"归因依赖这里返回完整地址池。
+	# soc/fw/modules 等探测均有 /tmp 或 sysfs 缓存，整体代价为个位数 fork。
+	json_init
+	json_add_string "soc" "$(probe_soc)"
+	json_add_int "cores" "$(probe_npu_cores)"
+	json_add_string "fw_version" "$(probe_fw_version)"
+	json_add_string "fw_mask" "$(probe_fw_mask)"
+	json_add_string "nss_freq" "$(probe_nss_freq)"
+	json_add_int "sqm" "$(probe_sqm)"
+	add_modules_object
+	json_add_object "router"
+	json_add_string "hostname" "$(cat /proc/sys/kernel/hostname 2>/dev/null)"
+	json_add_array "ips"
+	for ip in $(ip -o addr show 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}'); do
+		json_add_string "" "$ip"
+	done
+	json_close_array
+	json_close_object
+	json_dump
+}
+
+get_metrics() {
+	json_init
+	add_dynamic_metrics
+	json_dump
+}
+
+get_status() {
+	ensure_profile
+
+	local soc cores fw_ver fw_mask nss_freq sqm_state
+	if [ -f "$PROFILE_ENV" ]; then
+		. "$PROFILE_ENV"
+	fi
+
+	[ -z "$soc" ] && soc=$(probe_soc)
+	[ -z "$cores" ] && cores=$(probe_npu_cores "$soc")
+	[ -z "$fw_ver" ] && fw_ver=$(probe_fw_version)
+	[ -z "$fw_mask" ] && fw_mask=$(probe_fw_mask)
+	[ -z "$nss_freq" ] && nss_freq=$(probe_nss_freq)
+	[ -z "$sqm_state" ] && sqm_state=$(probe_sqm)
+
+	json_init
+	json_add_string "soc" "$soc"
+	json_add_int "cores" "$cores"
+	json_add_string "fw_version" "$fw_ver"
+	json_add_string "fw_mask" "$fw_mask"
+	json_add_string "nss_freq" "$nss_freq"
+	json_add_int "sqm" "$sqm_state"
+	add_dynamic_metrics
+	json_dump
+}
+
+get_ports() {
+	local glue="/sys/kernel/debug/qca-ppe-nss/status"
+	local net="/sys/class/net"
+
+	if [ -r "$glue" ]; then
+		awk '
+		BEGIN {
+			GLUE = "/sys/kernel/debug/qca-ppe-nss/status"
+			NET = "/sys/class/net"
+			pjson = ""
+			while ((getline line < GLUE) > 0) {
+				if (line ~ /^if_num/) {
+					n = split(line, f, /[ =:]+/)
+					ifnum = f[2]; nd = ""; st = 0; htx = 0; frx = 0
+					for (i = 3; i <= n; i++) {
+						if (f[i] == "netdev") nd = f[i+1]
+						else if (f[i] == "started") st = f[i+1]
+						else if (f[i] == "tx_redirect_pkts") htx = f[i+1]
+						else if (f[i] == "rx_fw_pkts") frx = f[i+1]
+					}
+					if (nd != "" && nd != "-") {
+						speed_file = NET "/" nd "/speed"
+						carrier_file = NET "/" nd "/carrier"
+						rx_b_file = NET "/" nd "/statistics/rx_bytes"
+						tx_b_file = NET "/" nd "/statistics/tx_bytes"
+						rx_p_file = NET "/" nd "/statistics/rx_packets"
+						tx_p_file = NET "/" nd "/statistics/tx_packets"
+
+						speed = 0; carrier = 0
+						rx_bytes = 0; tx_bytes = 0
+						rx_total = 0; tx_total = 0
+
+						if ((getline s < speed_file) > 0) speed = s + 0
+						close(speed_file)
+						if ((getline c < carrier_file) > 0) carrier = c + 0
+						close(carrier_file)
+						if ((getline rb < rx_b_file) > 0) rx_bytes = rb + 0
+						close(rx_b_file)
+						if ((getline tb < tx_b_file) > 0) tx_bytes = tb + 0
+						close(tx_b_file)
+						if ((getline rp < rx_p_file) > 0) rx_total = rp + 0
+						close(rx_p_file)
+						if ((getline tp < tx_p_file) > 0) tx_total = tp + 0
+						close(tx_p_file)
+
+						tx_offloaded = (tx_total >= htx) ? (tx_total - htx) : 0
+						rx_offloaded = (rx_total >= frx) ? (rx_total - frx) : 0
+						tx_pct = (tx_total > 0) ? (tx_offloaded * 100.0 / tx_total) : 0.0
+						rx_pct = (rx_total > 0) ? (rx_offloaded * 100.0 / rx_total) : 0.0
+
+						item = sprintf("{\"ifnum\":%d,\"netdev\":\"%s\",\"started\":%d,\"carrier\":%d,\"speed\":%d,\"tx_bytes\":%d,\"tx_host_pkts\":%d,\"tx_total\":%d,\"tx_offloaded\":%d,\"tx_offload_pct\":%.1f,\"rx_bytes\":%d,\"rx_host_pkts\":%d,\"rx_total\":%d,\"rx_offloaded\":%d,\"rx_offload_pct\":%.1f}",
+							ifnum, nd, st, carrier, speed, tx_bytes, htx, tx_total, tx_offloaded, tx_pct, rx_bytes, frx, rx_total, rx_offloaded, rx_pct)
+
+						if (pjson != "") pjson = pjson ","
+						pjson = pjson item
+					}
+				}
+			}
+			close(GLUE)
+			print "{\"ports\":[" pjson "]}"
+		}
+		' /dev/null 2>/dev/null && return
+	fi
+
+	echo '{"ports":[]}'
+}
+
+get_flows() {
+	lua -e '
+		local f = io.open("/proc/net/nf_conntrack", "r")
+		if not f then
+			print("{\"installed\":0,\"cols\":[],\"data\":[]}")
+			return
+		end
+
+		local items = {}
+		local n = 0
+		local jc = require("luci.jsonc")
+
+		for line in f:lines() do
+			local fam = (line:sub(1, 4) == "ipv6") and 6 or 4
+			local proto = line:match("^%S+%s+%d+%s+(%S+)") or "tcp"
+			local s1, d1, sp1, dp1, pk1, b1, s2, d2, sp2, dp2, pk2, b2 = line:match("src=(%S+)%s+dst=(%S+)%s+sport=(%d+)%s+dport=(%d+)%s+packets=(%d+)%s+bytes=(%d+)%s+src=(%S+)%s+dst=(%S+)%s+sport=(%d+)%s+dport=(%d+)%s+packets=(%d+)%s+bytes=(%d+)")
+			if s1 then
+				local tot_p = tonumber(pk1) + tonumber(pk2)
+				if tot_p > 0 then
+					local mark = tonumber(line:match("mark=(%d+)")) or 0
+					local state = (proto == "tcp") and (line:match("%s+([%u_]+)%s+src=") or "") or ""
+					n = n + 1
+					items[n] = {
+						fam,
+						proto,
+						s1,
+						tonumber(sp1),
+						d1,
+						tonumber(dp1),
+						tot_p,
+						tonumber(b1) + tonumber(b2),
+						mark,
+						state
+					}
+				end
+			end
+		end
+		f:close()
+
+		-- router 自识别交由前端完成：getProfile 的 router.ips 已覆盖此用途，
+		-- 此处不再 fork `ip -o addr show`（流表页激活时该调用每 4s 一次）
+		io.write(jc.stringify({installed=1, cols={"family","proto","src","sport","dst","dport","pkts","bytes","mark","state"}, data=items}))
+	' 2>/dev/null || printf '{"installed":1,"cols":[],"data":[]}\n'
+}
+
+get_audit() {
+	if [ ! -x /usr/sbin/nlbw ]; then
+		json_init
+		json_add_int "installed" 0
+		json_add_string "message" "未安装 nlbwmon 流量审计组件"
+		json_add_object "audit"
+		json_add_array "columns"
+		json_close_array
+		json_add_array "data"
+		json_close_array
+		json_close_object
+		json_dump
+		return
+	fi
+
+	printf '{"installed":1,"audit":'
+	/usr/sbin/nlbw -c json -g mac 2>/dev/null || printf '{"columns":[],"data":[]}'
+	printf '}\n'
+}
+
+get_settings() {
+	json_init
+	json_add_int "enabled" "$(uci -q get nss_dashboard.general.enabled || echo 1)"
+	json_add_int "crypto" "$(uci -q get nss_dashboard.crypto.enabled || echo 0)"
+	json_add_string "frequency" "$(uci -q get nss_dashboard.clock.frequency || echo '1478.4 MHz')"
+	json_add_int "auto_block" "$(uci -q get nss_dashboard.security.auto_block || echo 1)"
+	json_dump
+}
+
+set_settings() {
+	read -r input
+	json_load "$input"
+	json_get_var enabled "enabled"
+	json_get_var crypto "crypto"
+	json_get_var freq "frequency"
+	json_get_var auto_block "auto_block"
+
+	[ -n "$enabled" ] && uci -q set nss_dashboard.general.enabled="$enabled"
+	[ -n "$crypto" ] && uci -q set nss_dashboard.crypto.enabled="$crypto"
+	[ -n "$freq" ] && uci -q set nss_dashboard.clock.frequency="$freq"
+	[ -n "$auto_block" ] && uci -q set nss_dashboard.security.auto_block="$auto_block"
+	uci -q commit nss_dashboard
+
+	if [ "$auto_block" = "1" ]; then
+		# 写入 LuCI「全局网络选项」对应的 network.globals 段（真实开关位置），
+		# 并清理旧版本误写入 @device[0] 的残留选项
+		uci -q set network.globals.flow_offloading='0'
+		uci -q set network.globals.flow_offloading_hw='0'
+		uci -q set network.globals.packet_steering='0'
+		uci -q delete network.@device[0].flow_offloading 2>/dev/null
+		uci -q delete network.@device[0].flow_offloading_hw 2>/dev/null
+		uci -q delete network.@device[0].packet_steering 2>/dev/null
+		uci -q commit network
+	fi
+
+	if [ -n "$freq" ]; then
+		sed -i "s/^nss_freq=.*/nss_freq='$freq'/" /tmp/nss_profile.env 2>/dev/null
+		sed -i "s/\"nss_freq\":\"[^\"]*\"/\"nss_freq\":\"$freq\"/" "$PROFILE_JSON" 2>/dev/null
+		if [ -x /usr/bin/nss_freq ]; then
+			case "$freq" in
+				*748*) /usr/bin/nss_freq mid >/dev/null 2>&1 ;;
+				*1478*) /usr/bin/nss_freq mid >/dev/null 2>&1 ;;
+				*1689*) /usr/bin/nss_freq high >/dev/null 2>&1 ;;
+			esac
+		fi
+	fi
+
+	json_init
+	json_add_boolean "success" 1
+	json_dump
+}
+
+case "$1" in
+	list)
+		echo '{"getProfile":{},"getMetrics":{},"getStatus":{},"getPorts":{},"getFlows":{},"getAudit":{},"getSettings":{},"setSettings":{"enabled":"bool","crypto":"bool","frequency":"str","auto_block":"bool"}}'
+		;;
+	call)
+		case "$2" in
+			getProfile) get_profile ;;
+			getMetrics) get_metrics ;;
+			getStatus) get_status ;;
+			getPorts) get_ports ;;
+			getFlows) get_flows ;;
+			getAudit) get_audit ;;
+			getSettings) get_settings ;;
+			setSettings) set_settings ;;
+			*) echo '{"error":"Unsupported method"}' ;;
+		esac
+		;;
+esac

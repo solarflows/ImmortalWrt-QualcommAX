@@ -27,11 +27,9 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +	u32 duration;
 +	u8 band = 0;
 +
-+	rcu_read_lock();
-+	conf = rcu_dereference(sdata->vif.bss_conf.chanctx_conf);
++	conf = sdata_dereference(sdata->vif.bss_conf.chanctx_conf, sdata);
 +	if (conf)
 +			band = conf->def.chan->band;
-+	rcu_read_unlock();
 +
 +	duration = ieee80211_rate_expected_tx_airtime(hw, NULL, ri, band, true, 1024);
 +	duration += duration >> 4; /* add assumed packet error rate of ~6% */

@@ -191,7 +191,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  /**
   * nf_nat_used_tuple - check if proposed nat tuple clashes with existing entry
   * @tuple: proposed NAT binding
-@@ -471,22 +576,79 @@ find_appropriate_src(struct net *net,
+@@ -471,22 +576,80 @@ find_appropriate_src(struct net *net,
  {
  	unsigned int h = hash_by_src(net, zone, tuple);
  	const struct nf_conn *ct;
@@ -201,7 +201,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 +
 +	spin_lock_bh(lock);
 +#endif
- 
+
  	hlist_for_each_entry_rcu(ct, &nf_nat_bysource[h], nat_bysource) {
 -		if (same_src(ct, tuple) &&
 +		if (!!(range->flags & NF_NAT_RANGE_FULLCONE) != nf_nat_is_fullcone(ct))
@@ -220,7 +220,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
  			nf_ct_invert_tuple(result,
  				       &ct->tuplehash[IP_CT_DIR_REPLY].tuple);
  			result->dst = tuple->dst;
- 
+
 -			if (nf_in_range(result, range))
 -				return 1;
 +			if (nf_in_range(result, range)) {
@@ -264,6 +264,7 @@ Signed-off-by: Akhilesh Samineni <akhilesh.samineni@broadcom.com>
 +			nf_ct_invert_tuple(result,
 +					   &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
 +			result->src = tuple->src;
++			result->dst.dir = IP_CT_DIR_ORIGINAL;
 +			found = 1;
 +			break;
 +		}

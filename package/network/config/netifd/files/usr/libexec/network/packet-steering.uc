@@ -57,8 +57,11 @@ function set_task_cpu(pid, cpu) {
 
 function cpu_mask(cpu)
 {
-	let mask;
-	if (cpu < 0)
+	let mask = 0;
+	if (type(cpu) == "array")
+		for (let c in cpu)
+			mask |= 1 << int(c);
+	else if (cpu < 0)
 		mask = (1 << length(cpus)) - 1;
 	else
 		mask = (1 << int(cpu));
@@ -336,7 +339,9 @@ function assign_dev_cpu(dev) {
 		let cpu;
 		if (all_cpus)
 			cpu = -1;
-		else
+		else if (rps_cpus)
+			cpu = rps_cpus;
+		else if (!hw_spread)
 			cpu = get_next_cpu(rx_weight, dev.napi_cpu);
 		if (hw_spread)
 			cpu = null;

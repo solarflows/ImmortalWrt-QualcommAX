@@ -2,9 +2,3 @@
 *.patch whitespace=-indent-with-non-tab,-space-before-tab,-tab-in-indent,-trailing-space
 *.dts text eol=lf
 *.dts[io] text eol=lf
-
-# Hardware acceleration & vendor offload protection shield (merge=ours)
-target/linux/qualcommax/** merge=ours
-package/kernel/mac80211/** merge=ours
-package/nss/** merge=ours
-

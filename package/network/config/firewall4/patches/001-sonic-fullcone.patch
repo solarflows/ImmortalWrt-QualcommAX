@@ -95,11 +95,12 @@ restrictions to mapping creation, and keep explicit DNAT rules first.
  
  return {
  	read_kernel_version: function() {
-@@ -1475,6 +1498,7 @@ return {
+@@ -1533,6 +1556,7 @@ return {
  			"dnat",
  			"snat",
  			"masquerade",
 +			"fullcone",
+ 			"npt",
  			"accept",
  			"reject",
  			"drop"

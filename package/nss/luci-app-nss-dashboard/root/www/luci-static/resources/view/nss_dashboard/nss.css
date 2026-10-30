@@ -1,0 +1,583 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Clean, modular, fully-scoped CSS for luci-app-nss-dashboard */
+/* Zero !important declarations: specificity managed via .nss-dashboard-spa and #nss-status-table */
+/* Rely 100% on LuCI native cascade.css and Design Tokens */
+
+/* 1. Functional Sticky Telemetry Bar (Scheme A: Three-Bay Balanced Section) */
+#nss-sticky-telemetry-bar.cbi-section {
+	position: sticky;
+	top: 40px;
+	z-index: 5;
+	width: 100%;
+	max-width: 100%;
+	margin: 0 0 14px 0;
+	background: var(--background-color-high, var(--surface, #141822));
+	border: 1px solid var(--border-color-high, var(--hairline, rgba(255, 255, 255, 0.15)));
+	border-radius: 4px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+	padding: 10px 14px;
+	box-sizing: border-box;
+}
+
+#nss-sticky-telemetry-bar .three-bay-fixed {
+	display: grid;
+	grid-template-columns: 1fr 1fr 280px;
+	gap: 16px;
+	align-items: stretch;
+	width: 100%;
+}
+
+#nss-sticky-telemetry-bar .bay-card {
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	min-width: 0;
+}
+
+#nss-sticky-telemetry-bar .bay-title-bar {
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--text-color-medium, #888);
+	padding-bottom: 5px;
+	margin-bottom: 6px;
+	border-bottom: 1px solid var(--border-color-low, rgba(255, 255, 255, 0.06));
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+#nss-sticky-telemetry-bar .bay-grid-content {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+	width: 100%;
+}
+
+#nss-sticky-telemetry-bar .bay-divider-right {
+	border-right: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
+	padding-right: 16px;
+}
+
+#nss-sticky-telemetry-bar .control-panel-fixed {
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	height: 84px;
+}
+
+#nss-sticky-telemetry-bar .control-summary-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 11px;
+	padding: 0 2px;
+}
+
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-unit {
+	height: 24px;
+	min-height: 24px;
+	max-height: 24px;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	border-radius: 3px;
+	white-space: nowrap;
+	user-select: none;
+	font-variant-numeric: tabular-nums;
+	overflow: hidden;
+	margin: 0;
+	padding: 0 6px;
+	width: 100%;
+}
+
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-unit-bar {
+	border: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.06));
+	color: var(--text-color-high, #adbac7);
+	padding: 0 5px;
+	gap: 5px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) .fit-bar-label {
+	font-size: 10px;
+	font-weight: 700;
+	color: var(--text-color-medium, #888);
+	width: 24px;
+	min-width: 24px;
+	max-width: 24px;
+	text-align: right;
+	flex-shrink: 0;
+	line-height: 14px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-end;
+}
+
+@media screen and (max-width: 1024px) {
+	#nss-sticky-telemetry-bar .three-bay-fixed {
+		grid-template-columns: 1fr 1fr;
+		gap: 14px;
+	}
+	#nss-sticky-telemetry-bar .bay-card:nth-child(2) {
+		border-right: none;
+		padding-right: 0;
+	}
+	#nss-sticky-telemetry-bar .bay-card.control-bay {
+		grid-column: 1 / -1;
+		border-top: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
+		padding-top: 10px;
+	}
+	#nss-sticky-telemetry-bar .control-panel-fixed {
+		height: auto;
+		gap: 6px;
+	}
+}
+
+@media screen and (max-width: 640px) {
+	#nss-sticky-telemetry-bar .three-bay-fixed {
+		grid-template-columns: 1fr;
+		gap: 12px;
+	}
+	#nss-sticky-telemetry-bar .bay-divider-right {
+		border-right: none;
+		padding-right: 0;
+		border-bottom: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
+		padding-bottom: 10px;
+	}
+}
+
+/* 2. Pure Design Tokens Badges (Pure CSS Variables, Zero Hardcoded Hex) */
+:is(.nss-dashboard-spa, #nss-status-table) .badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 2px 7px;
+	border-radius: 3px;
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 15px;
+	border: 1px solid var(--border-color-medium, rgba(128, 128, 128, 0.3));
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.06));
+	color: var(--text-color-high, #adbac7);
+	white-space: nowrap;
+	text-decoration: none;
+	vertical-align: middle;
+	font-variant-numeric: tabular-nums;
+	box-sizing: border-box;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge-dot {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+	flex-shrink: 0;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-success {
+	background: color-mix(in srgb, var(--success-color-high, #00ac59) 15%, transparent);
+	border-color: color-mix(in srgb, var(--success-color-high, #00ac59) 45%, transparent);
+	color: var(--success-color-high, #00ac59);
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-info {
+	background: color-mix(in srgb, var(--primary-color-high, #1976d2) 15%, transparent);
+	border-color: color-mix(in srgb, var(--primary-color-high, #1976d2) 45%, transparent);
+	color: var(--primary-color-high, #1976d2);
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-warning {
+	background: color-mix(in srgb, var(--warn-color-high, #efbd0b) 15%, transparent);
+	border-color: color-mix(in srgb, var(--warn-color-high, #efbd0b) 45%, transparent);
+	color: var(--warn-color-high, #efbd0b);
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-danger {
+	background: color-mix(in srgb, var(--error-color-high, #f62b12) 15%, transparent);
+	border-color: color-mix(in srgb, var(--error-color-high, #f62b12) 45%, transparent);
+	color: var(--error-color-high, #f62b12);
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge.badge-neutral {
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.06));
+	border-color: var(--border-color-medium, rgba(128, 128, 128, 0.25));
+	color: var(--text-color-medium, #888);
+}
+
+/* 3. Section Title Alignment & Equal-Width Tile System */
+.nss-dashboard-spa .cbi-section-title {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.nss-dashboard-spa .nss-status-label {
+	width: 28%;
+	min-width: 90px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .th-hint {
+	border-bottom: 1px dotted var(--text-color-low, rgba(255, 255, 255, 0.3));
+	cursor: help;
+}
+
+.nss-dashboard-spa .nss-grid-3x112 {
+	display: inline-grid;
+	grid-template-columns: repeat(3, 112px);
+	column-gap: 6px;
+	row-gap: 9px;
+}
+
+.nss-dashboard-spa .nss-load-box-348 {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	width: 348px;
+	max-width: 100%;
+}
+
+/* Merged Tile Primitives */
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-102,
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-112,
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-64 {
+	justify-content: center;
+	box-sizing: border-box;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+	overflow: hidden;
+	margin: 0;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-102 {
+	width: 102px;
+	min-width: 102px;
+	max-width: 102px;
+	height: 22px;
+	padding: 0 4px;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-112 {
+	width: 112px;
+	min-width: 112px;
+	max-width: 112px;
+	height: 22px;
+	padding: 0 5px;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .badge-tile-64 {
+	width: 64px;
+	min-width: 64px;
+	max-width: 64px;
+}
+
+@media screen and (max-width: 480px) {
+	.nss-dashboard-spa .nss-grid-3x112 {
+		grid-template-columns: repeat(2, 112px);
+	}
+}
+
+/* 4. Pre-Constrained Table Column Widths & Anti-Jitter Numeric Pipeline */
+.nss-dashboard-spa .table th.sorted {
+	color: var(--primary-color-high, #1976d2);
+}
+
+.nss-dashboard-spa .nss-fixed-table {
+	table-layout: fixed;
+	width: 100%;
+	min-width: 740px;
+}
+
+.nss-dashboard-spa .nss-fixed-table th,
+.nss-dashboard-spa .nss-fixed-table td {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	box-sizing: border-box;
+}
+
+.nss-dashboard-spa .nss-num-cell {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* 5. TCP Protocol & 5-Char Monospace Badges */
+.nss-dashboard-spa .tcp-proto-badge {
+	width: 36px;
+	min-width: 36px;
+	max-width: 36px;
+	box-sizing: border-box;
+	text-align: center;
+	justify-content: center;
+	padding: 1px 2px;
+}
+
+.nss-dashboard-spa .tcp-badge-5char {
+	width: 44px;
+	min-width: 44px;
+	max-width: 44px;
+	box-sizing: border-box;
+	text-align: center;
+	justify-content: center;
+	font-size: 10px;
+	padding: 1px 2px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	letter-spacing: -0.2px;
+}
+
+/* 6. Notice Banner & Top Scroll Proxy */
+.nss-dashboard-spa .nss-notice-banner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	background: rgba(25, 118, 210, 0.08);
+	border: 1px solid rgba(25, 118, 210, 0.25);
+	border-radius: 4px;
+	padding: 6px 12px;
+	margin-bottom: 6px;
+	font-size: 11px;
+	color: var(--text-color-medium, #888);
+}
+
+.nss-dashboard-spa .nss-scroll-proxy {
+	overflow-x: auto;
+	height: 7px;
+	margin-bottom: 2px;
+	scrollbar-width: thin;
+}
+
+.nss-dashboard-spa .nss-scroll-proxy::-webkit-scrollbar {
+	height: 6px;
+}
+
+.nss-dashboard-spa .nss-scroll-proxy::-webkit-scrollbar-thumb {
+	background: var(--border-color-medium, rgba(255, 255, 255, 0.25));
+	border-radius: 3px;
+}
+
+/* 7. Client Trigger & Accordion Sub-Row Panel */
+.nss-dashboard-spa .client-trigger-box {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1.2;
+	position: relative;
+	cursor: pointer;
+	width: 100%;
+}
+
+.nss-dashboard-spa .client-expand-row > td {
+	border-top: none;
+	background: transparent;
+	white-space: normal;
+	overflow: visible;
+	padding: 2px 14px 12px 14px;
+}
+
+.nss-dashboard-spa .client-tree-panel {
+	border-left: 2px solid var(--primary-color-high, #1976d2);
+	margin-left: 10px;
+	padding-left: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.nss-dashboard-spa .client-main-row {
+	cursor: pointer;
+}
+.nss-dashboard-spa .client-main-row.expanded {
+	background: color-mix(in srgb, var(--primary-color-high, #1976d2) 4%, transparent);
+}
+
+.nss-dashboard-spa .ip-action-btn {
+	cursor: pointer;
+	padding: 1px 5px;
+	font-size: 10px;
+	border-radius: 2px;
+	border: 1px solid var(--border-color-medium, rgba(255, 255, 255, 0.15));
+	background: var(--background-color-low, transparent);
+	color: var(--text-color-medium, #888);
+	user-select: none;
+	line-height: 1.3;
+}
+.nss-dashboard-spa .ip-action-btn:hover {
+	color: var(--text-color-highest, var(--text-color-high, currentColor));
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.2));
+	border-color: var(--primary-color-high, #1976d2);
+}
+
+/* 8. Action Button & Loading Animation */
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) button#btn-force-refresh {
+	height: 24px;
+	min-height: 24px;
+	max-height: 24px;
+	padding: 0 8px;
+	line-height: 22px;
+	font-size: 11px;
+	box-sizing: border-box;
+	align-self: center;
+	margin: 0;
+	cursor: pointer;
+	user-select: none;
+}
+
+:is(.nss-dashboard-spa, #nss-sticky-telemetry-bar) button#btn-force-refresh:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+/* 9. Neutralize Aggressive Mobile Card Distortion & Restore Cell Padding */
+#nss-status-table,
+.nss-dashboard-spa .nss-status-table {
+	border-collapse: collapse;
+}
+
+/* Neutralize theme sticky headers (e.g. Footstrap .fs-dt): our tables live in
+ * overflow-x scroll wrappers, which become the sticky containing block, so a
+ * themed top offset (46px) permanently pushes the thead down over the first
+ * data row. Unlayered + mirrored specificity beats the layered theme rule
+ * without any !important. */
+.nss-dashboard-spa .table th,
+.nss-dashboard-spa .table.fs-dt:not(.fs-stacked) .tr.table-titles .th {
+	position: static;
+	top: auto;
+}
+
+.nss-dashboard-spa .table td[data-title]::before,
+.nss-dashboard-spa .table td::before {
+	display: none;
+	content: none;
+}
+
+.nss-dashboard-spa .table thead {
+	display: table-header-group;
+}
+.nss-dashboard-spa .table thead tr,
+.nss-dashboard-spa .table tr.table-titles,
+.nss-dashboard-spa .table tbody tr,
+.nss-dashboard-spa .table tr {
+	display: table-row;
+	flex-wrap: nowrap;
+}
+.nss-dashboard-spa .table th,
+.nss-dashboard-spa .table td {
+	display: table-cell;
+	vertical-align: middle;
+}
+
+/* 10. Self-Contained Meter Bars (Zero Theme Collisions, Zero cbi-progressbar Hijack) */
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar {
+	height: 14px;
+	border-radius: 999px;
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.08));
+	position: relative;
+	overflow: hidden;
+	box-sizing: border-box;
+	margin: 0;
+	border: none;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-fill,
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-warn,
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-danger {
+	height: 100%;
+	border-radius: 999px;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-fill { background: var(--primary-color-medium, #1976d2); }
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-warn { background: var(--warn-color-high, #efbd0b); }
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-danger { background: var(--error-color-high, #f62b12); }
+
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-disabled {
+	background: var(--background-color-low, rgba(255, 255, 255, 0.05));
+	border: 1px dashed var(--border-color-medium, rgba(255, 255, 255, 0.2));
+	opacity: 0.8;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .nss-stacked {
+	display: flex;
+}
+
+:is(.nss-dashboard-spa, #nss-status-table) .nss-stacked > div {
+	border-radius: 0;
+	height: 100%;
+	margin-right: -0.5px;
+}
+
+/* 11. Horizontal Scroll Container */
+.nss-dashboard-spa [id$="-scroll-wrap"] {
+	overflow-x: auto;
+	width: 100%;
+	max-width: 100%;
+	min-width: 0;
+	-webkit-overflow-scrolling: touch;
+	scrollbar-width: thin;
+	display: block;
+}
+
+.nss-dashboard-spa [id$="-scroll-wrap"]::-webkit-scrollbar {
+	height: 6px;
+}
+
+.nss-dashboard-spa [id$="-scroll-wrap"]::-webkit-scrollbar-thumb {
+	background: var(--border-color-medium, rgba(255, 255, 255, 0.2));
+	border-radius: 3px;
+}
+
+/* 12. Fluid Audit Rank Horizontal Capsule Bars */
+.nss-dashboard-spa .nss-audit-rank-box {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: 680px;
+	margin: 10px auto 16px auto;
+	padding: 0 10px;
+	box-sizing: border-box;
+}
+
+.nss-dashboard-spa .nss-rank-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	font-size: 11px;
+}
+
+.nss-dashboard-spa .nss-rank-name {
+	width: 140px;
+	min-width: 140px;
+	text-align: right;
+	font-weight: 600;
+	color: var(--text-color-high, #adbac7);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.nss-dashboard-spa .nss-rank-bar {
+	flex: 1;
+	height: 12px;
+	min-width: 80px;
+}
+
+.nss-dashboard-spa .nss-rank-val {
+	width: 130px;
+	min-width: 130px;
+	font-weight: 700;
+	color: var(--text-color-medium, #888);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}

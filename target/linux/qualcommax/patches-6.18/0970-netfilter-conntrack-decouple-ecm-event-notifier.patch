@@ -1,0 +1,86 @@
+diff --git a/include/net/netfilter/nf_conntrack_ecache.h b/include/net/netfilter/nf_conntrack_ecache.h
+index 8dcf7c3..394330b 100644
+--- a/include/net/netfilter/nf_conntrack_ecache.h
++++ b/include/net/netfilter/nf_conntrack_ecache.h
+@@ -71,6 +71,9 @@ struct nf_ct_event_notifier {
+
+ void nf_conntrack_register_notifier(struct net *net,
+ 				   const struct nf_ct_event_notifier *nb);
++void nf_conntrack_register_ecm_notifier(struct net *net,
++					const struct nf_ct_event_notifier *nb);
++void nf_conntrack_unregister_ecm_notifier(struct net *net);
+ void nf_conntrack_unregister_notifier(struct net *net);
+
+ void nf_ct_deliver_cached_events(struct nf_conn *ct);
+diff --git a/include/net/netns/conntrack.h b/include/net/netns/conntrack.h
+index ab74b5e..bbd799b 100644
+--- a/include/net/netns/conntrack.h
++++ b/include/net/netns/conntrack.h
+@@ -92,6 +92,9 @@ struct netns_ct {
+
+ 	struct ip_conntrack_stat __percpu *stat;
+ 	struct nf_ct_event_notifier __rcu *nf_conntrack_event_cb;
++#ifdef CONFIG_NF_CONNTRACK_EVENTS
++	struct nf_ct_event_notifier __rcu *nf_conntrack_ecm_cb;
++#endif
+ 	struct nf_ip_net	nf_ct_proto;
+ #if defined(CONFIG_NF_CONNTRACK_LABELS)
+ 	atomic_t		labels_used;
+diff --git a/net/netfilter/nf_conntrack_ecache.c b/net/netfilter/nf_conntrack_ecache.c
+index a330b0c..efc6b07 100644
+--- a/net/netfilter/nf_conntrack_ecache.c
++++ b/net/netfilter/nf_conntrack_ecache.c
+@@ -140,12 +140,14 @@ static int __nf_conntrack_eventmask_report(struct nf_conntrack_ecache *e,
+ 	rcu_read_lock();
+
+ 	notify = rcu_dereference(net->ct.nf_conntrack_event_cb);
+-	if (!notify) {
+-		rcu_read_unlock();
+-		return 0;
+-	}
+-
+-	ret = notify->ct_event(events | missed, item);
++	if (notify)
++		ret = notify->ct_event(events | missed, item);
++	else
++		ret = 0;
++
++	notify = rcu_dereference(net->ct.nf_conntrack_ecm_cb);
++	if (notify)
++		notify->ct_event(events | missed, item);
+ 	rcu_read_unlock();
+
+ 	if (likely(ret >= 0 && missed == 0))
+@@ -278,6 +280,7 @@ void nf_conntrack_register_notifier(struct net *net,
+ 	mutex_lock(&nf_ct_ecache_mutex);
+ 	notify = rcu_dereference_protected(net->ct.nf_conntrack_event_cb,
+ 					   lockdep_is_held(&nf_ct_ecache_mutex));
++	WARN_ON_ONCE(notify);
+ 	rcu_assign_pointer(net->ct.nf_conntrack_event_cb, new);
+ 	mutex_unlock(&nf_ct_ecache_mutex);
+ }
+@@ -292,6 +295,24 @@ void nf_conntrack_unregister_notifier(struct net *net)
+ }
+ EXPORT_SYMBOL_GPL(nf_conntrack_unregister_notifier);
+
++void nf_conntrack_register_ecm_notifier(struct net *net,
++					const struct nf_ct_event_notifier *new)
++{
++	mutex_lock(&nf_ct_ecache_mutex);
++	rcu_assign_pointer(net->ct.nf_conntrack_ecm_cb, new);
++	mutex_unlock(&nf_ct_ecache_mutex);
++}
++EXPORT_SYMBOL_GPL(nf_conntrack_register_ecm_notifier);
++
++void nf_conntrack_unregister_ecm_notifier(struct net *net)
++{
++	mutex_lock(&nf_ct_ecache_mutex);
++	RCU_INIT_POINTER(net->ct.nf_conntrack_ecm_cb, NULL);
++	mutex_unlock(&nf_ct_ecache_mutex);
++	synchronize_rcu();
++}
++EXPORT_SYMBOL_GPL(nf_conntrack_unregister_ecm_notifier);
++
+ void nf_conntrack_ecache_work(struct net *net, enum nf_ct_ecache_state state)
+ {
+ 	struct nf_conntrack_net *cnet = nf_ct_pernet(net);

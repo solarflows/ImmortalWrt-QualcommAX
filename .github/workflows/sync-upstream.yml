@@ -160,7 +160,14 @@ jobs:
           echo "Resetting nss-edma-rolling branch from origin/nss-edma-julius..."
           git checkout -B nss-edma-rolling nss-edma-julius
 
-          # 2. 启用 merge=ours 合并驱动并执行自动合并
+          # 2. 动态注入硬件防护盾至 runner 的 .git/info/attributes 并启用 merge=ours 合并驱动
+          echo "Configuring rolling merge=ours protection shield in .git/info/attributes..."
+          mkdir -p .git/info
+          cat << 'EOF' > .git/info/attributes
+target/linux/qualcommax/** merge=ours
+package/kernel/mac80211/** merge=ours
+package/nss/** merge=ours
+EOF
           echo "Merging upstream OpenWrt master (${UPSTREAM_HEAD}) into nss-edma-rolling..."
           git config merge.ours.driver true
           MERGE_MSG=$(printf "chore(sync): rolling merge OpenWrt master into nss-edma-rolling\n\nProtected paths preserved:\n- target/linux/qualcommax\n- package/kernel/mac80211\n- package/nss")

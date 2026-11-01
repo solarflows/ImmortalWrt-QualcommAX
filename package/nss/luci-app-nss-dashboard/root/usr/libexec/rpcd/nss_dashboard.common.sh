@@ -44,11 +44,30 @@ probe_nss_freq() {
 			cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
 		fi
 	fi
+	if [ -z "$cur_freq" ] && [ -r /proc/sys/dev/nss/clock/current_freq ]; then
+		cat /proc/sys/dev/nss/clock/current_freq >/dev/null 2>&1
+		local dmesg_hz
+		dmesg_hz=$(dmesg | grep -o 'Frequency Set to [0-9]*' | tail -n 1 | awk '{print $NF}')
+		if [ -n "$dmesg_hz" ] && [ "$dmesg_hz" -gt 0 ] 2>/dev/null; then
+			cur_freq=$(awk -v h="$dmesg_hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+		fi
+	fi
 	if [ -z "$cur_freq" ] && [ -r /sys/kernel/debug/clk/nss_core_clk/clk_rate ]; then
 		local hz
 		read -r hz < /sys/kernel/debug/clk/nss_core_clk/clk_rate 2>/dev/null
 		if [ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null; then
 			cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+		fi
+	fi
+	if [ -z "$cur_freq" ]; then
+		local dt_max_file="/proc/device-tree/soc@0/nss@40000000/qcom,max-frequency"
+		[ ! -f "$dt_max_file" ] && dt_max_file=$(find /proc/device-tree/soc* -name "qcom,max-frequency" 2>/dev/null | head -n 1)
+		if [ -f "$dt_max_file" ]; then
+			local dt_hz
+			dt_hz=$(printf "%d" 0x$(hexdump -e '4/1 "%02x"' "$dt_max_file" 2>/dev/null))
+			if [ -n "$dt_hz" ] && [ "$dt_hz" -gt 0 ] 2>/dev/null; then
+				cur_freq=$(awk -v h="$dt_hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+			fi
 		fi
 	fi
 	if [ -z "$cur_freq" ] && [ -f /etc/config/nss_dashboard ]; then
@@ -60,6 +79,28 @@ probe_nss_freq() {
 		[ "$cores" -eq 1 ] && cur_freq="1056.0 MHz" || cur_freq="1478.4 MHz"
 	fi
 	echo "$cur_freq"
+}
+
+add_freq_table_object() {
+	local soc="${1:-$(probe_soc)}"
+	json_add_array "freq_table"
+	case "$soc" in
+		IPQ60*)
+			json_add_object; json_add_string "value" "748.8 MHz"; json_add_string "label" "稳健节能 (748.8 MHz)"; json_close_object
+			json_add_object; json_add_string "value" "1056.0 MHz"; json_add_string "label" "标准均衡 (1056.0 MHz)"; json_close_object
+			json_add_object; json_add_string "value" "1497.6 MHz"; json_add_string "label" "极速超频 (1497.6 MHz - 满血)"; json_close_object
+			;;
+		IPQ50*)
+			json_add_object; json_add_string "value" "850.0 MHz"; json_add_string "label" "标准节能 (850.0 MHz)"; json_close_object
+			json_add_object; json_add_string "value" "1000.0 MHz"; json_add_string "label" "极速超频 (1000.0 MHz - 满血)"; json_close_object
+			;;
+		IPQ807*|*)
+			json_add_object; json_add_string "value" "748.8 MHz"; json_add_string "label" "稳健节能 (748.8 MHz)"; json_close_object
+			json_add_object; json_add_string "value" "1478.4 MHz"; json_add_string "label" "IPQ807x 标准 (1478.4 MHz - 推荐)"; json_close_object
+			json_add_object; json_add_string "value" "1689.6 MHz"; json_add_string "label" "极速超频 (1689.6 MHz - 满血)"; json_close_object
+			;;
+	esac
+	json_close_array
 }
 
 probe_fw_version() {

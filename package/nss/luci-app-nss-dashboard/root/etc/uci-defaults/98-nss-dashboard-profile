@@ -61,7 +61,7 @@ mod_qdisc=$mod_qdisc
 mod_crypto=$mod_crypto
 EOF
 
-# 4. State discovery & UCI reconciliation (only initialize if not already set by user)
+# 4. State discovery & UCI reconciliation (only initialize on firstboot / unset, preserve user settings across reboots)
 [ -f /etc/config/nss_dashboard ] || touch /etc/config/nss_dashboard
 
 if ! uci -q get nss_dashboard.general >/dev/null; then
@@ -86,11 +86,16 @@ if ! uci -q get nss_dashboard.general >/dev/null; then
 		uci -q set nss_dashboard.crypto.enabled='0'
 	fi
 
-	uci -q set nss_dashboard.clock.frequency="$cur_freq"
-
 	# Security auto-block defaults to on
 	uci -q set nss_dashboard.security.auto_block='1'
 
+	uci -q commit nss_dashboard
+fi
+
+# Frequency lifecycle: only discover & initialize if unset (first boot), never overwrite user-configured preference on reboot
+if [ -z "$(uci -q get nss_dashboard.clock.frequency)" ]; then
+	uci -q set nss_dashboard.clock=nss_dashboard
+	uci -q set nss_dashboard.clock.frequency="${cur_freq:-1478.4 MHz}"
 	uci -q commit nss_dashboard
 fi
 

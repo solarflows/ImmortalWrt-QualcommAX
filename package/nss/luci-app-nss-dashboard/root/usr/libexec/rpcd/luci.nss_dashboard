@@ -201,11 +201,14 @@ get_audit() {
 }
 
 get_settings() {
+	local freq=$(uci -q get nss_dashboard.clock.frequency)
+	[ -z "$freq" ] && freq=$(probe_nss_freq)
 	json_init
 	json_add_int "enabled" "$(uci -q get nss_dashboard.general.enabled || echo 1)"
 	json_add_int "crypto" "$(uci -q get nss_dashboard.crypto.enabled || echo 0)"
-	json_add_string "frequency" "$(uci -q get nss_dashboard.clock.frequency || echo '1478.4 MHz')"
+	json_add_string "frequency" "${freq:-1478.4 MHz}"
 	json_add_int "auto_block" "$(uci -q get nss_dashboard.security.auto_block || echo 1)"
+	add_freq_table_object
 	json_dump
 }
 

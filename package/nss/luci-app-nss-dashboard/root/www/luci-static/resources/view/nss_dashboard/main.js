@@ -644,7 +644,7 @@ function renderStatusCard(d, p) {
 			if (valueAttrs.title) spanAttrs.title = valueAttrs.title;
 		}
 		return E('div', { 'style': 'display:flex; align-items:center; gap:8px;' }, [
-			E('span', { 'style': 'width:45px; min-width:45px; font-size:11px;' }, [ label ]),
+			E('span', { 'style': 'width:48px; min-width:48px; font-size:11px; white-space:nowrap;' }, [ label ]),
 			E('div', { 'style': 'flex:1;' }, [ barEl ]),
 			E('span', spanAttrs, [ valueText ])
 		]);
@@ -860,7 +860,7 @@ function renderControlCard(s, d, p, onSaved) {
 		'checked': (s.auto_block !== 0) ? '' : null
 	});
 
-	var table = E('table', { 'class': 'table' }, [
+	var table = E('table', { 'class': 'table nss-control-table' }, [
 		E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td left', 'style': 'width:35%' }, [
 				E('label', {}, [ E('strong', {}, [ _('NSS 硬件网络加速总开关') ]) ]),
@@ -1702,19 +1702,13 @@ function flowsSummaryPairs(processed) {
 }
 
 function renderFlowsSummaryTable(processed) {
-	var rowChildren = [ [], [] ];
-	flowsSummaryPairs(processed).forEach(function(pair, i) {
-		rowChildren[i % 2].push(
-			E('td', { 'class': 'td left', 'style': 'width:16%; font-size:12px; color:var(--text-color-medium);' }, [ FLOWS_SUMMARY_LABELS[i] ]),
-			E('td', { 'class': 'td left nss-num-cell', 'id': pair[0], 'style': 'width:' + ((i % 3 === 2) ? '18%' : '17%') + '; ' + pair[2] }, [ pair[1] ])
-		);
+	var items = flowsSummaryPairs(processed).map(function(pair, i) {
+		return E('div', { 'class': 'nss-summary-card' }, [
+			E('div', { 'class': 'nss-summary-label' }, [ FLOWS_SUMMARY_LABELS[i] ]),
+			E('div', { 'class': 'nss-summary-val nss-num-cell', 'id': pair[0], 'style': pair[2] }, [ pair[1] ])
+		]);
 	});
-	return E('table', { 'class': 'table', 'style': 'margin-bottom:0;' }, [
-		E('tbody', {}, [
-			E('tr', { 'class': 'tr' }, rowChildren[0]),
-			E('tr', { 'class': 'tr' }, rowChildren[1])
-		])
-	]);
+	return E('div', { 'class': 'nss-flows-summary-grid' }, items);
 }
 
 function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeTrigger) {

@@ -804,15 +804,31 @@ function renderControlCard(s, d, p, onSaved) {
 		'checked': (s.crypto === 1) ? '' : null
 	});
 
+	var tableList = (s && s.freq_table && s.freq_table.length) ? s.freq_table : ((p && p.freq_table && p.freq_table.length) ? p.freq_table : []);
+	if (!tableList.length) {
+		tableList = [
+			{ value: '748.8 MHz', label: '稳健节能 (748.8 MHz)' },
+			{ value: '1478.4 MHz', label: 'IPQ807x 标准 (1478.4 MHz - 推荐)' },
+			{ value: '1689.6 MHz', label: '极速超频 (1689.6 MHz - 满血)' }
+		];
+	}
+
+	var curVal = (s && s.frequency) ? s.frequency : ((d && d.nss_freq) ? d.nss_freq : '1478.4 MHz');
+	var matched = false;
+	var freqOptions = tableList.map(function(item) {
+		var isSel = (curVal && (curVal === item.value || curVal.indexOf(item.value.split(' ')[0]) !== -1));
+		if (isSel) matched = true;
+		return E('option', { 'value': item.value, 'selected': isSel ? '' : null }, [ _(item.label) ]);
+	});
+
+	if (!matched && curVal) {
+		freqOptions.unshift(E('option', { 'value': curVal, 'selected': '' }, [ curVal + ' (' + _('当前运行') + ')' ]));
+	}
+
 	var selectFreq = E('select', {
 		'class': 'cbi-input-select',
-		'style': 'padding:4px 8px; font-size:13px; width:240px;'
-	}, [
-		E('option', { 'value': '748.8 MHz', 'selected': (s.frequency && s.frequency.indexOf('748') !== -1) ? '' : null }, [ _('稳健节能 (748.8 MHz)') ]),
-		E('option', { 'value': '1056.0 MHz', 'selected': (s.frequency && s.frequency.indexOf('1056') !== -1) ? '' : null }, [ _('IPQ60xx 默认 (1056.0 MHz)') ]),
-		E('option', { 'value': '1478.4 MHz', 'selected': (!s.frequency || s.frequency.indexOf('1478') !== -1) ? '' : null }, [ _('IPQ807x 标准 (1478.4 MHz - 推荐)') ]),
-		E('option', { 'value': '1689.6 MHz', 'selected': (s.frequency && s.frequency.indexOf('1689') !== -1) ? '' : null }, [ _('极速超频 (1689.6 MHz - 满血)') ])
-	]);
+		'style': 'padding:4px 8px; font-size:13px; width:260px;'
+	}, freqOptions);
 
 	var cbAutoBlock = E('input', {
 		'type': 'checkbox',

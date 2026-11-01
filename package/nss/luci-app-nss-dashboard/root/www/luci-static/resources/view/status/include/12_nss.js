@@ -20,8 +20,8 @@ function row(label, value, hint) {
 	}, [ label ]) : label;
 
 	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td left', 'style': 'width:25%; min-width:85px; max-width:120px; font-weight:600; white-space:nowrap; vertical-align:middle;' }, [ labelEl ]),
-		E('td', { 'class': 'td left', 'style': 'width:75%; min-width:320px; vertical-align:middle;' }, Array.isArray(value) ? value : [ value ])
+		E('td', { 'class': 'td left nss-ov-label', 'style': 'width:25%; min-width:85px; max-width:120px; font-weight:600; white-space:nowrap; vertical-align:middle;' }, [ labelEl ]),
+		E('td', { 'class': 'td left nss-ov-content', 'style': 'width:75%; min-width:320px; vertical-align:middle;' }, Array.isArray(value) ? value : [ value ])
 	]);
 }
 

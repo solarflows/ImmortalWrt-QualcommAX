@@ -86,18 +86,18 @@ add_freq_table_object() {
 	json_add_array "freq_table"
 	case "$soc" in
 		IPQ60*)
-			json_add_object; json_add_string "value" "748.8 MHz"; json_add_string "label" "稳健节能 (748.8 MHz)"; json_close_object
-			json_add_object; json_add_string "value" "1056.0 MHz"; json_add_string "label" "标准均衡 (1056.0 MHz)"; json_close_object
-			json_add_object; json_add_string "value" "1497.6 MHz"; json_add_string "label" "极速超频 (1497.6 MHz - 满血)"; json_close_object
+			json_add_string "" "748.8 MHz"
+			json_add_string "" "1056.0 MHz"
+			json_add_string "" "1497.6 MHz"
 			;;
 		IPQ50*)
-			json_add_object; json_add_string "value" "850.0 MHz"; json_add_string "label" "标准节能 (850.0 MHz)"; json_close_object
-			json_add_object; json_add_string "value" "1000.0 MHz"; json_add_string "label" "极速超频 (1000.0 MHz - 满血)"; json_close_object
+			json_add_string "" "850.0 MHz"
+			json_add_string "" "1000.0 MHz"
 			;;
 		IPQ807*|*)
-			json_add_object; json_add_string "value" "748.8 MHz"; json_add_string "label" "稳健节能 (748.8 MHz)"; json_close_object
-			json_add_object; json_add_string "value" "1478.4 MHz"; json_add_string "label" "IPQ807x 标准 (1478.4 MHz - 推荐)"; json_close_object
-			json_add_object; json_add_string "value" "1689.6 MHz"; json_add_string "label" "极速超频 (1689.6 MHz - 满血)"; json_close_object
+			json_add_string "" "748.8 MHz"
+			json_add_string "" "1478.4 MHz"
+			json_add_string "" "1689.6 MHz"
 			;;
 	esac
 	json_close_array

@@ -184,7 +184,6 @@ get_audit() {
 	if [ ! -x /usr/sbin/nlbw ]; then
 		json_init
 		json_add_int "installed" 0
-		json_add_string "message" "未安装 nlbwmon 流量审计组件"
 		json_add_object "audit"
 		json_add_array "columns"
 		json_close_array

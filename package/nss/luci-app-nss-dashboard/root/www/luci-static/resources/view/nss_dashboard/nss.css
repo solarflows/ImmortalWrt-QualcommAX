@@ -581,3 +581,119 @@
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
 }
+
+/* 13. Flows Summary Responsive Grid */
+.nss-dashboard-spa .nss-flows-summary-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px 12px;
+	margin-bottom: 8px;
+}
+
+.nss-dashboard-spa .nss-summary-card {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 6px 10px;
+	border-radius: 4px;
+	border: 1px solid var(--border-color-low, rgba(255, 255, 255, 0.08));
+	background: var(--background-color-medium, rgba(255, 255, 255, 0.04));
+	min-width: 0;
+}
+
+.nss-dashboard-spa .nss-summary-label {
+	font-size: 11px;
+	color: var(--text-color-medium, #888);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.nss-dashboard-spa .nss-summary-val {
+	font-size: 12px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 14. Responsive Layout Adaptations for Narrow / Mobile Viewports */
+@media screen and (max-width: 640px) {
+	.nss-dashboard-spa .nss-flows-summary-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+	}
+
+	.nss-dashboard-spa .nss-notice-banner {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 6px;
+	}
+
+	.nss-dashboard-spa .nss-status-table tr {
+		display: flex;
+		flex-direction: column;
+		padding: 6px 0;
+	}
+
+	.nss-dashboard-spa .nss-status-table td.nss-status-label {
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
+		padding-bottom: 4px;
+	}
+
+	.nss-dashboard-spa .nss-status-table td:last-child {
+		width: 100%;
+		min-width: 0;
+		padding-top: 0;
+	}
+
+	.nss-dashboard-spa .nss-control-table tr {
+		display: flex;
+		flex-direction: column;
+		padding: 8px 0;
+		border-bottom: 1px solid var(--border-color-low, rgba(255, 255, 255, 0.08));
+	}
+
+	.nss-dashboard-spa .nss-control-table td {
+		width: 100%;
+		padding: 3px 0;
+		border: none;
+	}
+
+	.nss-dashboard-spa .nss-control-table select.cbi-input-select {
+		width: 100%;
+		max-width: 100%;
+	}
+}
+
+@media screen and (max-width: 480px) {
+	#nss-status-table {
+		table-layout: auto;
+	}
+
+	#nss-status-table tr {
+		display: flex;
+		flex-direction: column;
+		padding: 5px 0;
+	}
+
+	#nss-status-table td.nss-ov-label {
+		width: 100%;
+		max-width: 100%;
+		min-width: 0;
+		padding: 2px 0 3px 0;
+		font-size: 11px;
+		color: var(--text-color-medium);
+		border: none;
+	}
+
+	#nss-status-table td.nss-ov-content {
+		width: 100%;
+		min-width: 0;
+		padding: 2px 0 4px 0;
+		border: none;
+	}
+}

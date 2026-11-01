@@ -1,0 +1,54 @@
+From: VIKINGYFY <vikingyfy@gmail.com>
+Subject: [PATCH] nss-drv: keep core stats enabled with autoscale disabled
+
+--- a/nss_freq.c
++++ b/nss_freq.c
+@@ -209,14 +209,6 @@
+ 	uint32_t maximum;
+ 	uint32_t index = nss_runtime_samples.freq_scale_index;
+ 
+-	/*
+-	 * We do not accept any statistics if auto scaling is off,
+-	 * we start with a fresh sample set when scaling is
+-	 * eventually turned on.
+-	 */
+-	if (!nss_cmd_buf.auto_scale && nss_runtime_samples.initialized) {
+-		return;
+-	}
+ 
+ 	/*
+ 	 * Delete Current Index Value, Add New Value, Recalculate new Sum, Shift Index
+@@ -235,7 +227,6 @@
+ 		 * Samples Are All Ready, Start Auto Scale
+ 		 */
+ 		if (nss_runtime_samples.sample_count == NSS_SAMPLE_BUFFER_SIZE ) {
+-			nss_cmd_buf.auto_scale = 1;
+ 			nss_runtime_samples.freq_scale_ready = 1;
+ 			nss_runtime_samples.initialized = 1;
+ 		}
+@@ -421,7 +412,13 @@
+ 
+ 	nss_work->frequency = nss_runtime_samples.freq_scale[index].frequency;
+ 
+-	nss_work->stats_enable = auto_scale;
++	if (!auto_scale) {
++		nss_cmd_buf.auto_scale = 0;
++		nss_runtime_samples.freq_scale_ready = 0;
++	}
++
++	/* Keep NSS core stats enabled even when fixed-frequency scaling is requested. */
++	nss_work->stats_enable = 1;
+ 	nss_cmd_buf.current_freq = nss_work->frequency;
+ 	queue_work(nss_wq, (struct work_struct *)nss_work);
+ 
+--- a/nss_init.c
++++ b/nss_init.c
+@@ -267,7 +267,7 @@
+ 	nss_work->stats_enable = 1;
+ 	queue_work(nss_wq, (struct work_struct *)nss_work);
+ 
+-	nss_cmd_buf.auto_scale = 0;
++	nss_cmd_buf.auto_scale = 1;
+ 	nss_runtime_samples.freq_scale_ready = 1;
+ 
+ 	return ret;

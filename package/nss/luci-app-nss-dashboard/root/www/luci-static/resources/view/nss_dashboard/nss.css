@@ -222,9 +222,8 @@
 }
 
 .nss-dashboard-spa .nss-status-label {
-	width: 28%;
+	width: 33%;
 	min-width: 90px;
-	font-weight: 600;
 	white-space: nowrap;
 }
 
@@ -492,6 +491,7 @@
 }
 
 :is(.nss-dashboard-spa, #nss-status-table) .nss-bar-fill,
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-success,
 :is(.nss-dashboard-spa, #nss-status-table) .nss-bar-warn,
 :is(.nss-dashboard-spa, #nss-status-table) .nss-bar-danger {
 	height: 100%;
@@ -499,6 +499,7 @@
 }
 
 :is(.nss-dashboard-spa, #nss-status-table) .nss-bar-fill { background: var(--primary-color-medium, #1976d2); }
+:is(.nss-dashboard-spa, #nss-status-table) .nss-bar-success { background: var(--success-color-high, #00ac59); }
 :is(.nss-dashboard-spa, #nss-status-table) .nss-bar-warn { background: var(--warn-color-high, #efbd0b); }
 :is(.nss-dashboard-spa, #nss-status-table) .nss-bar-danger { background: var(--error-color-high, #f62b12); }
 

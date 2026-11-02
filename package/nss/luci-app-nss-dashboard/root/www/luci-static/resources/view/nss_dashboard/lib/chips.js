@@ -162,7 +162,12 @@ return baseclass.extend({
 
 		var vn = parseFloat(value) || 0;
 		var pc = Math.min(100, Math.max(0, (100 / max) * vn));
-		var fillClass = (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : 'nss-bar-fill';
+		var fillClass;
+		if (opts.intent === 'offload') {
+			fillClass = (vn >= 60) ? 'nss-bar-success' : (vn >= 30) ? 'nss-bar-fill' : (vn > 0) ? 'nss-bar-warn' : 'nss-bar-disabled';
+		} else {
+			fillClass = (vn > 80) ? 'nss-bar-danger' : (vn > 50) ? 'nss-bar-warn' : 'nss-bar-fill';
+		}
 
 		return E('div', {
 			'class': 'nss-bar',

@@ -15,13 +15,12 @@ var RADIO_TEMP_TTL = 3;
 
 function row(label, value, hint) {
 	var labelEl = hint ? E('span', {
-		'title': hint,
-		'style': 'cursor:help; border-bottom:1px dotted var(--text-color-medium, rgba(255,255,255,0.3));'
+		'title': hint
 	}, [ label ]) : label;
 
 	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td left nss-ov-label', 'style': 'width:25%; min-width:85px; max-width:120px; font-weight:600; white-space:nowrap; vertical-align:middle;' }, [ labelEl ]),
-		E('td', { 'class': 'td left nss-ov-content', 'style': 'width:75%; min-width:320px; vertical-align:middle;' }, Array.isArray(value) ? value : [ value ])
+		E('td', { 'class': 'td left nss-ov-label', 'width': '33%' }, [ labelEl ]),
+		E('td', { 'class': 'td left nss-ov-content' }, Array.isArray(value) ? value : [ value ])
 	]);
 }
 
@@ -215,7 +214,7 @@ return baseclass.extend({
 			E('table', {
 				'id': 'nss-status-table',
 				'class': 'table',
-				'style': 'width:100%; table-layout:fixed; margin:0;'
+				'style': 'width:100%; margin:0;'
 			}, [
 				row(_('协处理器'), specView, _('高通网络子系统 (NSS) 硬件卸载协处理器，内置独立双核/单核与硬件转发管线，微码执行物理层线速转发')),
 				row(_('模块状态'), modulesView, _('底层驱动与加速子系统卸载状态：Bridge(桥接)、PPPoE(拨号)、Wi-Fi(无线通道)、SQM(队列整形)、VLAN(虚网)、Qdisc(流量控制)、EIP-197(硬件加解密)')),

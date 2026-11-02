@@ -171,9 +171,19 @@ jobs:
           git config merge.ours.driver true
           MERGE_MSG=$(printf "chore(sync): rolling merge OpenWrt master into nss-edma-rolling\n\nProtected paths preserved:\n- target/linux/qualcommax\n- package/kernel/mac80211\n- package/nss")
           if ! git merge -X ours --allow-unrelated-histories --no-edit upstream-openwrt/master -m "$MERGE_MSG"; then
-            echo "::error::Merge failed unexpectedly! Aborting."
-            git merge --abort || true
-            exit 1
+            echo "Merge encountered unresolved conflicts; checking if they reside within protected paths..."
+            UNRESOLVED_OUTSIDE=$(git status --porcelain | grep -E '^(UU|UD|DU|AA)' | grep -vE '(target/linux/qualcommax/|package/kernel/mac80211/|package/nss/)' || true)
+            if [ -n "$UNRESOLVED_OUTSIDE" ]; then
+              echo "::error::Unresolved merge conflicts outside protected paths:"
+              echo "$UNRESOLVED_OUTSIDE"
+              git merge --abort || true
+              exit 1
+            fi
+            echo "All conflicts reside within protected paths. Auto-resolving via secondary protection..."
+            git rm -rf --quiet target/linux/qualcommax package/kernel/mac80211 package/nss 2>/dev/null || true
+            git checkout nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss
+            git add target/linux/qualcommax package/kernel/mac80211 package/nss
+            git commit -m "$MERGE_MSG"
           fi
 
           # 3. 第二道物理防线：彻底清除上游合并引入的新增文件，将受保护目录物理重置为基底分支

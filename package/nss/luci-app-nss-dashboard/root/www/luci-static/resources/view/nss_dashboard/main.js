@@ -452,7 +452,7 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 	// ── 仓 1: 核心算力 (Computing) ──
 	var bayCompute = E('div', { 'class': 'bay-card bay-divider-right' }, [
 		E('div', { 'class': 'bay-title-bar' }, [
-			E('span', { 'class': 'th-hint', 'title': _('高通 SoC 硬件架构、工作主频、CPU 三态负载、芯片结温与 NPU 负载') }, [
+			E('span', { 'title': _('高通 SoC 硬件架构、工作主频、CPU 三态负载、芯片结温与 NPU 负载') }, [
 				'⚡ ' + _('核心算力')
 			]),
 			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
@@ -485,7 +485,7 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 	// ── 仓 2: 硬件遥测 (Telemetry) ──
 	var bayTelemetry = E('div', { 'class': 'bay-card bay-divider-right' }, [
 		E('div', { 'class': 'bay-title-bar' }, [
-			E('span', { 'class': 'th-hint', 'title': _('硬件线速吞吐速率、微码心跳、ECM 并发流数、双栈分布、直通状态与安全协同防御') }, [
+			E('span', { 'title': _('硬件线速吞吐速率、微码心跳、ECM 并发流数、双栈分布、直通状态与安全协同防御') }, [
 				'📊 ' + _('硬件遥测')
 			]),
 			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
@@ -523,7 +523,7 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 	// ── 仓 3: 运行控制与流表概要 (Control) ──
 	var bayControl = E('div', { 'class': 'bay-card control-bay' }, [
 		E('div', { 'class': 'bay-title-bar' }, [
-			E('span', { 'class': 'th-hint', 'title': _('调度周期控制、强制刷新与全网并发流汇总') }, [
+			E('span', { 'title': _('调度周期控制、强制刷新与全网并发流汇总') }, [
 				'🎛️ ' + _('运行控制')
 			]),
 			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
@@ -581,12 +581,12 @@ function renderConflictBanner(d) {
 }
 
 // ── 3. 子卡 A：状态总览 (Status) ──
-/* 状态页两栏行：左列 th-hint 标签（悬停提示），右列内容 */
+/* 状态页两栏行：左列标签（悬停提示），右列内容 */
 function statusRow(label, hint, content) {
+	var tdAttrs = { 'class': 'td left nss-status-label' };
+	if (hint) tdAttrs.title = hint;
 	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td left nss-status-label', 'title': hint }, [
-			E('span', { 'class': 'th-hint' }, [ label ])
-		]),
+		E('td', tdAttrs, [ label ]),
 		E('td', { 'class': 'td left' }, [ content ])
 	]);
 }
@@ -626,7 +626,10 @@ function renderStatusCard(d, p) {
 		(fwMask && fwMask !== '0x0') ? E('span', {
 			'class': 'badge badge-neutral badge-tile-112',
 			'title': _('微码特性掩码 (fw_mask)')
-		}, [ E('strong', {}, [ _('掩码:') ]), fwMask ]) : '',
+		}, [ E('strong', {}, [ _('掩码:') ]), fwMask ]) : E('span', {
+			'class': 'badge badge-neutral badge-tile-112',
+			'title': _('无扩展功能掩码 (标准固件)')
+		}, [ E('strong', {}, [ _('掩码:') ]), _('标准') ]),
 		E('span', {
 			'class': 'badge badge-success badge-tile-112',
 			'title': _('NPU 微码与内核驱动每秒高频心跳包采样 (pkts/s)')
@@ -690,11 +693,11 @@ function renderStatusCard(d, p) {
 
 	var modulesView = E('div', { 'class': 'nss-grid-3x112' }, [
 		moduleChip('Bridge', mods.bridge),
+		moduleChip('VLAN', mods.vlan),
 		moduleChip('PPPoE', mods.pppoe),
 		wifiChip,
-		sqmChip,
-		moduleChip('VLAN', mods.vlan),
 		moduleChip('Qdisc', mods.qdisc),
+		sqmChip,
 		moduleChip('EIP-197', mods.crypto)
 	]);
 
@@ -740,11 +743,11 @@ function renderStatusCard(d, p) {
 	]);
 
 	var flowChips = [
-		E('span', { 'class': 'badge badge-info badge-tile-112' }, [ E('strong', {}, [ 'IPv4:' ]), (d.ecm_v4 || 0) ]),
-		E('span', { 'class': 'badge badge-info badge-tile-112' }, [ E('strong', {}, [ 'IPv6:' ]), (d.ecm_v6 || 0) ]),
 		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'TCP:' ]), (d.ecm_tcp || 0) ]),
 		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'UDP:' ]), (d.ecm_udp || 0) ]),
-		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'Other:' ]), (d.ecm_other || 0) ])
+		E('span', { 'class': 'badge badge-neutral badge-tile-112' }, [ E('strong', {}, [ 'Other:' ]), (d.ecm_other || 0) ]),
+		E('span', { 'class': 'badge badge-info badge-tile-112' }, [ E('strong', {}, [ 'IPv4:' ]), (d.ecm_v4 || 0) ]),
+		E('span', { 'class': 'badge badge-info badge-tile-112' }, [ E('strong', {}, [ 'IPv6:' ]), (d.ecm_v6 || 0) ])
 	];
 
 	var tempElements = [];

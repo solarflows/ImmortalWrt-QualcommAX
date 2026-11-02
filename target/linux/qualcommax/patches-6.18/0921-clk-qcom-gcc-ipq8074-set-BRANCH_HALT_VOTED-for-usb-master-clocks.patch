@@ -1,0 +1,40 @@
+From: Chukun Pan <amadeus@jmu.edu.cn>
+Date: Thu, 10 Sep 2026 15:30:00 +0800
+Subject: [PATCH] clk: qcom: ipq8074: set BRANCH_HALT_VOTED flag for usb master clocks
+
+Currently, on IPQ8074 boards with vendor U-Boot (such as Netgear RBR750,
+Linksys MX5300, Zyxel NBG7815), U-Boot leaves USB clocks active without
+releasing hardware votes. When Linux disables unused clocks during boot,
+attempting to halt these branches results in timeout warnings and marks
+the kernel tainted:
+
+[    3.518119] gcc_usb1_master_clk status stuck at 'on'
+[    3.518158] WARNING: CPU: 3 PID: 1 at drivers/clk/qcom/clk-branch.c:87 clk_branch_toggle+0x168/0x180
+[    3.699804] gcc_usb0_master_clk status stuck at 'on'
+[    3.699836] WARNING: CPU: 3 PID: 1 at drivers/clk/qcom/clk-branch.c:87 clk_branch_toggle+0x168/0x180
+
+Like IPQ5332 and IPQ5424, mark gcc_usb0_master_clk and gcc_usb1_master_clk
+with BRANCH_HALT_VOTED so clk_branch_wait() delays without polling the
+halt register when disabling, avoiding the stuck warning while keeping
+USB functional when enabled.
+
+Signed-off-by: Chukun Pan <amadeus@jmu.edu.cn>
+---
+--- a/drivers/clk/qcom/gcc-ipq8074.c
++++ b/drivers/clk/qcom/gcc-ipq8074.c
+@@ -2612,6 +2612,7 @@ static struct clk_branch gcc_sys_noc_us
+
+ static struct clk_branch gcc_usb0_master_clk = {
+ 	.halt_reg = 0x3e000,
++	.halt_check = BRANCH_HALT_VOTED,
+ 	.clkr = {
+ 		.enable_reg = 0x3e000,
+ 		.enable_mask = BIT(0),
+@@ -2725,6 +2726,7 @@ static struct clk_branch gcc_sys_noc_us
+
+ static struct clk_branch gcc_usb1_master_clk = {
+ 	.halt_reg = 0x3f000,
++	.halt_check = BRANCH_HALT_VOTED,
+ 	.clkr = {
+ 		.enable_reg = 0x3f000,
+ 		.enable_mask = BIT(0),

@@ -330,8 +330,8 @@ function toggleClientExpand(rowEl, clientObj, key, colSpan) {
 var calcCpuLoad = chips.calcCpuLoad.bind(chips);
 var sampleMetricsRate = chips.sampleMetricsRate.bind(chips);
 
-function progressbar(value, max, label) {
-	return chips.bar({ value: value, max: max, label: label, disabledText: label || _('休眠待机'), height: 13 });
+function progressbar(value, max, label, intent) {
+	return chips.bar({ value: value, max: max, label: label, disabledText: label || _('休眠待机'), height: 13, intent: intent });
 }
 
 function hostCpuProgressbar(total, usr, sys, sirq) {
@@ -850,7 +850,7 @@ function renderControlCard(s, d, p, onSaved) {
 
 	var selectFreq = E('select', {
 		'class': 'cbi-input-select',
-		'style': 'padding:4px 8px; font-size:13px; width:260px;'
+		'style': 'padding:4px 8px; font-size:13px; max-width:320px; width:100%;'
 	}, freqOptions);
 
 	var cbAutoBlock = E('input', {
@@ -862,7 +862,7 @@ function renderControlCard(s, d, p, onSaved) {
 
 	var table = E('table', { 'class': 'table nss-control-table' }, [
 		E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td left', 'style': 'width:35%' }, [
+			E('td', { 'class': 'td left', 'width': '33%' }, [
 				E('label', {}, [ E('strong', {}, [ _('NSS 硬件网络加速总开关') ]) ]),
 				E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
 					_('开启后由 NSS 协处理器接管有线与无线网络流量线速转发')
@@ -1033,7 +1033,7 @@ function renderPortsCard(d, onRefreshToggle) {
 				]),
 				E('td', { 'class': 'td nss-num-cell' }, [
 					E('div', { 'style': 'display:flex; align-items:center; gap:6px;' }, [
-						E('div', { 'style': 'width:100px; flex-shrink:0;' }, [ progressbar(hwRatio, 100) ]),
+						E('div', { 'style': 'width:100px; flex-shrink:0;' }, [ progressbar(hwRatio, 100, null, 'offload') ]),
 						E('span', { 'style': 'font-size:11px; font-weight:bold; width:40px; text-align:right;' }, [ hwRatio + '%' ])
 					])
 				]),

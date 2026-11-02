@@ -227,11 +227,6 @@
 	white-space: nowrap;
 }
 
-:is(.nss-dashboard-spa, #nss-status-table) .th-hint {
-	border-bottom: 1px dotted var(--text-color-low, rgba(255, 255, 255, 0.3));
-	cursor: help;
-}
-
 .nss-dashboard-spa .nss-grid-3x112 {
 	display: inline-grid;
 	grid-template-columns: repeat(3, 112px);

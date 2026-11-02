@@ -14,12 +14,11 @@ var lastRadioTemps = {};
 var RADIO_TEMP_TTL = 3;
 
 function row(label, value, hint) {
-	var labelEl = hint ? E('span', {
-		'title': hint
-	}, [ label ]) : label;
+	var tdAttrs = { 'class': 'td left nss-ov-label', 'width': '33%' };
+	if (hint) tdAttrs.title = hint;
 
 	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td left nss-ov-label', 'width': '33%' }, [ labelEl ]),
+		E('td', tdAttrs, [ label ]),
 		E('td', { 'class': 'td left nss-ov-content' }, Array.isArray(value) ? value : [ value ])
 	]);
 }
@@ -78,11 +77,11 @@ return baseclass.extend({
 
 		var modulesView = E('div', { 'style': 'display:inline-grid; grid-template-columns:repeat(3, 102px); grid-template-rows:repeat(3, 22px); gap:6px; min-height:78px;' }, [
 			chips.moduleChip('Bridge', mods.bridge, null, null, chipOpts),
+			chips.moduleChip('VLAN', mods.vlan, null, null, chipOpts),
 			chips.moduleChip('PPPoE', mods.pppoe, null, null, chipOpts),
 			wifiChip,
-			sqmChip,
-			chips.moduleChip('VLAN', mods.vlan, null, null, chipOpts),
 			chips.moduleChip('Qdisc', mods.qdisc, null, null, chipOpts),
+			sqmChip,
 			chips.moduleChip('EIP-197', mods.crypto, null, null, chipOpts)
 		]);
 

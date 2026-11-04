@@ -622,9 +622,16 @@ static void nssinfo_deinit(struct nss_nlmcast_ctx *ctx)
 	nssinfo_deinit_t deinit;
 
 	/*
-	 * Close NL socket and terminate ctx->sock.thread
+	 * Release resources used by each subsystem before closing the netlink socket
 	 */
-	nss_nlmcast_sock_close(ctx);
+	for (i = 0; i < NSS_NLCMN_SUBSYS_MAX; i++) {
+		if (nssinfo_subsystem_array[i].is_inited) {
+			deinit = nssinfo_subsystem_array[i].deinit;
+			if (deinit) {
+				deinit(ctx);
+			}
+		}
+	}
 
 	/*
 	 * Release memory used for storing stats
@@ -640,14 +647,9 @@ static void nssinfo_deinit(struct nss_nlmcast_ctx *ctx)
 	}
 
 	/*
-	 * Release resources used by each subsystem
+	 * Close NL socket and terminate ctx->sock.thread
 	 */
-	for (i = 0; i < NSS_NLCMN_SUBSYS_MAX; i++) {
-		deinit = nssinfo_subsystem_array[i].deinit;
-		if (deinit) {
-			deinit(ctx);
-		}
-	}
+	nss_nlmcast_sock_close(ctx);
 }
 
 /*

@@ -7,7 +7,21 @@ CPUFREQ_PATH="/sys/devices/system/cpu/cpufreq"
 THERMAL_PATH="/sys/class/thermal"
 
 cpu_arch="$(awk -F ': ' '/model name/ {print $2}' "$CPUINFO_PATH" | head -n1)"
-[ -n "${cpu_arch}" ] || cpu_arch="?"
+if [ -z "${cpu_arch}" ] || [ "${cpu_arch}" = "?" ]; then
+	part="$(awk -F ': ' '/CPU part/ {print $2}' "$CPUINFO_PATH" | head -n1)"
+	case "$part" in
+		0xd03) cpu_arch="ARM Cortex-A53" ;;
+		0xd05) cpu_arch="ARM Cortex-A55" ;;
+		0xd07) cpu_arch="ARM Cortex-A57" ;;
+		0xd08) cpu_arch="ARM Cortex-A72" ;;
+		0xd09) cpu_arch="ARM Cortex-A73" ;;
+		0xd0a) cpu_arch="ARM Cortex-A75" ;;
+		0xd0b) cpu_arch="ARM Cortex-A76" ;;
+		*)
+			[ -f /proc/device-tree/model ] && cpu_arch="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)" || cpu_arch="ARMv8"
+			;;
+	esac
+fi
 
 case "$DISTRIB_TARGET" in
 "x86"/*)
@@ -27,8 +41,11 @@ case "$DISTRIB_TARGET" in
 "x86"/*)
 	cpu_freq="$(awk -F ': ' '/MHz/ {print $2}' "$CPUINFO_PATH" | head -n1)MHz" ;;
 *)
-	[ ! -e "$CPUFREQ_PATH/policy0/cpuinfo_cur_freq" ] || \
+	if [ -e "$CPUFREQ_PATH/policy0/scaling_cur_freq" ]; then
+		cpu_freq="$(awk '{printf("%.fMHz", $0 / 1000)}' "$CPUFREQ_PATH/policy0/scaling_cur_freq")"
+	elif [ -e "$CPUFREQ_PATH/policy0/cpuinfo_cur_freq" ]; then
 		cpu_freq="$(awk '{printf("%.fMHz", $0 / 1000)}' "$CPUFREQ_PATH/policy0/cpuinfo_cur_freq")"
+	fi
 	;;
 esac
 

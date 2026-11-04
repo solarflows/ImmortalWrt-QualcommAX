@@ -47,9 +47,9 @@ Default Project / ImmortalWrt-QualcommAX
 
 *   **对应分支**：`base/openwrt-upstream`
 *   **官方同步锚点 (Baseline Anchor)**：
-    *   **Commit SHA**：`5700101d7c85381889d890dc1d3d001d0b4b6446`
-    *   **日期**：`2026-10-30`
-    *   **标题**：`ipq40xx: include TP-Link Deco M5 board data`
+    *   **Commit SHA**：`89489ba0a7d5ec431df0d15d654ef2436d6a2fbe`
+    *   **日期**：`2026-11-04`
+    *   **标题**：`realtek: dsa: use regmap for TC policing registers`
 *   **资产范围**：
     *   OpenWrt 官方原生构建体系：`include/`、`scripts/`、`tools/`、`toolchain/`；
     *   Linux 6.18 通用内核基础树：`target/linux/generic/`；

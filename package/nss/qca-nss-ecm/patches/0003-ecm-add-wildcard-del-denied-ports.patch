@@ -1,0 +1,93 @@
+From: Sean Khan <datapronix@protonmail.com>
+Subject: [PATCH] nss-ecm: add wildcard option to delete denied ports
+
+Add ability to delete all denied ports from acceleration blacklists
+using a wildcard option:
+  echo del * > /proc/sys/net/ecm/udp_denied_ports
+  echo del * > /proc/sys/net/ecm/tcp_denied_ports
+
+Signed-off-by: Sean Khan <datapronix@protonmail.com>
+---
+--- a/frontends/ecm_front_end_common.c
++++ b/frontends/ecm_front_end_common.c
+@@ -1566,36 +1566,58 @@ static int ecm_front_end_denied_ports_handler(int write, void *buffer, size_t *l
+ 			}
+ 		}
+ 	} else if (!strncmp(token, "del", 3)) {
+-		while (buf) {
+-			token = strsep(&buf, " ");
+-			if (kstrtol(token, 10, &val)) {
+-				DEBUG_ERROR("%s is not a number\n", token);
+-				kfree(pfree);
+-				return -EINVAL;
+-			}
+-			if (sscanf(token, "%d", &port)) {
+-				struct hlist_node *pnode, *temp;
+-				uint32_t hash;
++		token = strsep(&buf, " ");
+ 
+-				if (port < 0 || port > 65535) {
+-					DEBUG_ERROR("port %d is not between (0-65535)\n", port);
++		/* Simple check for wildcard - handles both with and without newline */
++		if (token && token[0] == '*') {
++			int i;
++			struct hlist_node *pnode, *temp;
++
++			/* Loop through all hash buckets and delete all entries */
++			for (i = 0; i < ECM_FRONT_END_DENIED_PORTS_HTABLE_SIZE; i++) {
++				hlist_for_each_safe(pnode, temp, &denied_ports[i]) {
++					struct ecm_denied_port_node *p = hlist_entry(pnode, struct ecm_denied_port_node, hnode);
++					hlist_del(&p->hnode);
++					vfree(p);
++					if (is_udp) {
++						atomic_dec(&ecm_udp_denied_port_count);
++					} else {
++						atomic_dec(&ecm_tcp_denied_port_count);
++					}
++				}
++			}
++		} else {
++			while (token) {
++				if (kstrtol(token, 10, &val)) {
++					DEBUG_ERROR("%s is not a number\n", token);
+ 					kfree(pfree);
+ 					return -EINVAL;
+ 				}
++				if (sscanf(token, "%d", &port)) {
++					struct hlist_node *pnode, *temp;
++					uint32_t hash;
++
++					if (port < 0 || port > 65535) {
++						DEBUG_ERROR("port %d is not between (0-65535)\n", port);
++						kfree(pfree);
++						return -EINVAL;
++					}
+ 
+-				hash = hash_32(port, ECM_FRONT_END_DENIED_PORTS_HTABLE_SIZE);
+-				hlist_for_each_safe(pnode, temp, &denied_ports[hash]) {
+-					struct ecm_denied_port_node *p = hlist_entry(pnode, struct ecm_denied_port_node, hnode);
+-					if (p->port == port) {
+-						hlist_del(&p->hnode);
+-						vfree(p);
+-						if (is_udp) {
+-							atomic_dec(&ecm_udp_denied_port_count);
+-						} else {
+-							atomic_dec(&ecm_tcp_denied_port_count);
++					hash = hash_32(port, ECM_FRONT_END_DENIED_PORTS_HTABLE_SIZE);
++					hlist_for_each_safe(pnode, temp, &denied_ports[hash]) {
++						struct ecm_denied_port_node *p = hlist_entry(pnode, struct ecm_denied_port_node, hnode);
++						if (p->port == port) {
++							hlist_del(&p->hnode);
++							vfree(p);
++							if (is_udp) {
++								atomic_dec(&ecm_udp_denied_port_count);
++							} else {
++								atomic_dec(&ecm_tcp_denied_port_count);
++							}
+ 						}
+ 					}
+ 				}
++				token = strsep(&buf, " ");
+ 			}
+ 		}
+ 	} else {

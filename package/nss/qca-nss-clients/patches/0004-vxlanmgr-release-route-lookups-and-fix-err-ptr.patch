@@ -1,0 +1,38 @@
+From: Andrei-Alexandru Bleortu <me@andrei-z.com>
+Subject: [PATCH] vxlanmgr: release the source-address route lookups and check ERR_PTR
+
+Picking a tunnel source address looks a route up and keeps only the
+address it yields, but never dropped the reference the lookup took, so
+every tunnel created with an unspecified local address leaked a route.
+Put the IPv4 rtable and release the IPv6 dst once the address is copied.
+
+ipv6_dst_lookup_flow() reports a failure as an ERR_PTR, never NULL, so
+the IPv6 "no route" test never fired and the error pointer went on as a
+route; test it with IS_ERR().
+
+Signed-off-by: Andrei-Alexandru Bleortu <me@andrei-z.com>
+---
+--- a/vxlanmgr/nss_vxlanmgr_tunnel.c
++++ b/vxlanmgr/nss_vxlanmgr_tunnel.c
+@@ -148,6 +148,7 @@ static bool nss_vxlanmgr_tunnel_fill_src_ip(struct vxlan_dev *vxlan,
+ 				return false;
+ 			}
+ 			new_src_ip[0] = fl4.saddr;
++			ip_rt_put(rt);
+ 			return true;
+ 		}
+ 		new_src_ip[0] = src_ip->sin.sin_addr.s_addr;
+@@ -168,11 +169,12 @@ static bool nss_vxlanmgr_tunnel_fill_src_ip(struct vxlan_dev *vxlan,
+ 
+ 		dentry = ipv6_stub->ipv6_dst_lookup_flow(vxlan->net,
+ 				vxlan->vn6_sock->sock->sk, &fl6, final_dst);
+-		if (!dentry) {
++		if (IS_ERR(dentry)) {
+ 			nss_vxlanmgr_warn("No route, drop packet.\n");
+ 			return false;
+ 		}
+ 		memcpy(new_src_ip, &fl6.saddr, sizeof(struct in6_addr));
++		dst_release(dentry);
+ 		return true;
+ 	}
+ 	memcpy(new_src_ip, &src_ip->sin6.sin6_addr, sizeof(struct in6_addr));

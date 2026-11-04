@@ -1,0 +1,68 @@
+From: Sean Khan <datapronix@protonmail.com>
+Subject: [PATCH] nss-drv: fix write error when creating/destroying PPE VP interfaces
+
+proc_dostring() has already copied user data into nss_ppe_vp_cmd.
+The subsequent copy_from_user() was redundant and caused -EFAULT on
+modern Linux kernels with hardened usercopy.
+
+Copy from nss_ppe_vp_cmd to cmd_buf instead of calling copy_from_user(),
+and update the help message to point to the correct sysctl path.
+
+Signed-off-by: Sean Khan <datapronix@protonmail.com>
+Co-Authored-By: Husky <hyiy666@gmail.com>
+---
+--- a/nss_ppe_vp.c
++++ b/nss_ppe_vp.c
+@@ -97,8 +97,8 @@ static void nss_ppe_vp_proc_help(void)
+ {
+ 	nss_info_always("== for dynamic interface types read following file ==");
+ 	nss_info_always("/sys/kernel/debug/qca-nss-drv/stats/dynamic_if/type_names");
+-	nss_info_always("NSS PPE VP create: echo <interface name> <dynamic interface type> > /proc/sys/nss/ppe_vp/create");
+-	nss_info_always("NSS PPE VP destroy: echo <interface name> <dynamic interface type> > /proc/sys/nss/ppe_vp/destroy");
++	nss_info_always("NSS PPE VP create: echo <interface name> <dynamic interface type> > /proc/sys/dev/nss/ppe_vp/create");
++	nss_info_always("NSS PPE VP destroy: echo <interface name> <dynamic interface type> > /proc/sys/dev/nss/ppe_vp/destroy");
+ }
+
+ /*
+@@ -211,10 +211,10 @@ static void nss_ppe_vp_callback(void *app_data, struct nss_ppe_vp_msg *npvm)
+  * nss_ppe_vp_parse_vp_cmd()
+  *	Parse PPE VP create and destroy message and return the NSS interface number.
+  * Command usage:
+- * echo <interface name> <dynamic interface type> /proc/sys/nss/ppe_vp/create>
+- * echo ath0 6 > /proc/sys/nss/ppe_vp/create
++ * echo <interface name> <dynamic interface type> /proc/sys/dev/nss/ppe_vp/create>
++ * echo ath0 6 > /proc/sys/dev/nss/ppe_vp/create
+  * Since ath0 has only one type i.e. ath0 is NSS_DYNAMIC_INTERFACE_TYPE_VAP, the above command can be rewritten as
+- * echo ath0 > /proc/sys/nss/ppe_vp/create => Here 6 can be ignored.
++ * echo ath0 > /proc/sys/dev/nss/ppe_vp/create => Here 6 can be ignored.
+  */
+ static nss_if_num_t nss_ppe_vp_parse_vp_cmd(const struct ctl_table *ctl, int write, void __user *buffer, size_t *lenp, loff_t *ppos)
+ {
+@@ -224,7 +224,6 @@ static nss_if_num_t nss_ppe_vp_parse_vp_cmd(const struct ctl_table *ctl, int wri
+ 	struct nss_ctx_instance *nss_ctx = nss_ppe_vp_get_context();
+ 	char *pos;
+ 	char cmd_buf[NSS_PPE_VP_MAX_CMD_STR] = {0}, dev_name[NSS_PPE_VP_MAX_CMD_STR] = {0};
+-	size_t count = *lenp;
+ 	int ret = proc_dostring(ctl, write, buffer, lenp, ppos);
+
+ 	if (!write) {
+@@ -239,17 +238,8 @@ static nss_if_num_t nss_ppe_vp_parse_vp_cmd(const struct ctl_table *ctl, int wri
+
+ 	NSS_VERIFY_CTX_MAGIC(nss_ctx);
+
+-	if (count >= NSS_PPE_VP_MAX_CMD_STR) {
+-		nss_ppe_vp_proc_help();
+-		nss_warning("%px: Input string too big", nss_ctx);
+-		return -E2BIG;
+-	}
+-
+-	if (copy_from_user(cmd_buf, buffer, count)) {
+-		nss_warning("%px: Cannot copy user's entry to kernel memory", nss_ctx);
+-		return -EFAULT;
+-	}
+-
++	/* proc_dostring has already copied the data to nss_ppe_vp_cmd */
++	strncpy(cmd_buf, (char *)nss_ppe_vp_cmd, sizeof(cmd_buf) - 1);
+ 	if ((pos = strrchr(cmd_buf, '\n')) != NULL) {
+ 		*pos = '\0';
+ 	}

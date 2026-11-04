@@ -15,7 +15,7 @@ probe_modules_state
 sqm_state=$(probe_sqm "$mod_qdisc")
 
 # 2. Collect router self hostname and interface assets
-router_host=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "czw")
+router_host=$(cat /proc/sys/kernel/hostname 2>/dev/null || echo "OpenWrt")
 
 # 3. Assemble and persist static profile JSON via jshn
 mkdir -p /tmp
@@ -64,38 +64,11 @@ EOF
 # 4. State discovery & UCI reconciliation (only initialize on firstboot / unset, preserve user settings across reboots)
 [ -f /etc/config/nss_dashboard ] || touch /etc/config/nss_dashboard
 
-if ! uci -q get nss_dashboard.general >/dev/null; then
+if ! uci -q get nss_dashboard.security >/dev/null; then
 	uci -q batch <<-EOF
-		set nss_dashboard.general=nss_dashboard
-		set nss_dashboard.crypto=nss_dashboard
-		set nss_dashboard.clock=nss_dashboard
 		set nss_dashboard.security=nss_dashboard
+		set nss_dashboard.security.auto_block='1'
 	EOF
-
-	# Probe NSS driver state
-	if [ -d /sys/module/qca_nss_drv ] || [ -d /sys/kernel/debug/qca-ppe-nss ]; then
-		uci -q set nss_dashboard.general.enabled='1'
-	else
-		uci -q set nss_dashboard.general.enabled='0'
-	fi
-
-	# Probe EIP-197 crypto state
-	if [ -d /sys/module/qca_nss_crypto ] || [ -f /lib/firmware/ifpp.bin ]; then
-		[ -d /sys/module/qca_nss_crypto ] && uci -q set nss_dashboard.crypto.enabled='1' || uci -q set nss_dashboard.crypto.enabled='0'
-	else
-		uci -q set nss_dashboard.crypto.enabled='0'
-	fi
-
-	# Security auto-block defaults to on
-	uci -q set nss_dashboard.security.auto_block='1'
-
-	uci -q commit nss_dashboard
-fi
-
-# Frequency lifecycle: only discover & initialize if unset (first boot), never overwrite user-configured preference on reboot
-if [ -z "$(uci -q get nss_dashboard.clock.frequency)" ]; then
-	uci -q set nss_dashboard.clock=nss_dashboard
-	uci -q set nss_dashboard.clock.frequency="${cur_freq:-1478.4 MHz}"
 	uci -q commit nss_dashboard
 fi
 

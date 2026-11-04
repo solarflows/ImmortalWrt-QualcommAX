@@ -213,19 +213,19 @@ return baseclass.extend({
 	buildSpec: function(d, p) {
 		d = d || {};
 		p = p || {};
-		var cores = p.cores || d.cores || 2;
-		var rawFw = p.fw_version || d.fw_version || '12.5';
-		var fwMask = p.fw_mask || d.fw_mask || '0x36';
+		var cores = p.cores || d.cores || 0;
+		var rawFw = p.fw_version || d.fw_version || '';
+		var fwMask = p.fw_mask || d.fw_mask || '';
 		var fwShort = rawFw.replace(/^NSS\.(FW\.)?/, '');
-		var fwDisplay = 'FW ' + fwShort + (fwMask && fwMask !== '0x0' ? ' [' + fwMask + ']' : '');
+		var fwDisplay = fwShort ? ('FW ' + fwShort + (fwMask && fwMask !== '0x0' ? ' [' + fwMask + ']' : '')) : '';
 		var t = parseFloat(d.cpu_temp) || 0;
 
 		return {
-			soc: p.soc || d.soc || 'IPQ8074',
+			soc: p.soc || d.soc || '',
 			cores: cores,
-			isDualNpu: (cores !== 1),
-			npuLabel: (cores !== 1) ? 'NPU ×2' : 'NPU ×1',
-			freq: d.nss_freq || p.nss_freq || '1478.4 MHz',
+			isDualNpu: (cores > 1),
+			npuLabel: (cores > 1) ? 'NPU ×' + cores : 'NPU',
+			freq: d.nss_freq || p.nss_freq || '',
 			rawFw: rawFw,
 			fwShort: fwShort,
 			fwMask: fwMask,

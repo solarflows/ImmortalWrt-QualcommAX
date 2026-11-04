@@ -200,28 +200,23 @@ get_audit() {
 }
 
 get_settings() {
-	local freq=$(uci -q get nss_dashboard.clock.frequency)
-	[ -z "$freq" ] && freq=$(probe_nss_freq)
 	json_init
-	json_add_int "enabled" "$(uci -q get nss_dashboard.general.enabled || echo 1)"
-	json_add_int "crypto" "$(uci -q get nss_dashboard.crypto.enabled || echo 0)"
-	json_add_string "frequency" "${freq:-1478.4 MHz}"
+	json_add_string "frequency" "$(probe_nss_freq)"
 	json_add_int "auto_block" "$(uci -q get nss_dashboard.security.auto_block || echo 1)"
-	add_freq_table_object
+	probe_nss_frequencies
 	json_dump
 }
 
 set_settings() {
 	read -r input
 	json_load "$input"
-	json_get_var enabled "enabled"
-	json_get_var crypto "crypto"
 	json_get_var freq "frequency"
 	json_get_var auto_block "auto_block"
 
-	[ -n "$enabled" ] && uci -q set nss_dashboard.general.enabled="$enabled"
-	[ -n "$crypto" ] && uci -q set nss_dashboard.crypto.enabled="$crypto"
-	[ -n "$freq" ] && uci -q set nss_dashboard.clock.frequency="$freq"
+	if [ -n "$freq" ] && [ -x /usr/bin/nss_freq ]; then
+		/usr/bin/nss_freq "$freq" >/dev/null 2>&1
+	fi
+
 	[ -n "$auto_block" ] && uci -q set nss_dashboard.security.auto_block="$auto_block"
 	uci -q commit nss_dashboard
 
@@ -237,18 +232,6 @@ set_settings() {
 		uci -q commit network
 	fi
 
-	if [ -n "$freq" ]; then
-		sed -i "s/^nss_freq=.*/nss_freq='$freq'/" /tmp/nss_profile.env 2>/dev/null
-		sed -i "s/\"nss_freq\":\"[^\"]*\"/\"nss_freq\":\"$freq\"/" "$PROFILE_JSON" 2>/dev/null
-		if [ -x /usr/bin/nss_freq ]; then
-			case "$freq" in
-				*748*) /usr/bin/nss_freq mid >/dev/null 2>&1 ;;
-				*1478*) /usr/bin/nss_freq mid >/dev/null 2>&1 ;;
-				*1689*) /usr/bin/nss_freq high >/dev/null 2>&1 ;;
-			esac
-		fi
-	fi
-
 	json_init
 	json_add_boolean "success" 1
 	json_dump
@@ -256,7 +239,7 @@ set_settings() {
 
 case "$1" in
 	list)
-		echo '{"getProfile":{},"getMetrics":{},"getStatus":{},"getPorts":{},"getFlows":{},"getAudit":{},"getSettings":{},"setSettings":{"enabled":"bool","crypto":"bool","frequency":"str","auto_block":"bool"}}'
+		echo '{"getProfile":{},"getMetrics":{},"getStatus":{},"getPorts":{},"getFlows":{},"getAudit":{},"getSettings":{},"setSettings":{"frequency":"str","auto_block":"bool"}}'
 		;;
 	call)
 		case "$2" in

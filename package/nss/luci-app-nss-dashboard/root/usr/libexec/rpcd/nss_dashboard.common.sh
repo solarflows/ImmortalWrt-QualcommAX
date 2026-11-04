@@ -17,15 +17,31 @@ probe_soc() {
 		compat=$(tr '\0' '\n' < /sys/firmware/devicetree/base/compatible 2>/dev/null)
 	fi
 
+	local matched
+	matched=$(echo "$compat" | awk -F, '/qcom,ipq/ { print toupper($2); exit }')
+	if [ -n "$matched" ]; then
+		echo "$matched"
+		return
+	fi
+
 	case "$compat" in
-		*ipq60*|*qcom,ipq6018*) echo "IPQ6018" ;;
-		*ipq50*|*qcom,ipq5018*) echo "IPQ5018" ;;
-		*ipq807*)              echo "IPQ8074" ;;
-		*)                      echo "IPQ8074" ;;
+		*ipq60*) echo "IPQ6018" ;;
+		*ipq50*) echo "IPQ5018" ;;
+		*ipq807*) echo "IPQ8074" ;;
+		*) echo "" ;;
 	esac
 }
 
 probe_npu_cores() {
+	local dt_base=""
+	[ -d /proc/device-tree ] && dt_base=/proc/device-tree || dt_base=/sys/firmware/devicetree/base
+	local dt_cores
+	dt_cores=$(ls -d "$dt_base"/soc*/nss@* 2>/dev/null | wc -l)
+	if [ -n "$dt_cores" ] && [ "$dt_cores" -gt 0 ] 2>/dev/null; then
+		echo "$dt_cores"
+		return
+	fi
+
 	local soc="$1"
 	[ -z "$soc" ] && soc=$(probe_soc)
 
@@ -44,13 +60,9 @@ probe_nss_freq() {
 			cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
 		fi
 	fi
-	if [ -z "$cur_freq" ] && [ -r /proc/sys/dev/nss/clock/current_freq ]; then
-		cat /proc/sys/dev/nss/clock/current_freq >/dev/null 2>&1
-		local dmesg_hz
-		dmesg_hz=$(dmesg | grep -o 'Frequency Set to [0-9]*' | tail -n 1 | awk '{print $NF}')
-		if [ -n "$dmesg_hz" ] && [ "$dmesg_hz" -gt 0 ] 2>/dev/null; then
-			cur_freq=$(awk -v h="$dmesg_hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
-		fi
+	if [ -z "$cur_freq" ] && [ -s /tmp/nss_freq ]; then
+		cur_freq=$(cat /tmp/nss_freq 2>/dev/null | tr -d '[:space:]')
+		[ -n "$cur_freq" ] && cur_freq="$cur_freq MHz"
 	fi
 	if [ -z "$cur_freq" ] && [ -r /sys/kernel/debug/clk/nss_core_clk/clk_rate ]; then
 		local hz
@@ -70,36 +82,33 @@ probe_nss_freq() {
 			fi
 		fi
 	fi
-	if [ -z "$cur_freq" ] && [ -f /etc/config/nss_dashboard ]; then
-		cur_freq=$(uci -q get nss_dashboard.clock.frequency 2>/dev/null)
-	fi
-	if [ -z "$cur_freq" ]; then
-		local cores
-		cores=$(probe_npu_cores)
-		[ "$cores" -eq 1 ] && cur_freq="1056.0 MHz" || cur_freq="1478.4 MHz"
-	fi
 	echo "$cur_freq"
 }
 
-add_freq_table_object() {
-	local soc="${1:-$(probe_soc)}"
-	json_add_array "freq_table"
-	case "$soc" in
-		IPQ60*)
-			json_add_string "" "748.8 MHz"
-			json_add_string "" "1056.0 MHz"
-			json_add_string "" "1497.6 MHz"
-			;;
-		IPQ50*)
-			json_add_string "" "850.0 MHz"
-			json_add_string "" "1000.0 MHz"
-			;;
-		IPQ807*|*)
-			json_add_string "" "748.8 MHz"
-			json_add_string "" "1478.4 MHz"
-			json_add_string "" "1689.6 MHz"
-			;;
-	esac
+probe_nss_frequencies() {
+	local dt_node=""
+	local dt_base=""
+	[ -d /proc/device-tree ] && dt_base=/proc/device-tree || dt_base=/sys/firmware/devicetree/base
+	for n in "$dt_base"/soc*/nss*; do
+		if [ -r "$n/qcom,max-frequency" ]; then
+			dt_node="$n"
+			break
+		fi
+	done
+
+	local low_hz mid_hz max_hz
+	if [ -n "$dt_node" ]; then
+		[ -r "$dt_node/qcom,low-frequency" ] && low_hz=$(printf "%d" 0x$(hexdump -e '4/1 "%02x"' "$dt_node/qcom,low-frequency" 2>/dev/null))
+		[ -r "$dt_node/qcom,mid-frequency" ] && mid_hz=$(printf "%d" 0x$(hexdump -e '4/1 "%02x"' "$dt_node/qcom,mid-frequency" 2>/dev/null))
+		[ -r "$dt_node/qcom,max-frequency" ] && max_hz=$(printf "%d" 0x$(hexdump -e '4/1 "%02x"' "$dt_node/qcom,max-frequency" 2>/dev/null))
+	fi
+
+	json_add_array "frequencies"
+	for hz in "$low_hz" "$mid_hz" "$max_hz"; do
+		if [ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null; then
+			json_add_string "" "$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')"
+		fi
+	done
 	json_close_array
 }
 
@@ -286,7 +295,7 @@ add_dynamic_metrics() {
 
 	json_add_int "heartbeat" "${heartbeat:-0}"
 	json_add_double "nss_bytes" "${nss_bytes:-0}"
-	json_add_string "nss_freq" "${cur_freq:-1478.4 MHz}"
+	json_add_string "nss_freq" "$cur_freq"
 	json_add_int "core0_load" "${core0_load:-0}"
 	if [ -n "$core1_load" ]; then
 		json_add_int "core1_load" "$core1_load"

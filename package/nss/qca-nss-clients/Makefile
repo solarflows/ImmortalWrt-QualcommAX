@@ -136,6 +136,7 @@ define KernelPackage/qca-nss-drv-netlink
 	   +@NSS_DRV_IPV6_ENABLE \
 	   +@NSS_DRV_WIFIOFFLOAD_ENABLE
   FILES:=$(PKG_BUILD_DIR)/netlink/qca-nss-netlink.ko
+  AUTOLOAD:=$(call AutoProbe,qca-nss-netlink)
 endef
 
 define KernelPackage/qca-nss-drv-netlink/Description

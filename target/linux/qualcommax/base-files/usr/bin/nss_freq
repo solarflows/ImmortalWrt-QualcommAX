@@ -18,15 +18,15 @@ format_frequency() {
 }
 
 show_status() {
-	status_current="$(cat "$current_freq" 2>/dev/null)"
+	status_current="$(cat "$current_freq" 2>/dev/null | tr -d '[:space:]')"
 	if [ -z "$status_current" ]; then
+		# Compatibility fallback for kernels without 0004 sysctl fix
 		cat "$current_freq" >/dev/null 2>&1
 		nss_hz="$(dmesg | grep -o 'Frequency Set to [0-9]*' | tail -n 1 | awk '{print $NF}')"
 		[ -n "$nss_hz" ] && status_current="$nss_hz"
 	fi
-	[ -n "$status_current" ] || status_current="$(awk 'NF { print $1; exit }' "$current_freq" 2>/dev/null)"
 	[ -n "$status_current" ] || die "NSS frequency control is unavailable"
-	status_scale="$(cat "$auto_scale" 2>/dev/null)" || die "NSS frequency mode is unavailable"
+	status_scale="$(cat "$auto_scale" 2>/dev/null | tr -d '[:space:]')" || die "NSS frequency mode is unavailable"
 	case "$status_scale" in
 		1) status_mode="Auto" ;;
 		0) status_mode="Fixed" ;;
@@ -41,10 +41,12 @@ select_frequencies() {
 	[ -r "$compatible" ] || die "device-tree compatible data is unavailable"
 
 	if grep -q 'qcom,ipq6018' "$compatible"; then
+		low_frequency=187200000
 		mid_frequency=748800000
 		high_frequency=1497600000
 	elif grep -q 'qcom,ipq8074' "$compatible"; then
-		mid_frequency=748800000
+		low_frequency=748800000
+		mid_frequency=1497600000
 		high_frequency=1689600000
 	else
 		die "unsupported platform"
@@ -64,11 +66,14 @@ case "${1:-status}" in
 		show_status
 		exit 0
 		;;
-	mid|high)
+	low|mid|high)
 		level="$1"
 		;;
+	*[0-9]*)
+		req_freq="$1"
+		;;
 	*)
-		echo "Usage: nss_freq {mid|high|status}" >&2
+		echo "Usage: nss_freq {low|mid|high|status|<frequency>}" >&2
 		exit 2
 		;;
 esac
@@ -76,10 +81,24 @@ esac
 select_frequencies
 [ -w "$current_freq" ] || die "run as root after the NSS driver has initialized"
 
-case "$level" in
-	mid) target_frequency=$mid_frequency ;;
-	high) target_frequency=$high_frequency ;;
-esac
+if [ -n "$level" ]; then
+	case "$level" in
+		low) target_frequency=$low_frequency ;;
+		mid) target_frequency=$mid_frequency ;;
+		high) target_frequency=$high_frequency ;;
+	esac
+elif [ -n "$req_freq" ]; then
+	case "$req_freq" in
+		*748*) level="low"; target_frequency=$low_frequency ;;
+		*1497*) level="mid"; target_frequency=$mid_frequency ;;
+		*1689*) level="high"; target_frequency=$high_frequency ;;
+		*187*) level="low"; target_frequency=$low_frequency ;;
+		*)
+			target_frequency=$(echo "$req_freq" | tr -cd '0-9')
+			level="custom"
+			;;
+	esac
+fi
 
 printf '%s\n' "$target_frequency" > "$current_freq" || die "failed to set NSS frequency"
 save_level

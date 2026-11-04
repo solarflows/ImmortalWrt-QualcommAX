@@ -26,7 +26,7 @@ var callGetSettings = rpc.declare({
 var callSetSettings = rpc.declare({
 	object: 'luci.nss_dashboard',
 	method: 'setSettings',
-	params: [ 'enabled', 'crypto', 'frequency', 'auto_block' ]
+	params: [ 'frequency', 'auto_block' ]
 });
 
 var callGetPorts = rpc.declare({
@@ -377,7 +377,7 @@ function moduleChip(name, state, customLabel, customTitle) {
 var POLL_BADGE_DEFS = {
 	paused:  { cls: 'badge-warning', icon: '⏸ ', text: _('已暂停'),      title: _('当前档位：已手动暂停轮询。点击切换至「4s 实时更新 (自适应)」') },
 	hovered: { cls: 'badge-info', icon: '🔒 ', text: _('排序冻结'),    title: _('鼠标正在表格内浏览：行序已冻结、数据持续原位更新、新行追加表尾；移出表格恢复自动排序') },
-	keep:    { cls: 'badge-info',    dot: true,   text: _('保持 4s 更新'), title: _('当前档位：保持 4s 更新（常亮盯盘模式，禁用空闲退避与失焦降频）。点击切换至「暂停轮询」') },
+	keep:    { cls: 'badge-info',    dot: true,   text: _('保持 4s 更新'), title: _('当前档位：保持 4s 更新（禁用空闲退避与失焦休眠）。点击切换至「暂停轮询」') },
 	hidden:  { cls: 'badge-neutral', text: _('后台休眠'), still: true },
 	idle:    { cls: 'badge-neutral', icon: '⏱️ ', text: _('挂机省电'),    title: _('当前处于挂机省电模式（24s 轮询）。移动鼠标立即唤醒，或点击切换至「保持 4s 更新 (不休眠)」') },
 	active:  { cls: 'badge-neutral', dot: 'success', text: _('4s 实时更新'), title: _('当前档位：4s 实时更新（自适应省电）。点击切换至「保持 4s 更新 (不休眠)」') }
@@ -485,7 +485,7 @@ function renderStickyBar(d, p, onRefreshToggle, onForceRefresh) {
 	// ── 仓 2: 硬件遥测 (Telemetry) ──
 	var bayTelemetry = E('div', { 'class': 'bay-card bay-divider-right' }, [
 		E('div', { 'class': 'bay-title-bar' }, [
-			E('span', { 'title': _('硬件线速吞吐速率、微码心跳、ECM 并发流数、双栈分布、直通状态与安全协同防御') }, [
+			E('span', { 'title': _('硬件线速吞吐速率、微码心跳、ECM 并发流数、双栈分布、直通状态与冲突规避') }, [
 				'📊 ' + _('硬件遥测')
 			]),
 			E('span', { 'style': 'font-weight:400; color:var(--text-color-medium); font-size:10px;' }, [
@@ -570,7 +570,7 @@ function renderConflictBanner(d) {
 	}, [
 		E('strong', {}, [ '⚠️ ' + _('内核协议栈配置与 NSS 硬件加速冲突') ]),
 		E('div', { 'style': 'margin-top:4px;' }, [
-			_('检测到系统开启了软件流量分流 (flow_offloading=1)。数据包将被提前截获跳过 Conntrack 通知链，导致 ECM 硬件加速失效与连接撕裂。系统安全防护已自动阻断该项影响。建议手动关闭此冲突项：可直接前往'),
+			_('检测到系统启用了软件流量分流 (flow_offloading=1)。数据包会被提前截获并跳过 Conntrack 通知链，导致 ECM 无法建立硬件加速流。插件已自动禁用该冲突配置。建议前往确认：可直接前往'),
 			E('a', {
 				'href': L.url('admin/network/network'),
 				'style': 'color:var(--primary-color-high); font-weight:bold; text-decoration:underline; margin-left:4px;'
@@ -788,133 +788,56 @@ function renderStatusCard(d, p) {
 	return E('div', {}, [ section1, section2 ]);
 }
 
-// ── 4. 子卡 B：控制与防御 (Controls) ──
-function formatFreqLabel(val, soc) {
-	if (!val) return '';
-	var s = soc || 'IPQ8074';
-	if (s.indexOf('IPQ60') !== -1) {
-		if (val.indexOf('748.8') !== -1) return _('稳健节能 (%s)').format(val);
-		if (val.indexOf('1056.0') !== -1) return _('标准均衡 (%s)').format(val);
-		if (val.indexOf('1497.6') !== -1) return _('极速超频 (%s - 满血)').format(val);
-	} else if (s.indexOf('IPQ50') !== -1) {
-		if (val.indexOf('850.0') !== -1) return _('标准节能 (%s)').format(val);
-		if (val.indexOf('1000.0') !== -1) return _('极速超频 (%s - 满血)').format(val);
-	} else {
-		if (val.indexOf('748.8') !== -1) return _('稳健节能 (%s)').format(val);
-		if (val.indexOf('1478.4') !== -1) return _('IPQ807x 标准 (%s - 推荐)').format(val);
-		if (val.indexOf('1689.6') !== -1) return _('极速超频 (%s - 满血)').format(val);
-	}
-	return val;
-}
-
+// ── 4. 子卡 B：运行设置 (Settings) ──
 function renderControlCard(s, d, p, onSaved) {
-	var isDualNpu = (d.cores !== 1);
+	var isDualNpu = (d && d.cores !== 1);
 	var npuLabel = isDualNpu ? 'NPU ×2' : 'NPU ×1';
-
-	var cbEnabled = E('input', {
-		'type': 'checkbox',
-		'class': 'cbi-checkbox',
-		'style': 'width:18px; height:18px; cursor:pointer;',
-		'checked': (s.enabled === 1) ? '' : null
-	});
-
-	var cbCrypto = E('input', {
-		'type': 'checkbox',
-		'class': 'cbi-checkbox',
-		'style': 'width:18px; height:18px; cursor:pointer;',
-		'checked': (s.crypto === 1) ? '' : null
-	});
-
-	var soc = (p && p.soc) ? p.soc : ((d && d.soc) ? d.soc : 'IPQ8074');
-	var tableList = (s && s.freq_table && s.freq_table.length) ? s.freq_table : ((p && p.freq_table && p.freq_table.length) ? p.freq_table : []);
-	if (!tableList.length) {
-		if (soc.indexOf('IPQ60') !== -1) {
-			tableList = ['748.8 MHz', '1056.0 MHz', '1497.6 MHz'];
-		} else if (soc.indexOf('IPQ50') !== -1) {
-			tableList = ['850.0 MHz', '1000.0 MHz'];
-		} else {
-			tableList = ['748.8 MHz', '1478.4 MHz', '1689.6 MHz'];
-		}
-	}
-
-	var curVal = (s && s.frequency) ? s.frequency : ((d && d.nss_freq) ? d.nss_freq : '1478.4 MHz');
-	var matched = false;
-	var freqOptions = tableList.map(function(item) {
-		var val = (typeof(item) === 'string') ? item : (item.value || '');
-		var lbl = (typeof(item) === 'object' && item.label) ? _(item.label) : formatFreqLabel(val, soc);
-		var isSel = (curVal && (curVal === val || curVal.indexOf(val.split(' ')[0]) !== -1));
-		if (isSel) matched = true;
-		return E('option', { 'value': val, 'selected': isSel ? '' : null }, [ lbl ]);
-	});
-
-	if (!matched && curVal) {
-		freqOptions.unshift(E('option', { 'value': curVal, 'selected': '' }, [ curVal + ' (' + _('当前运行') + ')' ]));
-	}
+	var curFreq = (s && s.frequency) ? s.frequency : ((p && p.nss_freq) ? p.nss_freq : ((d && d.nss_freq) ? d.nss_freq : ''));
+	var freqList = (s && Array.isArray(s.frequencies) && s.frequencies.length) ? s.frequencies : (curFreq ? [ curFreq ] : []);
 
 	var selectFreq = E('select', {
 		'class': 'cbi-input-select',
 		'style': 'padding:4px 8px; font-size:13px; max-width:320px; width:100%;'
-	}, freqOptions);
+	}, freqList.map(function(val) {
+		var isSel = (curFreq && (curFreq === val || curFreq.indexOf(val.split(' ')[0]) !== -1));
+		return E('option', { 'value': val, 'selected': isSel ? '' : null }, [ val ]);
+	}));
 
 	var cbAutoBlock = E('input', {
 		'type': 'checkbox',
 		'class': 'cbi-checkbox',
 		'style': 'width:18px; height:18px; cursor:pointer;',
-		'checked': (s.auto_block !== 0) ? '' : null
+		'checked': (s && s.auto_block !== 0) ? '' : null
 	});
 
 	var table = E('table', { 'class': 'table nss-control-table' }, [
 		E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td left', 'width': '33%' }, [
-				E('label', {}, [ E('strong', {}, [ _('NSS 硬件网络加速总开关') ]) ]),
+				E('label', {}, [ E('strong', {}, [ _('NSS 协处理器运行主频') ]) ]),
 				E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
-					_('开启后由 NSS 协处理器接管有线与无线网络流量线速转发')
+					_('当前芯片硬件时钟频率 (配置由系统 nss_freq 服务接管)')
 				])
 			]),
 			E('td', { 'class': 'td left' }, [
-				E('label', { 'style': 'display:inline-flex; align-items:center; gap:8px; cursor:pointer;' }, [
-					cbEnabled,
-					E('span', { 'style': 'font-weight:600; color:var(--success-color-high);' }, [ _('启用 (即时生效)') ])
+				E('div', { 'style': 'display:flex; flex-direction:column; gap:6px;' }, [
+					selectFreq,
+					E('div', { 'style': 'font-size:11px; color:var(--text-color-medium);' }, [
+						_('当前运行时钟: ') + (npuLabel ? npuLabel + ' @ ' : '') + (curFreq || _('检测中…'))
+					])
 				])
 			])
 		]),
 		E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td left' }, [
-				E('label', {}, [ E('strong', {}, [ _('NSS EIP-197 硬件加解密引擎 (Crypto Offload)') ]) ]),
+				E('label', {}, [ E('strong', {}, [ _('内核冲突配置自动规避 (Auto-Block Conflict)') ]) ]),
 				E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
-					_('启用高通独立安全协处理器，卸载 IPsec 与网络大包加解密 (关闭时使用 CPU ARMv8 CE 纳秒级指令)')
-				])
-			]),
-			E('td', { 'class': 'td left' }, [
-				E('div', { 'style': 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
-					E('label', { 'style': 'display:inline-flex; align-items:center; gap:8px; cursor:pointer;' }, [
-						cbCrypto,
-						E('span', { 'style': 'font-weight:600;' }, [ _('启用 EIP-197 加速') ])
-					]),
-					E('span', { 'class': 'badge badge-warning' }, [ '⚠️ ' + _('修改后需重启生效') ])
-				])
-			])
-		]),
-		E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td left' }, [
-				E('label', {}, [ E('strong', {}, [ _('NSS 核心主频调节') ]) ]),
-				E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
-					_('调节 NSS 锁相环时钟频率 (当前识别目标: ') + npuLabel + ')'
-				])
-			]),
-			E('td', { 'class': 'td left' }, [ selectFreq ])
-		]),
-		E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td left' }, [
-				E('label', {}, [ E('strong', {}, [ _('内核冲突配置自动阻断墙 (Auto-Block Protection)') ]) ]),
-				E('div', { 'style': 'font-size:12px; color:var(--text-color-medium); margin-top:2px;' }, [
-					_('主动拦截外部 flow_offloading 与 packet_steering，防止硬件流表撕裂丢包')
+					_('自动禁用外部软件 flow_offloading 与 packet_steering，避免流表冲突丢包')
 				])
 			]),
 			E('td', { 'class': 'td left' }, [
 				E('label', { 'style': 'display:inline-flex; align-items:center; gap:8px; cursor:pointer;' }, [
 					cbAutoBlock,
-					E('span', { 'style': 'font-weight:600; color:var(--success-color-high);' }, [ _('启用主动阻断防御') ])
+					E('span', { 'style': 'font-weight:600; color:var(--success-color-high);' }, [ _('启用冲突自动规避') ])
 				])
 			])
 		])
@@ -925,24 +848,20 @@ function renderControlCard(s, d, p, onSaved) {
 		'style': 'margin-top:12px;',
 		'click': function(ev) {
 			ev.preventDefault();
-			var enabled = cbEnabled.checked ? 1 : 0;
-			var crypto = cbCrypto.checked ? 1 : 0;
 			var freq = selectFreq.value;
 			var auto_block = cbAutoBlock.checked ? 1 : 0;
 
 			ui.showModal(_('正在保存 NSS 配置…'), [
-				E('p', { 'class': 'spinning' }, [ _('正在写入配置并执行状态对齐…') ])
+				E('p', { 'class': 'spinning' }, [ _('正在写入配置并对齐时钟…') ])
 			]);
 
-			callSetSettings(enabled, crypto, freq, auto_block).then(function() {
-				s.enabled = enabled;
-				s.crypto = crypto;
-				s.frequency = freq;
-				s.auto_block = auto_block;
-				if (d) d.nss_freq = freq;
-				if (p) p.nss_freq = freq;
+			callSetSettings(freq, auto_block).then(function() {
+				if (s) {
+					s.frequency = freq;
+					s.auto_block = auto_block;
+				}
 				if (onSaved) onSaved();
-				ui.addNotification(null, E('p', {}, [ _('NSS 硬件控制配置已成功保存并应用。') ]), 'info');
+				ui.addNotification(null, E('p', {}, [ _('NSS 运行设置已成功保存并应用。') ]), 'info');
 				ui.hideModal();
 			}).catch(function(err) {
 				ui.addNotification(null, E('p', {}, [ _('保存配置失败: ') + err.message ]), 'danger');
@@ -953,7 +872,7 @@ function renderControlCard(s, d, p, onSaved) {
 
 	var moduleBox = E('div', { 'class': 'cbi-section' }, [
 		E('h3', { 'class': 'cbi-section-title' }, [
-			E('span', {}, [ _('NSS 硬件协同控制与冲突防御') ]),
+			E('span', {}, [ _('NSS 运行设置与冲突规避') ]),
 			badge('badge-info', _('热生效 / 重启约束'))
 		]),
 		E('div', { 'class': 'cbi-section-node' }, [ table ])
@@ -1263,7 +1182,7 @@ function processFlowsData(d, hostHints) {
 		});
 
 		var routerInfo = d.router || (staticProfile && staticProfile.router) || getSessionData('nss_router_device') || {};
-		var routerHostname = (routerInfo.hostname || window.location.hostname || 'czw').replace(/\.lan$/i, '');
+		var routerHostname = (routerInfo.hostname || window.location.hostname || 'OpenWrt').replace(/\.lan$/i, '');
 		var routerIps = Array.isArray(routerInfo.ips) ? routerInfo.ips.slice() : [];
 		if (d.router && Array.isArray(d.router.ips)) {
 			d.router.ips.forEach(function(rip) {
@@ -1826,7 +1745,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 				_('硬件流表连接明细依赖 nssqos-conns 工具。该工具为可选特性组件，不影响底层 NSS 硬件网络加速核心线速转发功能。若需使用此大盘，可在编译配置中添加 nssqos 包。')
 			]),
 			E('p', { 'style': 'margin-top:6px; font-size:11px; color:var(--text-color-low);' }, [
-				_('系统已自动触发会话级防御熔断，已停止后台流表周期轮询 (0 后台开销)。')
+				_('未检测到组件，已暂停后台流表数据轮询以降低系统资源开销。')
 			]),
 			E('button', {
 				'class': 'btn cbi-button cbi-button-action',
@@ -1836,7 +1755,7 @@ function renderFlowsCard(d, onSubTabSwitch, hostHints, onRefreshToggle, onProbeT
 					sessionStorage.removeItem('nss_flows_installed');
 					if (onProbeTrigger) onProbeTrigger();
 				}
-			}, [ _('手动探活与重检 (Half-Open Probe)') ])
+			}, [ _('重试检测组件') ])
 		]);
 	} else if (flowSubTab === 'clients') {
 		clientTable.update(clientsList);
@@ -2388,7 +2307,7 @@ return view.extend({
 				},
 				{
 					id: 'control',
-					label: _('控制防御'),
+					label: _('运行设置'),
 					render: function() {
 						dom.content(subCardContainer, renderControlCard(settingsData, metricsData, p, renderSticky));
 					}

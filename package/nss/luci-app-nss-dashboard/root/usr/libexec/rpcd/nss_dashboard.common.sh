@@ -57,18 +57,22 @@ probe_nss_freq() {
 		local hz
 		hz=$(cat /proc/sys/dev/nss/clock/current_freq 2>/dev/null | tr -d '[:space:]')
 		if [ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null; then
-			cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+			cur_freq="$(( hz / 1000000 )).$(( (hz % 1000000) / 100000 )) MHz"
 		fi
 	fi
 	if [ -z "$cur_freq" ] && [ -s /tmp/nss_freq ]; then
-		cur_freq=$(cat /tmp/nss_freq 2>/dev/null | tr -d '[:space:]')
-		[ -n "$cur_freq" ] && cur_freq="$cur_freq MHz"
+		local tf
+		read -r tf < /tmp/nss_freq 2>/dev/null
+		tf=$(echo "$tf" | tr -d '[:space:]')
+		tf="${tf%MHz}"
+		tf="${tf%mhz}"
+		[ -n "$tf" ] && cur_freq="$tf MHz"
 	fi
 	if [ -z "$cur_freq" ] && [ -r /sys/kernel/debug/clk/nss_core_clk/clk_rate ]; then
 		local hz
-		read -r hz < /sys/kernel/debug/clk/nss_core_clk/clk_rate 2>/dev/null
+		hz=$(cat /sys/kernel/debug/clk/nss_core_clk/clk_rate 2>/dev/null | tr -d '[:space:]')
 		if [ -n "$hz" ] && [ "$hz" -gt 0 ] 2>/dev/null; then
-			cur_freq=$(awk -v h="$hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+			cur_freq="$(( hz / 1000000 )).$(( (hz % 1000000) / 100000 )) MHz"
 		fi
 	fi
 	if [ -z "$cur_freq" ]; then
@@ -78,7 +82,7 @@ probe_nss_freq() {
 			local dt_hz
 			dt_hz=$(printf "%d" 0x$(hexdump -e '4/1 "%02x"' "$dt_max_file" 2>/dev/null))
 			if [ -n "$dt_hz" ] && [ "$dt_hz" -gt 0 ] 2>/dev/null; then
-				cur_freq=$(awk -v h="$dt_hz" 'BEGIN { printf "%.1f MHz", h / 1000000 }')
+				cur_freq="$(( dt_hz / 1000000 )).$(( (dt_hz % 1000000) / 100000 )) MHz"
 			fi
 		fi
 	fi
@@ -258,11 +262,8 @@ add_dynamic_metrics() {
 			/sys/kernel/debug/qca-nss-drv/stats/ipv4 /sys/kernel/debug/qca-nss-drv/stats/ipv6 2>/dev/null || echo 0)
 	fi
 
-	local cur_freq=""
-	if [ -f /tmp/nss_profile.env ]; then
-		cur_freq=$(grep '^nss_freq=' /tmp/nss_profile.env 2>/dev/null | cut -d"'" -f2)
-	fi
-	[ -z "$cur_freq" ] && cur_freq=$(probe_nss_freq)
+	local cur_freq
+	cur_freq=$(probe_nss_freq)
 
 	local ecm_v4=0 ecm_v6=0 ecm_total=0
 	for f in /sys/kernel/debug/ecm/ecm_*_ipv4/accelerated_count; do

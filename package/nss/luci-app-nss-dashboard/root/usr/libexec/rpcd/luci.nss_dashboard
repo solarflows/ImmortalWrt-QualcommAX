@@ -54,7 +54,7 @@ get_status() {
 	[ -z "$cores" ] && cores=$(probe_npu_cores "$soc")
 	[ -z "$fw_ver" ] && fw_ver=$(probe_fw_version)
 	[ -z "$fw_mask" ] && fw_mask=$(probe_fw_mask)
-	[ -z "$nss_freq" ] && nss_freq=$(probe_nss_freq)
+	nss_freq=$(probe_nss_freq)
 	[ -z "$sqm_state" ] && sqm_state=$(probe_sqm)
 
 	json_init
@@ -215,6 +215,11 @@ set_settings() {
 
 	if [ -n "$freq" ] && [ -x /usr/bin/nss_freq ]; then
 		/usr/bin/nss_freq "$freq" >/dev/null 2>&1
+		local new_freq
+		new_freq=$(probe_nss_freq)
+		if [ -f "$PROFILE_ENV" ]; then
+			sed -i "s|^nss_freq=.*|nss_freq='$new_freq'|" "$PROFILE_ENV" 2>/dev/null
+		fi
 	fi
 
 	[ -n "$auto_block" ] && uci -q set nss_dashboard.security.auto_block="$auto_block"

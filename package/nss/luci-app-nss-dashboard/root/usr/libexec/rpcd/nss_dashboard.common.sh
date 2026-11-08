@@ -196,7 +196,12 @@ probe_modules_state() {
 }
 
 probe_sqm() {
-	local qdisc_mod="${1:-0}"
+	local qdisc_mod="$1"
+	if [ -z "$qdisc_mod" ]; then
+		[ -n "$mod_qdisc" ] && qdisc_mod="$mod_qdisc"
+		[ -z "$qdisc_mod" ] && [ -f "$MODULES_CACHE" ] && qdisc_mod=$(grep '^mod_qdisc=' "$MODULES_CACHE" 2>/dev/null | cut -d= -f2)
+		qdisc_mod="${qdisc_mod:-0}"
+	fi
 	local sqm_state=-1
 	if [ -x /etc/init.d/sqm ]; then
 		if [ "$(uci -q get sqm.@queue[0].enabled 2>/dev/null || echo 0)" = "1" ]; then

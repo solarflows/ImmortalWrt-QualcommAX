@@ -238,7 +238,7 @@ index 0448de0..10edf23 100644
  	memset(&cmd, 0, sizeof(cmd));
  	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
  	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
-@@ -755,12 +805,7 @@ static int ath11k_dp_reo_cache_flush(struct ath11k_base *ab,
+@@ -755,13 +805,8 @@ static int ath11k_dp_reo_cache_flush(struct ath11k_base *ab,
  	ret = ath11k_dp_tx_send_reo_cmd(ab, rx_tid,
  					HAL_REO_CMD_FLUSH_CACHE,
  					&cmd, ath11k_dp_reo_cmd_free);
@@ -255,7 +255,7 @@ index 0448de0..10edf23 100644
 +	return ret;
  }
  
-@@ -770,18 +815,43 @@ static void ath11k_dp_rx_tid_del_func(struct ath11k_dp *dp, void *ctx,
+@@ -770,20 +815,45 @@ static void ath11k_dp_rx_tid_del_func(struct ath11k_dp *dp, void *ctx,
  {
  	struct ath11k_base *ab = dp->ab;
 -	struct dp_rx_tid *rx_tid = ctx;
@@ -271,6 +271,8 @@ index 0448de0..10edf23 100644
  		goto free_desc;
  	} else if (status != HAL_REO_CMD_SUCCESS) {
  		/* Shouldn't happen! Cleanup in case of other failure? */
+ 		ath11k_warn(ab, "failed to delete rx tid %d hw descriptor %d\n",
+ 			    rx_tid->tid, status);
  		return;
  	}
  

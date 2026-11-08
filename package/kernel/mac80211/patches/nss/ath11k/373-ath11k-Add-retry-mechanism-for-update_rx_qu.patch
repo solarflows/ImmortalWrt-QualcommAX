@@ -238,7 +238,7 @@ index 0448de0..10edf23 100644
  	memset(&cmd, 0, sizeof(cmd));
  	cmd.addr_lo = lower_32_bits(rx_tid->paddr);
  	cmd.addr_hi = upper_32_bits(rx_tid->paddr);
-@@ -755,27 +805,24 @@ static void ath11k_dp_reo_cache_flush(struct ath11k_base *ab,
+@@ -755,12 +805,7 @@ static int ath11k_dp_reo_cache_flush(struct ath11k_base *ab,
  	ret = ath11k_dp_tx_send_reo_cmd(ab, rx_tid,
  					HAL_REO_CMD_FLUSH_CACHE,
  					&cmd, ath11k_dp_reo_cmd_free);
@@ -255,24 +255,22 @@ index 0448de0..10edf23 100644
 +	return ret;
  }
  
- static void ath11k_dp_rx_tid_del_func(struct ath11k_dp *dp, void *ctx,
- 				      enum hal_reo_cmd_status status)
+@@ -770,18 +815,43 @@ static void ath11k_dp_rx_tid_del_func(struct ath11k_dp *dp, void *ctx,
  {
  	struct ath11k_base *ab = dp->ab;
 -	struct dp_rx_tid *rx_tid = ctx;
 +	struct dp_rx_tid *rx_tid = ctx, *update_rx_tid;
  	struct dp_reo_cache_flush_elem *elem, *tmp;
 +	struct dp_reo_update_rx_queue_elem *qelem, *qtmp;
-+	struct list_head flush_list;
-+
-+	INIT_LIST_HEAD(&flush_list);
+ 	struct list_head flush_list;
+ 
+ 	INIT_LIST_HEAD(&flush_list);
  
  	if (status == HAL_REO_CMD_DRAIN) {
 +		ab->soc_stats.hal_reo_cmd_drain++;
  		goto free_desc;
  	} else if (status != HAL_REO_CMD_SUCCESS) {
  		/* Shouldn't happen! Cleanup in case of other failure? */
-@@ -781,6 +828,29 @@ static void ath11k_dp_rx_tid_del_func(struct ath11k_dp *dp, void *ctx,
  		return;
  	}
  

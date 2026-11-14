@@ -136,7 +136,7 @@ index 9b118bf..68ec27e 100644
  	ath11k_core_pdev_suspend_target(ab);
  	ath11k_hif_irq_disable(ab);
  	ath11k_dp_pdev_free(ab);
-@@ -2393,6 +2411,10 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
+@@ -2472,6 +2490,10 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
  	int ret;
  
  	mutex_lock(&ab->core_lock);
@@ -144,9 +144,9 @@ index 9b118bf..68ec27e 100644
 +	ath11k_nss_teardown(ab);
 +	ab->nss.enabled = false;
 +
+ 	ath11k_hif_irq_disable(ab);
+ 	ath11k_hif_ce_irq_disable(ab);
  	ath11k_thermal_unregister(ab);
- 
- 	/*
 @@ -2738,6 +2760,10 @@ int ath11k_core_pre_init(struct ath11k_base *ab)
  		ath11k_err(ab, "failed to pre init firmware: %d", ret);
  		return ret;

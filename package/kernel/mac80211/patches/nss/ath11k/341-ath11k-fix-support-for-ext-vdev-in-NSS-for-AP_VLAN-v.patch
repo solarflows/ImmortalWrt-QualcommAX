@@ -40,9 +40,9 @@ diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/a
 index b7284de..74177a4 100644
 --- a/drivers/net/wireless/ath/ath11k/core.c
 +++ b/drivers/net/wireless/ath/ath11k/core.c
-@@ -2448,6 +2448,11 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
+@@ -2500,6 +2500,11 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
  
- 	clear_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 	ab->free_vdev_map = (1LL << (ab->num_radios * TARGET_NUM_VDEVS(ab))) - 1;
  
 +	/* We have disabled NSS Offload support in the starting.
 +	 * Re-enabling it if it was originally enabled in the MODULE_PARM_DESC.
@@ -51,4 +51,4 @@ index b7284de..74177a4 100644
 +
  	ret = ath11k_core_qmi_firmware_ready(ab);
  	if (ret)
- 		goto err_hal_srng_deinit;
+ 		return ret;

@@ -38,9 +38,6 @@ index 1dd3914..2738f66 100644
  	/* TCL Completion, REO Dest, ERR, Exception and h2rxdma rings are offloaded
  	 * to nss when its enabled, hence don't enable these interrupts
 @@ -560,6 +562,9 @@ static int ath11k_ahb_config_ext_irq(struct ath11k_base *ab)
- 		if (!irq_grp->napi_ndev) {
- 			ret = -ENOMEM;
- 			irq_grp->num_irq = 0;
  			goto err_request_irq;
  		}
  

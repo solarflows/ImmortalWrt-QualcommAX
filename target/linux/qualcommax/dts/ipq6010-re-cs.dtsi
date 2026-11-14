@@ -49,7 +49,6 @@
 		regulator-max-microvolt = <5000000>;
 		gpios = <&tlmm 22 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
-		regulator-boot-on;
 	};
 };
 
@@ -80,12 +79,17 @@
 };
 
 &qusb_phy_0 {
-	vdd-supply = <&usb_vbus>;
+&qusb_phy_0 {
 	status = "okay";
 };
 
 &rpm {
 	status = "disabled";
+};
+
+&usb3 {
+	vbus-supply = <&usb_vbus>;
+};
 };
 
 &sdhc {

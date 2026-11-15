@@ -319,6 +319,7 @@ define Device/netgear_rbr750
 	$(call Device/netgear_rbx750)
 	DEVICE_MODEL := RBR750
 	NETGEAR_BOARD_ID := U12H415T00_NETGEAR
+	NO_ROOTFS_DATA := 1
 endef
 TARGET_DEVICES += netgear_rbr750
 

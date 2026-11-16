@@ -174,13 +174,18 @@ platform_do_upgrade() {
 		fi
 		nand_do_upgrade "$1"
 		;;
+	netgear,rbr750)
+		CI_KERN_UBIPART="rootfs"
+		CI_ROOT_UBIPART="rootfs"
+		CI_DATA_UBIPART="reserved2"
+		nand_do_upgrade "$1"
+		;;
 	arcadyan,aw1000|\
 	cmcc,rm2-6|\
 	compex,wpq873|\
 	dynalink,dl-wrx36|\
 	edimax,cax1800|\
 	netgear,rax120v2|\
-	netgear,rbr750|\
 	netgear,rbr850|\
 	netgear,rbs750|\
 	netgear,rbs850|\

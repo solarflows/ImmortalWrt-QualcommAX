@@ -1,85 +1,166 @@
-# OpenWrt with NSS hardware offload for IPQ807x and IPQ60xx
+# ImmortalWrt QualcommAX (NSS-EDMA) 固件编译工程
 
-This is OpenWrt main with Qualcomm NSS hardware offload for IPQ807x and
-IPQ60xx (IPQ6018) routers, such as the Xiaomi AX3600, Redmi AX6, Linksys
-MX4300 and MR7350, and GL.iNet GL-AX1800. The NSS firmware runs on top of
-the upstream `qca_edma` and `qca_ppe` ethernet and DSA drivers on kernel
-6.18. It does not use the out-of-tree `qca-nss-dp` and `qca-ssdk` drivers.
+本项目基于官方 OpenWrt / ImmortalWrt Master 最新基线，深度整合高通 IPQ807x / IPQ60xx 原生 NSS 硬件加速体系（NSS-EDMA / ECM 直通架构），为 Netgear Orbi RBR750、小米 AX3600、红米 AX6、Linksys MX4300/MR7350 等机型提供工业级性能加速、全套已知硬件缺陷修复与现代化生态适配。
 
-Offloaded: IPv4 NAT and IPv6 routing through ECM, PPPoE, 802.1Q VLAN,
-bridging, multicast snooping, the NSS qdiscs for SQM, and ath11k Wi-Fi
-offload. 802.11s mesh offload needs the 11.4 NSS firmware (the mesh
-images). The full support matrix is in the wiki.
+---
 
-IPQ60xx support is new and lightly tested. The maintainer has no IPQ60xx
-hardware, so reports from IPQ60xx users are welcome.
+## 一、 核心特性与架构定位
 
-## Images
+- **原生 NSS-EDMA / PPE 驱动架构**：运行在 Linux 6.6/6.18 内核之上，基于官方原生 `qca_edma` 与 `qca_ppe` 驱动；**完全摒弃了旧时代破坏网络栈规范的 `qca-nss-dp` 与闭源 `qca-ssdk`**；
+- **全栈硬件分载 (NSS Hardware Offload)**：支持 IPv4 NAT、IPv6 路由、PPPoE、802.1Q VLAN、Bridge 桥接、Multicast IGMP/MLD Snooping、用于 SQM 的 NSS Qdisc 硬件队列、以及 `ath11k` Wi-Fi 无线硬件卸载；
+- **四层分支解耦流水线**：底盘纯净追踪官方 Master，中间层解耦承载驱动与调优，顶层生产发布与主控调度分离，便于后续维护者无损变基（Rebase）与定期安全合入；
+- **自研工件与体验优化**：
+  - **Netgear Orbi RBR750 原生分区**：采用官方 `CI_DATA_UBIPART="reserved2"`，彻底废弃易碎的 preinit 胶水脚本，并销毁废弃卷永久释放 34.5MB SquashFS 空间；
+  - **`luci-app-nss-dashboard` 工业级重构**：后端 RPC 纯无状态化、前端 V8 动态渲染、33% 栅格对齐、Native Hover 体验优化；
+  - **网络加速与出海生态**：集成 SONiC FullCone NAT1 套件与 `zapret2` 种子。
 
-Prebuilt images for every IPQ807x board, and every IPQ60xx board with an
-NSS node in its device tree, are on the
-[Qualcommax_NSS_Builder releases](https://github.com/JuliusBairaktaris/Qualcommax_NSS_Builder/releases)
-page. IPQ60xx images are in the `ipq60xx-1g` and `ipq60xx-512m` groups.
-Each build comes in a default and a mesh flavour.
+---
 
-## Documentation
+## 二、 四层分支架构说明 (Branch Architecture)
 
-The [wiki](https://github.com/JuliusBairaktaris/openwrt-nss-edma/wiki)
-covers the architecture, runtime operation, SQM, hardware support and
-known limitations.
+仓库采用严格的解耦堆叠模型，任何层级的改动清晰可追溯：
 
-## Branch layout
+```text
+[base/openwrt-upstream]  ── 官方 OpenWrt Master 纯净镜像 (零私有侵入，随时快进同步)
+         │
+         ▼ (rebase)
+[layer/julius-nss-base]  ── Vendor NSS-EDMA 协处理器驱动、内核桥接与核心补丁基盘
+         │
+         ▼ (rebase)
+[layer/community-tuning] ── 本土化基础包 (autocore、nss_freq 动态调频、cpufreq、国内镜像源)
+         │
+         ▼ (rebase)
+[nss-edma-julius]        ── 生产发版基底 (业务特性、高通无线栈修复、NSS Dashboard、机型原生适配)
+         ▲
+         │ (dispatch)
+[main]                   ── 主控分支：流水线调度、Seeds 种子生态配置与 openwrt.sha 追踪锚点
+```
 
-`nss-edma-rework` is
-[openwrt/openwrt](https://github.com/openwrt/openwrt) `main` plus a
-series on top:
+---
 
-1. `qca_edma` and `qca_ppe` changes that let the NSS firmware share the
-   EDMA and PPE with the host driver.
-2. NSS device tree nodes for IPQ807x and IPQ6018.
-3. Kernel support patches for ECM, the NSS qdiscs and qca-mcs.
-4. The `kmod-qca-ppe-nss` glue module and the NSS runtime tools.
-5. ath11k and mac80211 NSS Wi-Fi offload.
+## 三、 上游与参考源吸收总账 (Ecosystem Absorption Ledger)
 
-The NSS packages (driver, ECM, qdiscs, firmware) are in the
-[nss-packages](https://github.com/JuliusBairaktaris/nss-packages) feed,
-branch `edma-nss`.
+为便于后续维护者快速审计、追踪演进并在新版本中持续吸收上游成果，现将当前工程吸收的全部核心上游仓库、分支及贡献者资产归档如下：
 
-## Building
+### 1. 官方 OpenWrt Master (`upstream-openwrt`)
+- **关联远程**：`https://github.com/openwrt/openwrt.git`
+- **对应层级**：`base/openwrt-upstream`
+- **吸收内容**：
+  - Linux 6.6/6.18 内核通用安全补丁与网络子系统更新；
+  - `mac80211` 无线协议栈子系统（含 `airtime` 吞吐估算 `airtime.c:532` `WARN_ON_ONCE()` 报警修复）；
+  - `firewall4` 状态重构与原子重启补丁；
+  - `procd`、`netifd`、`dnsmasq` 上游同步。
 
-```sh
-git clone -b nss-edma-rework https://github.com/JuliusBairaktaris/openwrt-nss-edma.git
-cd openwrt-nss-edma
-cp feeds.conf.default feeds.conf
-echo "src-git nss https://github.com/JuliusBairaktaris/nss-packages.git;edma-nss" >> feeds.conf
+---
+
+### 2. Julius Bairaktaris 原生 NSS-EDMA 树 (`openwrt-nss-edma`)
+- **关联上游**：`https://github.com/JuliusBairaktaris/openwrt-nss-edma.git`
+- **对应层级**：`layer/julius-nss-base`
+- **吸收关键成果**：
+  - **原生 NSS-EDMA / ECM 驱动体系**：去除了破坏网络吞吐与公平性调度的主机软分载；
+  - **Flowtable 截断守卫** (`714-netfilter-...`)：解决硬件分载下探真实物理设备时穿透 VLAN/PPPoE 上的 SQM/Cake 队列整形问题；
+  - **`ath11k` Monitor 监听抓包修复**：`988` 补丁（从 TLV uplink OFDMA info 提取 Trigger-based 帧的 NSS/MCS 速率）与 `989` 补丁（Radiotap/L-SIG 速率误报修复）；
+  - **pstore 崩溃转储守卫** (`c3c7c4745a`)：防止早期开机时 NTP 授时跳变将 RAMOOPS 崩溃日志作为过期日志丢弃；
+  - **ARMv8 CE 硬件加速** (`aa4eab97fb`)：补齐 AES-CCM 硬件指令集加速；
+  - **`ath11k` 生产级稳定性加固**：PTK 原位替换、国家码管制域信道限制适配、QMI 队列移除保护；
+  - **PPE 队列与调度器优化**：多队列 TDM 锁步、DRR 调度、multicast 队列防丢包。
+
+---
+
+### 3. qosmio (Robert Marko) 生态树与分支 PR 成果
+- **关联上游**：`https://github.com/qosmio/nss-packages.git` 与 `https://github.com/qosmio/openwrt-ipq.git`
+- **吸收关键成果与社区贡献者**：
+  - **Mohamed Radwan** (`nss-packages#72`)：`qca-nss-drv` 引入 `napi_complete_done`，彻底消除 NAPI busy-poll 模式下的 IRQ 平衡报警；
+  - **Sean Khan**：
+    - `qca-nss-drv` (`nss-packages@dca6e6e880`)：移除 `nss_ppe_vp` 中冗余的 `copy_from_user`，防止写操作触发 `-EFAULT`；
+    - `qca-nss-ecm` (`nss-packages@e5831d6123`)：增加 `'del *'` 通配符指令，支持一键清空拒绝端口列表；
+    - `wifi-scripts` (`openwrt-ipq@dac2e2868b`)：WPA3 FT-SAE 快速漫游支持 `auth_server_shared_secret` 别名；
+  - **Yuen Su**：
+    - `ath11k` (`openwrt-ipq#131`)：将未就绪的 NSS 上下文失败重定向至注销流程，防止无线接口泄露；
+    - `mac80211` (`openwrt-ipq#130`)：为 `HAS_TX_QUEUE` 驱动将主机队列初始化为 `IEEE80211_AC_BE`；
+  - **Andrei-Alexandru Bleortu** (`nss-packages#77`)：`qca-nss-clients` vxlanmgr 释放隧道路由查找并增加 IPv6 `IS_ERR` 守卫；
+  - **ZyPulse** (`nss-packages#79`)：`qca-nss-drv` 追加 `CONFIG_NSS_FIRMWARE_VERSION_12_5` 编译依赖。
+
+---
+
+### 4. VIKINGYFY / 社区调优分支 (`vikingyfy`)
+- **关联上游**：`https://github.com/VIKINGYFY/immortalwrt.git`
+- **对应层级**：`layer/community-tuning`
+- **吸收内容**：
+  - **`nss_freq`**：纯净直接 PLL 寄存器时钟控制工具（NPU 动态调频与真实运行频率侦测）；
+  - **`autocore`**：多核 ARM64 负载均衡与状态监测；
+  - **`cpufreq`**：默认 Schedutil 调度器调优；
+  - 中国本土化软件源、APK 镜像与 NTP Pool 适配。
+
+---
+
+### 5. 潘楚琨 (Chukun Pan / LKML) 硬件补丁
+- **作者信息**：`amadeus@jmu.edu.cn` (Linux Kernel Mailing List)
+- **吸收内容**：
+  - **USB Master 时钟挂起修复** (`0921-clk-qcom-gcc-ipq8074-set-BRANCH_HALT_VOTED-...`)：原厂闭源 U-Boot (如 Netgear RBR750 / Linksys MX5300) 未注销时钟，Linux 启动期关断未使用时钟时因缺少 `BRANCH_HALT_VOTED` 导致轮询 200 次超时挂起并产生内核 `Tainted: [W]` 污点；打入此补丁后彻底根除报警；
+  - **IPQ USB Fastlock 增益校准** (`1ec7bc0a57`)：在 RX bank 正确配置 USB fastlock gain；
+  - **Qualcomm USB Host 供电归属修正** (`5e48121d93`)；
+  - **IPQ6018 PHY PIPE 时钟绑定** (`9ef5d4c1e7`)。
+
+---
+
+### 6. Canary233 / LibWrt
+- **来源引用**：`references/LibWrt` (commit `6667298b2d`)
+- **吸收内容**：
+  - **ECM 期望连接空指针崩溃守卫** (`0972-netfilter-nf_conntrack-null-check-expect-event.patch`)：修复高通 Vendor ECM 驱动注册通知结构体时未实现 `.exp_event`，导致处理 FTP 被动模式、SIP、H.323 等 ALG 期望连接时无条件调用造成 `pc: 0x0` 空指针宕机（Kernel Panic）。
+
+---
+
+### 7. 本地自研与专项工程集成 (Solarflows)
+- **Netgear Orbi RBR750 架构原生化**：
+  - 实现基于官方标准的 `CI_DATA_UBIPART="reserved2"`；
+  - 销毁旧版本残留的 `rootfs_data_old` 卷，释放 34.5MB SquashFS 空间；
+  - 彻底移除 `lib/preinit/79_netgear_rbr750_overlay` 易碎胶水脚本。
+- **`luci-app-nss-dashboard` 工业级重构**：
+  - 后端 RPC 完全去除展示用中文，移交前端 V8 与 LuCI `_()` 原生国际化；
+  - 严格采用官方 33% 栅格对齐；
+  - 消除点状下划线污染，改用 Native Hover；
+  - 展开态独立全宽子行（Accordion Sub-Row）杜绝浮层抽搐。
+- **出海代理与网络优化**：
+  - 集成 SONiC FullCone NAT1 套件；
+  - 集成 `damocjwj/openwrt-zapret2` 种子配置。
+
+---
+
+## 四、 编译与构建说明
+
+### 1. 本地编译
+```bash
+git clone -b nss-edma-julius https://github.com/solarflows/ImmortalWrt-QualcommAX.git
+cd ImmortalWrt-QualcommAX
+
+# 更新并安装 Feeds
 ./scripts/feeds update -a && ./scripts/feeds install -a
-make menuconfig   # qualcommax/ipq807x or ipq60xx, select the NSS packages
+
+# 导入种子配置 (例如 Netgear RBR750 / IPQ807x)
+cp configs/ipq807x/10-proxy.seed .config
+make defconfig
+
+# 启动多核编译
 make -j$(nproc)
 ```
 
-Without the nss feed, `ATH11K_NSS_SUPPORT` has an unmet dependency and
-menuconfig fails.
+### 2. 云端 CI 自动化流水线
+仓库根目录包含 `.github/workflows/firmware-builder.yml`，支持多矩阵自动化构建，由 `main` 分支的调度器和 `configs/` 种子矩阵驱动。
 
-The image always boots on the host datapath first. The `nss` service then
-starts the offload. With `uci set nss.general.enabled=0` the router runs
-as stock OpenWrt and no NSS module is loaded.
+---
 
-## Acknowledgements
+## 五、 致谢与引用 (Acknowledgements)
 
-- [Christian Marangi (Ansuel)](https://github.com/Ansuel) for the upstream
-  EDMA and PPE drivers.
-- [Robert Marko (robimarko)](https://github.com/robimarko) for maintaining the
-  OpenWrt qualcommax target.
-- [qosmio](https://github.com/qosmio/openwrt-ipq) for the NSS packaging and
-  firmware tarballs the feed builds on.
-- Qualcomm and CodeLinaro for the open-source NSS host components.
+- [Julius Bairaktaris](https://github.com/JuliusBairaktaris) 提供革命性的原生 NSS-EDMA / PPE 驱动融合架构；
+- [Robert Marko (robimarko / qosmio)](https://github.com/robimarko) 为 OpenWrt qualcommax 目标与 NSS 打包付出的长期努力；
+- [Christian Marangi (Ansuel)](https://github.com/Ansuel) 提供上游 EDMA 与 PPE 驱动基石；
+- [VIKINGYFY](https://github.com/VIKINGYFY) 提供本土化与调优实践；
+- [Chukun Pan (潘楚琨)](https://github.com/ChukunPan) 提供精准的内核时钟与硬件补丁；
+- [Canary233](https://github.com/Canary233) 提供 ECM 期望连接空指针修复。
 
-## Support
+---
 
-[GitHub Sponsors](https://github.com/sponsors/JuliusBairaktaris) or
-[PayPal](https://paypal.me/JuliusBairaktaris).
+## 六、 许可证
 
-## License
-
-GPL-2.0, see [LICENSE](LICENSE). The NSS components keep their upstream
-licenses.
+GPL-2.0 许可证，详见 [LICENSE](LICENSE)。所有 NSS 组件保留其上游许可证。

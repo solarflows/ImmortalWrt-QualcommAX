@@ -308,7 +308,7 @@ static int edma_rx_fill(struct edma_priv *priv, struct edma_ring *rxfill_ring)
 }
 
 static bool edma_rx_page_take(struct edma_priv *priv, struct page *page,
-			      u32 store_idx)
+			      u32 store_idx, bool quiet)
 {
 	struct edma_ring *ring = &priv->rxfill_ring;
 	int i;
@@ -324,9 +324,10 @@ static bool edma_rx_page_take(struct edma_priv *priv, struct page *page,
 			continue;
 
 		ring->page_store[i] = NULL;
-		dev_warn_ratelimited(&priv->pdev->dev,
-				     "rx page has invalid store index %u, expected %d\n",
-				     store_idx, i);
+		if (!quiet)
+			dev_warn_ratelimited(&priv->pdev->dev,
+					     "rx page has invalid store index %u, expected %d\n",
+					     store_idx, i);
 		return true;
 	}
 
@@ -375,17 +376,19 @@ static u32 edma_tx_release(struct edma_priv *priv, u32 idx, struct sk_buff *skb,
 	dma_unmap_single(dev, le32_to_cpu(txdesc->buffer_addr), len,
 			 DMA_TO_DEVICE);
 	bytes = len - EDMA_TX_PREHDR_SIZE;
-	ring->skb_store[idx] = NULL;
+	/* Orders the reads above before edma_ring_xmit() can take the slot. */
+	smp_store_release(&ring->skb_store[idx], NULL);
 
 	idx = (idx + 1) & (ring->count - 1);
-	while (ring->skb_store[idx] == skb) {
+	while (READ_ONCE(ring->skb_store[idx]) == skb) {
 		txdesc = EDMA_TXDESC_DESC(ring, idx);
 		len = txdesc->word1 & EDMA_TXDESC_DATA_LENGTH_MASK;
 
 		dma_unmap_page(dev, le32_to_cpu(txdesc->buffer_addr), len,
 			       DMA_TO_DEVICE);
 		bytes += len;
-		ring->skb_store[idx] = NULL;
+		/* As for the head: the reads first, then the slot. */
+		smp_store_release(&ring->skb_store[idx], NULL);
 		idx = (idx + 1) & (ring->count - 1);
 	}
 
@@ -446,7 +449,7 @@ static u32 edma_clean_tx(struct edma_priv *priv, struct edma_ring *txcmpl_ring,
 			priv->txcmpl_idx = txcmpl->buffer_addr;
 			if (priv->txcmpl_idx < priv->txdesc_ring.count)
 				priv->txcmpl_skb =
-					priv->txdesc_ring.skb_store[priv->txcmpl_idx];
+					READ_ONCE(priv->txdesc_ring.skb_store[priv->txcmpl_idx]);
 		}
 
 		if (!(txcmpl->status & EDMA_TXCMPL_MORE)) {
@@ -628,13 +631,56 @@ static u32 edma_clean_rx(struct edma_priv *priv, int budget,
 
 		pkt_len = desc_status & EDMA_RXDESC_PACKET_LEN_MASK;
 
-		if (unlikely(desc_status & EDMA_RXDESC_MORE))
-			priv->stats.rx_split_frame++;
+		/* A frame longer than a buffer arrives in several descriptors,
+		 * which the driver cannot assemble, and the later ones are not
+		 * frames of their own. The whole run is dropped: the first
+		 * counts as the length error and the last, which has the bit
+		 * clear, ends it.
+		 */
+		if (unlikely(priv->rx_more || (desc_status & EDMA_RXDESC_MORE))) {
+			bool more = !!(desc_status & EDMA_RXDESC_MORE);
+
+			if (more)
+				priv->stats.rx_split_frame++;
+			if (!priv->rx_more)
+				netdev->stats.rx_length_errors++;
+
+			page_pool_dma_sync_for_cpu(priv->page_pool, page, 0,
+						   sizeof(rxph->opaque));
+			store_idx = le32_to_cpu(rxph->opaque);
+			if (unlikely(!edma_rx_page_take(priv, page, store_idx,
+							priv->rx_more))) {
+				priv->stats.rx_untracked_page++;
+				netdev->stats.rx_errors++;
+			} else {
+				page_pool_put_full_page(priv->page_pool, page,
+							true);
+			}
+			priv->rx_more = more;
+			goto next;
+		}
+
+		if (unlikely(EDMA_RX_PREHDR_SIZE + pkt_len >
+			     priv->rx_buffer_size)) {
+			page_pool_dma_sync_for_cpu(priv->page_pool, page, 0,
+						   sizeof(rxph->opaque));
+			store_idx = le32_to_cpu(rxph->opaque);
+			if (unlikely(!edma_rx_page_take(priv, page, store_idx,
+							false))) {
+				priv->stats.rx_untracked_page++;
+				netdev->stats.rx_errors++;
+			} else {
+				page_pool_put_full_page(priv->page_pool, page,
+							true);
+				netdev->stats.rx_length_errors++;
+			}
+			goto next;
+		}
 
 		page_pool_dma_sync_for_cpu(priv->page_pool, page, 0,
 					   EDMA_RX_PREHDR_SIZE + pkt_len);
 		store_idx = le32_to_cpu(rxph->opaque);
-		if (unlikely(!edma_rx_page_take(priv, page, store_idx))) {
+		if (unlikely(!edma_rx_page_take(priv, page, store_idx, false))) {
 			priv->stats.rx_untracked_page++;
 			netdev->stats.rx_errors++;
 			goto next;
@@ -839,7 +885,7 @@ static netdev_tx_t edma_ring_xmit(struct edma_priv *priv, struct net_device *net
 	 * cannot change the addresses its completion still has to unmap.
 	 */
 	for (i = 0; i < ndesc; i++)
-		taken |= !!txdesc_ring->skb_store[(idx + i) & mask];
+		taken |= !!smp_load_acquire(&txdesc_ring->skb_store[(idx + i) & mask]);
 
 	/* Both refusals come before the preheader is pushed: the qdisc requeues
 	 * the frame as it was handed over, and a second push would prefix it
@@ -870,13 +916,13 @@ static netdev_tx_t edma_ring_xmit(struct edma_priv *priv, struct net_device *net
 	edma_tx_csum(skb, txph, proto);
 	tso = edma_tx_tso(skb, txph);
 
-	txdesc_ring->skb_store[idx] = skb;
+	WRITE_ONCE(txdesc_ring->skb_store[idx], skb);
 	txph->opaque = idx;
 
 	head_dma = dma_map_single(dev, skb->data, len + EDMA_TX_PREHDR_SIZE,
 				  DMA_TO_DEVICE);
 	if (dma_mapping_error(dev, head_dma)) {
-		txdesc_ring->skb_store[idx] = NULL;
+		WRITE_ONCE(txdesc_ring->skb_store[idx], NULL);
 		goto drop;
 	}
 
@@ -898,7 +944,7 @@ static netdev_tx_t edma_ring_xmit(struct edma_priv *priv, struct net_device *net
 		if (dma_mapping_error(dev, dma))
 			goto unmap;
 
-		txdesc_ring->skb_store[fidx] = skb;
+		WRITE_ONCE(txdesc_ring->skb_store[fidx], skb);
 		txdesc = EDMA_TXDESC_DESC(txdesc_ring, fidx);
 		txdesc->buffer_addr = cpu_to_le32(dma);
 		txdesc->word1 = tso | (i + 1 < shinfo->nr_frags ?
@@ -940,11 +986,11 @@ unmap:
 		dma_unmap_page(dev, le32_to_cpu(txdesc->buffer_addr),
 			       txdesc->word1 & EDMA_TXDESC_DATA_LENGTH_MASK,
 			       DMA_TO_DEVICE);
-		txdesc_ring->skb_store[fidx] = NULL;
+		WRITE_ONCE(txdesc_ring->skb_store[fidx], NULL);
 	}
 
 	dma_unmap_single(dev, head_dma, skb_headlen(skb), DMA_TO_DEVICE);
-	txdesc_ring->skb_store[idx] = NULL;
+	WRITE_ONCE(txdesc_ring->skb_store[idx], NULL);
 drop:
 	dev_kfree_skb_any(skb);
 	spin_unlock_bh(&priv->tx_lock);
@@ -1029,15 +1075,19 @@ err_txcmpl:
 
 static void edma_rings_drain(struct edma_priv *priv)
 {
-	edma_clean_tx(priv, &priv->txcmpl_ring, INT_MAX, 0);
+	if (priv->txcmpl_ring.desc)
+		edma_clean_tx(priv, &priv->txcmpl_ring, INT_MAX, 0);
 	priv->txcmpl_skb = NULL;
 	priv->txcmpl_run = false;
+	priv->rx_more = false;
 
 	edma_tx_ring_free(priv, &priv->txdesc_ring, sizeof(struct edma_txdesc));
 	edma_ring_free(priv, &priv->txcmpl_ring, sizeof(struct edma_txcmpl));
 	edma_rx_ring_free(priv, &priv->rxfill_ring,
 			  sizeof(struct edma_rxfill_desc));
 	edma_ring_free(priv, &priv->rxdesc_ring, sizeof(struct edma_rxdesc));
+	if (priv->netdev)
+		netdev_tx_reset_queue(netdev_get_tx_queue(priv->netdev, 0));
 }
 
 static void edma_configure_txdesc_ring(struct edma_priv *priv,
@@ -1130,6 +1180,7 @@ static void edma_configure_rxfill_ring(struct edma_priv *priv,
 		     EDMA_REG_RXFILL_RING_SIZE(soc->rxfill_ring),
 		     rxfill_ring->count & EDMA_RXFILL_RING_SIZE_MASK);
 
+	priv->rx_more = false;
 	edma_rx_fill(priv, rxfill_ring);
 }
 
@@ -1432,6 +1483,15 @@ static int edma_ndo_stop(struct net_device *netdev)
 	netif_stop_queue(netdev);
 	napi_disable(&priv->tx_napi);
 	napi_disable(&priv->rx_napi);
+
+	/* Wait for the poll's final IRQ unmask and wake after ownership drops. */
+	synchronize_net();
+	edma_tx_irq_mask(priv);
+	edma_rx_irq_mask(priv);
+	synchronize_irq(priv->txcmpl_irq);
+	synchronize_irq(priv->rxfill_irq);
+	synchronize_irq(priv->rxdesc_irq);
+	netif_tx_disable(netdev);
 
 	return 0;
 }
@@ -1903,7 +1963,6 @@ static int edma_ndo_change_mtu(struct net_device *netdev, int new_mtu)
 		 * the transmit path running into the rings freed below.
 		 */
 		edma_ndo_stop(netdev);
-		netif_tx_disable(netdev);
 	}
 
 	edma_hw_stop(priv);

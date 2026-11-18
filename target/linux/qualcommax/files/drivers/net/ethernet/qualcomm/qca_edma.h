@@ -322,6 +322,11 @@ struct edma_priv {
 	u32 txcmpl_idx;
 	bool txcmpl_run;
 
+	/* The descriptors being read are the rest of a frame longer than a
+	 * buffer, which is dropped.
+	 */
+	bool rx_more;
+
 	/* Counted here rather than in netdev->stats, which cannot say which of
 	 * the reasons a frame went missing for.
 	 */

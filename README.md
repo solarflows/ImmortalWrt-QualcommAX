@@ -44,12 +44,12 @@
 
 ### 1. 官方 OpenWrt Master (`upstream-openwrt`)
 - **关联远程**：`https://github.com/openwrt/openwrt.git`
-- **对应层级**：`base/openwrt-upstream`
+- **对应层级**：`base/openwrt-upstream`（当前锚点：`593608fbda`, 2026-11-11）
 - **吸收内容**：
-  - Linux 6.6/6.18 内核通用安全补丁与网络子系统更新；
-  - `mac80211` 无线协议栈子系统（含 `airtime` 吞吐估算 `airtime.c:532` `WARN_ON_ONCE()` 报警修复）；
-  - `firewall4` 状态重构与原子重启补丁；
-  - `procd`、`netifd`、`dnsmasq` 上游同步。
+  - Linux 6.18.60 内核通用安全补丁与网络子系统更新（含 `sch_cake` debugfs 卸载清理、批处理 watchdog、per-tin dither、多队列活跃流加权带宽共享）；
+  - `mac80211` 无线协议栈子系统（含 `airtime` 吞吐估算 `WARN_ON_ONCE` 修复、`361` `sdata_dereference()` 修复，以及定向恢复的 14 个上游安全/稳定补丁 `007`–`012`/`014`×2/`015`/`451`/`454`/`479`–`481`，修复 encap offload 加密/端口授权与 AP_VLAN/ROC 稳定性）；
+  - `firewall4` 原子重启、保活状态匹配、渲染失败保留旧规则及 NAT 防泄露地址族匹配（`003`/`005`/`006`/`007`）；
+  - `mbedtls` 3.6.8（11 CVE）、`odhcpd` (2026-11-16)、`hostapd`（6GHz `op_class=132` 与 `set_bss_order` 防崩溃）、`wifi-scripts`（`legacy_rates` 与 WPA3 FT-SAE）、`netifd`、`procd`、`base-files`（LED 重置与空格名）、`dnsmasq` 上游同步。
 
 ---
 
@@ -63,7 +63,8 @@
   - **pstore 崩溃转储守卫** (`c3c7c4745a`)：防止早期开机时 NTP 授时跳变将 RAMOOPS 崩溃日志作为过期日志丢弃；
   - **ARMv8 CE 硬件加速** (`aa4eab97fb`)：补齐 AES-CCM 硬件指令集加速；
   - **`ath11k` 生产级稳定性加固**：PTK 原位替换、国家码管制域信道限制适配、QMI 队列移除保护；
-  - **PPE 队列与调度器优化**：多队列 TDM 锁步、DRR 调度、multicast 队列防丢包。
+  - **PPE 队列、时钟与 EDMA 驱动加固**：多队列 TDM 锁步、DRR 调度、multicast 队列防丢包；`qca_edma` 分片 RX 丢弃、ARM64 `smp_store_release`/`smp_load_acquire` TX 环序、`edma_ndo_stop` IRQ 重屏蔽 + `synchronize_irq` 与 `edma_rings_drain` BQL 复位；`qca_ppe` + `pcs-qca-uniphy` 双向时钟选源，以及 IPQ8074/IPQ6018 Port 5 SGMII 速率与 USB Master `BRANCH_HALT_VOTED` 双平台对齐（`0921`/`0922`/`0923`/`0924`）；
+  - **NSS 驱动边界安全审计加固**：`qca-nss-drv` `0009`（`dynamic_interface` 发送路径类型与节点越界校验）、`qca-nss-clients` `0005`（`match` 与 `tunipip6` sysctl `copy_from_user` `-EFAULT`、无符号 `if_num` 与空指针守卫）。
 
 ---
 
@@ -97,7 +98,7 @@
 ### 5. 潘楚琨 (Chukun Pan / LKML) 硬件补丁
 - **作者信息**：`amadeus@jmu.edu.cn` (Linux Kernel Mailing List)
 - **吸收内容**：
-  - **USB Master 时钟挂起修复** (`0921-clk-qcom-gcc-ipq8074-set-BRANCH_HALT_VOTED-...`)：原厂闭源 U-Boot (如 Netgear RBR750 / Linksys MX5300) 未注销时钟，Linux 启动期关断未使用时钟时因缺少 `BRANCH_HALT_VOTED` 导致轮询 200 次超时挂起并产生内核 `Tainted: [W]` 污点；打入此补丁后彻底根除报警；
+  - **USB Master 时钟挂起修复** (`0924-clk-qcom-gcc-ipq8074-set-BRANCH_HALT_VOTED-...` & `0923-clk-qcom-gcc-ipq6018-set-BRANCH_HALT_VOTED-...`)：原厂闭源 U-Boot (如 Netgear RBR750 / Linksys MX5300) 未注销时钟，Linux 启动期关断未使用时钟时因缺少 `BRANCH_HALT_VOTED` 导致轮询 200 次超时挂起并产生内核 `Tainted: [W]` 污点；双平台打入此补丁后彻底根除报警；
   - **IPQ USB Fastlock 增益校准** (`1ec7bc0a57`)：在 RX bank 正确配置 USB fastlock gain；
   - **Qualcomm USB Host 供电归属修正** (`5e48121d93`)；
   - **IPQ6018 PHY PIPE 时钟绑定** (`9ef5d4c1e7`)。

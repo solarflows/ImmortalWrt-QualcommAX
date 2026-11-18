@@ -1,7 +1,7 @@
 # ImmortalWrt-QualcommAX 仓库四层资产全景总台账 (REPOSITORY-ASSETS-LEDGER.md)
 
 > **生效分支**：`nss-edma-julius`（生产基底分支）  
-> **制定日期**：2026-10-30  
+> **更新日期**：2026-11-18  
 > **文档定位**：本文档为本仓库面向多源上游协同（OpenWrt 官方 master、Julius 原生 NSS-EDMA、开源生态社区）的**核心资产确权与架构真理源**。明确定义 Layer 1 至 Layer 4 的职责边界、物理分支、锚点 Commit 与防护红线，从根本上杜绝版本同步过程中的代码覆盖、混淆视听与误判。
 
 ---
@@ -13,27 +13,27 @@
 ```text
 Default Project / ImmortalWrt-QualcommAX
 │
-├── [Layer 4: 自研特性与生态加固生产层] ──> 分支: nss-edma-julius (HEAD, 58 Commits)
+├── [Layer 4: 自研特性与生态加固生产层] ──> 分支: nss-edma-julius (HEAD, 72 Commits)
 │   ├── luci-app-nss-dashboard (自研工业级大盘组件, SPA架构, 微秒手风琴, 102px布局)
 │   ├── SONiC FullCone NAT1 套件 (内核 984~986 模块, firewall4 适配补丁, WebUI 与控制前端)
-│   ├── 7 大生态高价值缺陷修复 (dnsmasq, 361 RCU, PCIe IRQ, lockless ppp, stmmac, SAX1V1K, monitor trim)
-│   ├── P1/P2 编译与内核稳定性加固 (Conntrack RCU 解耦、PPPoE 无锁、Qdisc 逆序注销)
+│   ├── 生态高价值缺陷修复与安全加固 (mac80211 14项安全/稳定恢复, CAKE x4, EDMA/PPE/时钟, mbedtls 3.6.8 等)
+│   ├── P0/P1/P2 编译与内核稳定性加固 (Conntrack RCU 解耦、PPPoE 无锁、Qdisc 逆序注销、NSS 边界安全)
 │   └── 自动化双轨流水线与动态质量门禁 (sync-upstream.yml, verify-canary-health.sh)
 │
-├── [Layer 3: 开源社区调优层] ────────────> 分支: layer/community-tuning (4 Commits)
+├── [Layer 3: 开源社区调优层] ────────────> 分支: layer/community-tuning (5 Commits)
 │   ├── import(immortalwrt): 中国区本地化配置 (NTP 授时池, APK 软件源镜像)
 │   ├── import(immortalwrt): cpufreq 频率调节服务与 schedutil 默认调度
-│   ├── import(vikingyfy): ARMv8 Crypto Extensions 加密指令集加速与默认启用 ATH11K_NSS_SUPPORT
-│   └── import(vikingyfy): nss_freq 芯片与协处理器底层锁频工具
+│   ├── import(vikingyfy): nss_freq 芯片与协处理器底层锁频工具
+│   └── import(immortalwrt): autocore ARM64 负载均衡与状态监测
 │
-├── [Layer 2: 高通 NSS-EDMA 协处理器内联基盘] ──> 分支: layer/julius-nss-base (48 Commits)
+├── [Layer 2: 高通 NSS-EDMA 协处理器内联基盘] ──> 分支: layer/julius-nss-base (7 Commits)
 │   ├── package/nss/ (全套自包含内联驱动与微码固件: drv, ecm, clients, userspace, sqm, firmware)
 │   ├── target/linux/qualcommax/files/drivers/net/ (qca_edma, qca_ppe_main, pcs-qca-uniphy 协同驱动)
 │   ├── package/kernel/mac80211/patches/nss/ath11k/ (全套 30+ Wi-Fi NSS 直通卸载驱动补丁)
 │   └── target/linux/qualcommax/dts/ (IPQ807x / IPQ60xx NSS 协处理器设备树节点与 reserved-memory 拓扑)
 │
 └── [Layer 1: OpenWrt 官方通用代码底座] ───> 分支: base/openwrt-upstream (基准快照)
-    ├── 官方历史快照锚点: Commit 5700101d7c (2026-10-30)
+    ├── 官方历史快照锚点: Commit 593608fbda (2026-11-11, Linux 6.18.60 / backports 7.2)
     ├── Toolchain 工具链 (GCC 14, musl libc, autotools, cmake)
     ├── target/linux/generic/ (Linux 6.18 通用内核基准、pending 补丁集)
     └── 通用系统与服务包 (procd, uci, ubus, netifd, hostapd, dnsmasq, nftables 等)
@@ -47,9 +47,9 @@ Default Project / ImmortalWrt-QualcommAX
 
 *   **对应分支**：`base/openwrt-upstream`
 *   **官方同步锚点 (Baseline Anchor)**：
-    *   **Commit SHA**：`89489ba0a7d5ec431df0d15d654ef2436d6a2fbe`
-    *   **日期**：`2026-11-04`
-    *   **标题**：`realtek: dsa: use regmap for TC policing registers`
+    *   **Commit SHA**：`593608fbda`（Linux 6.18.60 / backports 7.2）
+    *   **日期**：`2026-11-11`
+    *   **标题**：`rockchip: take the VOP2 UV address from the chroma buffer`
 *   **资产范围**：
     *   OpenWrt 官方原生构建体系：`include/`、`scripts/`、`tools/`、`toolchain/`；
     *   Linux 6.18 通用内核基础树：`target/linux/generic/`；

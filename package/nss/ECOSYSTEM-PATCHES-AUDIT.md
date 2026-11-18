@@ -1,22 +1,22 @@
 # 高通 IPQ807x / IPQ60xx NSS 生态 Fork 补丁审计与吸收真理源
 
-> **文档状态**：已固化（2026-10-29 讨论决议）  
-> **分支基底**：`nss-edma-julius`  
-> **核心原则**：本文档记录了对整个高通开源社区及各大活跃 Fork 仓库（Julius、kuncy7、VIKINGYFY、sinancetinkaya、77160860 等）的完整技术对齐审计。**列入本清单的项目均已完成原理排查、实地核验与最终裁决，后续迭代严禁重复翻案或无端展开同质化讨论。**
+> **文档状态**：已同步更新（2026-11-18 全量复盘审计）  
+> **分支基底**：`nss-edma-julius`（基于 `base/openwrt-upstream` `593608fbda`, 2026-11-11）  
+> **核心原则**：本文档记录了对整个高通开源社区及各大活跃 Fork 仓库（Julius、kuncy7、VIKINGYFY、qosmio、sinancetinkaya、77160860 等）的完整技术对齐审计。**列入本清单的项目均已完成原理排查、实地核验与最终裁决，后续迭代严禁重复翻案或无端展开同质化讨论。**
 
 ---
 
 ## 一、 已全量吸收并落地的补丁清单 (Absorbed & Built Successfully)
 
-以下 6 大核心补丁经实机交叉编译校验（ThinkCentre-M910X），内核、NSS 驱动全家桶、设备镜像编译 100% 通过（0 错误 0 警告）：
+以下核心补丁均经实机交叉编译校验（ThinkCentre-M910X），内核、mac80211/ath11k、NSS 驱动全家桶、userspace 包编译 100% 通过：
 
 | 编号 | 资产名称 / 功能 | 涉及文件 | 来源与追溯索引 | 核心原理与解决痛点 | 实机编译验证 |
 |---|---|---|---|---|:---:|
 | **P-01** | Dnsmasq reload procd/ujail 信号竞态修复 | `package/network/services/dnsmasq/files/dnsmasq.init` | `kuncy7` (`4432bd5460`), OpenWrt Issue [#25409](https://github.com/openwrt/openwrt/issues/25409), PR [#25983](https://github.com/openwrt/openwrt/pull/25983) | 在 reload 时比对实例定义与 md5 指纹，仅对未重启实例发 SIGHUP，根除频繁改配置引发 ujail 崩溃导致 procd crash loop 掐死 DNS。 | ✅ 通过 |
-| **P-02** | mac80211 吞吐估算 RCU 读保护锁 | `package/kernel/mac80211/patches/subsys/361-*.patch` | `kuncy7` (`8d87ab6164`), branch `mac80211-361-rcu` | 在 `sta_estimate_expected_throughput()` 读取 `chanctx_conf` 外层补充 RCU 读锁，消除 `iw station dump` 或 Usteer 轮询时内核报出的 `WARNING: suspicious RCU usage`。 | ✅ 通过 |
-| **P-03** | PCIe ath11k DP 环中断散列多核 | `package/kernel/mac80211/patches/ath11k/959-*.patch` | `JuliusBairaktaris` (`49c55225fc`), OpenWrt Issue [#26242](https://github.com/openwrt/openwrt/issues/26242), PR [#26253](https://github.com/openwrt/openwrt/pull/26253) | 将 PCIe 独立无线芯片（如 QCN9074）的 4 个 REO 硬件接收环中断均匀散列到 4 颗 CPU，释放 PCIe 无线网卡多核线速吞吐。 | ✅ 通过 |
+| **P-02** | mac80211 吞吐估算 RCU/wiphy 锁修复 | `package/kernel/mac80211/patches/subsys/361-*.patch` | OpenWrt 上游 `e4d0856463` (Felix Fietkau)，取代早期 `kuncy7` `rcu_read_lock` 方案 | `sta_set_sinfo()` 运行于 wiphy mutex 下，改用 `sdata_dereference()` 读取 `chanctx_conf`，彻底消除 `WARNING: suspicious RCU usage`。 | ✅ 通过 |
+| **P-03** | PCIe ath11k DP 环中断散列多核 | `package/kernel/mac80211/patches/ath11k/982-*.patch` | `JuliusBairaktaris` (`49c55225fc`), OpenWrt PR [#26253](https://github.com/openwrt/openwrt/pull/26253) | 将 PCIe 独立无线芯片（如 QCN9074）的 4 个 REO 硬件接收环中断均匀散列到 4 颗 CPU，释放 PCIe 无线网卡多核线速吞吐。 | ✅ 通过 |
 | **P-04** | PPPoE lockless xmit 无锁直通发包 | `target/linux/generic/pending-6.18/652-*` & `653-*` | `JuliusBairaktaris` (`0e72354cdf`) | 为 `ppp_generic` 消除 unit/channel 互斥锁，降低 CPU 协议栈在多核大流量并发上传时的锁争用（CPU 占用下降约 3.2%）。 | ✅ 通过 |
-| **P-05** | NSS 接管 GMAC 时拦截 ethtool 防死锁 | `target/linux/qualcommax/patches-6.18/0958a-*.patch` | `kuncy7` (`f6afff4714`), Issue [#52](https://github.com/kuncy7/openwrt-nss-edma/issues/52) | 当 GMAC 被 NSS 固件接管时，拦截 `ethtool -G/-L` 变更并返回 `-EBUSY`，根除驱动因对已禁用队列调用 `napi_disable` 造成的 `rtnl_lock` 永久死锁。 | ✅ 通过 |
+| **P-05** | NSS 接管 GMAC 时拦截 ethtool 防死锁 | `target/linux/qualcommax/patches-6.18/0958a-*.patch` | `kuncy7` (`f6afff4714`), Issue [#52](https://github.com/kuncy7/openwrt-nss-edma/issues/52) | 当 IPQ50xx GMAC (`stmmac`) 被 NSS 固件接管时，拦截 `ethtool -G/-L` 返回 `-EBUSY`（IPQ807x/60xx 使用 `qca_edma` 未暴露此接口，天然免疫）。 | ✅ 通过 |
 | **P-06** | Spectrum SAX1V1K 专属三级温控风扇配置 | `target/linux/qualcommax/dts/ipq8072-sax1v1k.dts` & `ipq807x/config-default` | `77160860` / `VIKINGYFY` (`754ed2b4f1`) | 启用 `pwm-gpio` 与 `pwm-fan`，并在 cpu0~cpu3 与 cluster 上配置 70°C/80°C/90°C 三级阶梯降温调速。 | ✅ 通过 |
 | **P-07** | qca-nss-drv NAPI busy poll 中断使能平衡 | `package/nss/qca-nss-drv/patches/0007-*.patch` | `qosmio/nss-packages` PR [#72](https://github.com/qosmio/nss-packages/pull/72) by Mohamed Radwan | 将 4 处 NAPI 退出出口升级为 `napi_complete_done()`，消除内核在 busy poll 下报出的 `Unbalanced enable for IRQ` 告警。 | ✅ 通过 |
 | **P-08** | qca-nss-drv PPE VP proc 写入 `-EFAULT` 修复 | `package/nss/qca-nss-drv/patches/0008-*.patch` | `qosmio/nss-packages` Commit [`dca6e6e880`](https://github.com/qosmio/nss-packages/commit/dca6e6e880) by Sean Khan | 铲除 `proc_dostring` 之后的二次 `copy_from_user`，消除写入虚拟端口时的 `-EFAULT` 拒绝。 | ✅ 通过 |
@@ -25,6 +25,12 @@
 | **P-11** | ath11k NSS 初始化失败反注册回滚 | `package/kernel/mac80211/patches/nss/ath11k/999-939-*.patch` | `qosmio/openwrt-ipq` PR [#131](https://github.com/qosmio/openwrt-ipq/pull/131) by Yuen Su | 修复 `ath11k_nss_init()` 状态机未就绪时未执行反注册导致的 NSS 数据平面接口句柄泄漏。 | ✅ 通过 |
 | **P-12** | mac80211 HAS_TX_QUEUE 主机发送队列变量初值化 | `package/kernel/mac80211/patches/nss/subsys/999-926-*.patch` | `qosmio/openwrt-ipq` PR [#130](https://github.com/qosmio/openwrt-ipq/pull/130) by Yuen Su | 为跳过软件队列选择的发包局部变量赋初值 `IEEE80211_AC_BE`，杜绝内核栈随机脏数据越界。 | ✅ 通过 |
 | **P-13** | wifi-scripts WPA3 FT-SAE 漫游单密钥规范别名 | `package/network/config/wifi-scripts/.../ap.uc` | `qosmio/openwrt-ipq` Commit [`dac2e2868b`](https://github.com/qosmio/openwrt-ipq/commit/dac2e2868b) by Sean Khan | 支持 `auth_server_shared_secret` 别名读取，消除 WPA3 漫游报错 `FT_KEY_CANT_BE_DERIVED`。 | ✅ 通过 |
+| **P-14** | mac80211 上游安全/稳定补丁定向恢复 (14 项) | `package/kernel/mac80211/patches/subsys/{007..015,451,454,479..481}` | `base/openwrt-upstream` (`593608fbda`) | 恢复被 `caf712b388` 误删的 encap offload 加密/未授权端口/tainted key 安全修复（`008`–`012`）及 AP_VLAN/TXQ/RCU/ROC 稳定性补丁，同步适配 `nss/subsys/{236,245,999-926}` 并移除 `999-929` 冗余 CE reap 检查。 | ✅ 通过 |
+| **P-15** | ath11k 生产稳定性套件 (`911`/`980`/`988`/`989`/`993`/`996`/`997`/`999`) | `package/kernel/mac80211/patches/ath11k/` | `JuliusBairaktaris` / `VIKINGYFY` / `openwrt-arista` | 覆盖固件崩溃恢复所有权、Monitor TB/SIG 速率、PTK 原位替换、QMI 排空、已安装校准优先、国家码带宽截断与直接固件请求。 | ✅ 通过 |
+| **P-16** | EDMA/PPE/PCS/时钟双平台加固（IPQ8074 & IPQ6018） | `qca_edma.c`, `qca_ppe_main.c`, `pcs-qca-uniphy.c`, `patches-6.18/{0149,0921..0924}` | `JuliusBairaktaris` / `Chukun Pan` / `VIKINGYFY` + 自研审计扩展 | 补齐 RX 分片丢弃、ARM64 TX 内存屏障、stop IRQ 重屏蔽+`synchronize_irq`、drain BQL 复位；PPE/PCS 双向选源；IPQ8074 & IPQ6018 Port 5 SGMII 速率与 USB `BRANCH_HALT_VOTED` 双平台对称对齐。 | ✅ 通过 |
+| **P-17** | CAKE 调度器清理与多核性能套件 (`710`/`737`–`739`) | `target/linux/generic/{hack,pending}-6.18/` | `upstream-openwrt` / `VIKINGYFY` | 卸载清理 debugfs 防 UAF、批处理 watchdog、per-tin rounding dither、多队列活跃流加权共享。 | ✅ 通过 |
+| **P-18** | qca-nss-drv (`0009`) & qca-nss-clients (`0005`) 边界安全加固 | `package/nss/qca-nss-{drv,clients}/patches/` | 本仓库全量代码审计 + `qosmio`/`VIKINGYFY` 交叉核验 | 拦截 `dynamic_interface` 越界类型/节点；修复 `match`/`tunipip6` sysctl 二次 `copy_from_user` `-EFAULT`、无符号 `if_num` 与空指针解引用；清理 `pppoe` 孤立 `done:` 标签。 | ✅ 通过 |
+| **P-19** | 内核硬件与用户态安全/稳定性批次 | `firewall4`, `hostapd`, `wifi-scripts`, `netifd`, `procd`, `base-files`, `mbedtls`, `odhcpd`, `remoteproc`, `qca807x`/`8081`, `usb` | `upstream-openwrt` / `VIKINGYFY` / `JuliusBairaktaris` | `mbedtls` 3.6.8 (11 CVE)、`odhcpd` (2026-11-16)、`fw4` 原子重启/保活/渲染失败保留旧规则/NAT 防泄露地址族匹配、`hostapd` 6GHz & `set_bss_order`、`netifd` 网桥刷新、`remoteproc` coredump 内存预算、USB VBUS/Fastlock/DWC3-legacy、`pstore-archive` NTP 防跳变。 | ✅ 通过 |
 
 ---
 

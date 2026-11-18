@@ -102,7 +102,7 @@ Default Project / ImmortalWrt-QualcommAX
 ### 4. Layer 4：自研特性与生态加固生产层 (Production / Custom IP & Fixes)
 
 *   **对应分支**：`nss-edma-julius`（Parent: `layer/community-tuning`，生产 HEAD 分支）
-*   **提交范围**：共 58+ 提交，起点 Commit `4a9b3a53de` (`feat(nat): forward-port SONiC FullCone NAT1...`)
+*   **提交范围**：覆盖起点 Commit `4a9b3a53de` 及后续连续吸收/加固批次
 *   **资产属性**：**100% 由我们自主研发、深度重构或严格审查验证的核心业务资产**。
 *   **核心资产清单与物理路径**：
 
@@ -125,16 +125,9 @@ Default Project / ImmortalWrt-QualcommAX
     *   `package/network/config/firewall4/patches/001-sonic-fullcone.patch`（zone-aware 规则自动生成）
 *   **核心价值**：为 Linux 6.18 LTS 内核提供高性能 3-tuple 全锥形 NAT1 转发，完美解耦流表与硬件加速。
 
-#### 4.3 严格审计与实机验证的 7 大生态硬缺陷修复
+#### 4.3 严格审计与实机验证的生态硬缺陷修复批次 (`P-01` ~ `P-25`)
 *   **审计真理源**：`package/nss/ECOSYSTEM-PATCHES-AUDIT.md`
-*   **清单**：
-    1.  **Dnsmasq procd/ujail reload SIGHUP 竞态修复** (`package/network/services/dnsmasq/files/dnsmasq.init`, Commit `87075416f3`)；
-    2.  **mac80211 终端吞吐预估 RCU 读保护锁修复** (`package/kernel/mac80211/patches/subsys/361-*.patch`, Commit `65ca086892`)；
-    3.  **ath11k PCIe 独立无线网卡 4 REO 接收中断散列多核** (`package/kernel/mac80211/patches/ath11k/959-*.patch`, Commit `e703bf2a04`)；
-    4.  **PPP/PPPoE lockless_xmit 数据面多核无锁发包** (`target/linux/generic/pending-6.18/652-*`, `653-*`, Commit `3c683e6c41`)；
-    5.  **stmmac GMAC 被 NSS 固件接管时拒绝 ethtool 重配防死锁** (`target/linux/qualcommax/patches-6.18/0958a-*.patch`, Commit `74453989bf`)；
-    6.  **Spectrum SAX1V1K 专属 GPIO 27 软件 PWM 三级温控风扇配置** (`target/linux/qualcommax/dts/ipq8072-sax1v1k.dts` & `config-default`, Commit `41b1044302`)；
-    7.  **ath11k monitor trim 日志降级为 dbg 消除刷屏** (`package/kernel/mac80211/patches/ath11k/949-*.patch`, Commit `77fa4dfe5c`)。
+*   **核心清单**：涵盖基础 7 大缺陷修复（Dnsmasq reload SIGHUP、mac80211 `361` 锁、ath11k PCIe REO散列、PPP/PPPoE `652`/`653` 无锁发包、stmmac `0958a`、SAX1V1K PWM 风扇、`949` 降噪）、NSS 边界加固（`qca-nss-drv 0009` / `qca-nss-clients 0005`）、`mac80211` 上游 14+4 个安全/监听补丁（`007`–`017`, `501`–`505`）、`ath11k` WDS `AP_VLAN` 学习与卸载/`dscp_tid_map_rfc8325`/`monitor` 双向 Ethernet 与 `nss_ap_isolate` 重建同步（`999-934`, `999-940`–`999-943`）、`qca_ppe_main.c` CPU 多播与 Port 3 PCS 守卫、`sysupgrade` 网络优雅下线，以及 `hostapd`/`wpa_supplicant` ubus/MFP/CAC/PBC/DPP 系列修复（详情逐项见 `ECOSYSTEM-PATCHES-AUDIT.md`）。
 
 #### 4.4 自动化构建、流水线与动态质检门禁
 *   **物理路径**：

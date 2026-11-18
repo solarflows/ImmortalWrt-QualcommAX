@@ -31,6 +31,12 @@
 | **P-17** | CAKE 调度器清理与多核性能套件 (`710`/`737`–`739`) | `target/linux/generic/{hack,pending}-6.18/` | `upstream-openwrt` / `VIKINGYFY` | 卸载清理 debugfs 防 UAF、批处理 watchdog、per-tin rounding dither、多队列活跃流加权共享。 | ✅ 通过 |
 | **P-18** | qca-nss-drv (`0009`) & qca-nss-clients (`0005`) 边界安全加固 | `package/nss/qca-nss-{drv,clients}/patches/` | 本仓库全量代码审计 + `qosmio`/`VIKINGYFY` 交叉核验 | 拦截 `dynamic_interface` 越界类型/节点；修复 `match`/`tunipip6` sysctl 二次 `copy_from_user` `-EFAULT`、无符号 `if_num` 与空指针解引用；清理 `pppoe` 孤立 `done:` 标签。 | ✅ 通过 |
 | **P-19** | 内核硬件与用户态安全/稳定性批次 | `firewall4`, `hostapd`, `wifi-scripts`, `netifd`, `procd`, `base-files`, `mbedtls`, `odhcpd`, `remoteproc`, `qca807x`/`8081`, `usb` | `upstream-openwrt` / `VIKINGYFY` / `JuliusBairaktaris` | `mbedtls` 3.6.8 (11 CVE)、`odhcpd` (2026-11-16)、`fw4` 原子重启/保活/渲染失败保留旧规则/NAT 防泄露地址族匹配、`hostapd` 6GHz & `set_bss_order`、`netifd` 网桥刷新、`remoteproc` coredump 内存预算、USB VBUS/Fastlock/DWC3-legacy、`pstore-archive` NTP 防跳变。 | ✅ 通过 |
+| **P-20** | QCA PPE 多播与 Port 3 PCS 通道守卫 | `target/linux/qualcommax/files/drivers/net/ethernet/qualcomm/qca_ppe_main.c` | OpenWrt PR #26720 (`5c09af5ddf`, `bb9df4fd4f`) | `qca_ppe_port_mdb_del()` 在主机离组但交换机用户端口仍在组内时保留 CPU 端口多播掩码；`ppe_ipq6018_mux_setup()` 读取 `pcs_args.args[0]` 前检查 `args_count` 防未初始化读。 | ✅ 通过 |
+| **P-21** | sysupgrade 优雅关闭网络发送 PADT | `package/base-files/files/sbin/sysupgrade` | `JuliusBairaktaris` (`e0991ec1c0`) | 在调用 `ubus call system sysupgrade` 前执行 `/etc/init.d/network shutdown`，确保 PPPoE 发出 LCP Terminate-Request 与 PADT 避免重启重拨卡滞；若升级失败则 `/etc/init.d/network restart` 恢复。 | ✅ 通过 |
+| **P-22** | mac80211 监听过滤引用泄漏、fast-rx 统计与安全修复 | `package/kernel/mac80211/patches/subsys/{016,017,501..503,505}` | `upstream-openwrt` (`cb892a547f`, `bdd7b094ac`, `b5c6c2e4c4`, `134fff92d3`, `b06db99cef`, `fc1a637f99`) | `016` 修复 active monitor 关闭后硬件过滤引用计数泄漏；`017` 为 SW crypto 缺失 tailroom 扩容；`501` 64 位 TU 延时防溢出；`502` 拆分 fast-rx A-MSDU 前更新 STA RX 统计；`503` 丢弃 `RX_FLAG_ONLY_MONITOR` 帧防泄露；`505` 无 flush op 时跳过 unauth RCU 等待。 | ✅ 通过 |
+| **P-23** | ath11k NSS WDS、RFC 8325 DSCP-TID、Monitor 模式与隔离同步 | `package/kernel/mac80211/patches/nss/{subsys/999-934,ath11k/999-940..999-943}` | `kuncy7` (`686fa9be73`, `5f7db84d4c`, `1d295096c4`), `JuliusBairaktaris` (`1ea004caca`, `8722828b79`) 移植适配 `ab->nss.enabled` | `999-934`/`999-940`/`999-941` 修复 WDS 4addr `AP_VLAN` ext_vdev offload、SA 学习与卸载防 UAF；`999-942` 在 NSS 模式下以 RFC 8325 写入 TCL DSCP-to-TID 表；`999-943` 在并发 monitor 关闭 decap offload 时锁定 WMI/NSS 双向 Ethernet 并在 `add_interface` 重同步 `nss_ap_isolate`。 | ✅ 通过 |
+| **P-24** | hostapd / wpa_supplicant ubus 与客户端断连/MFP/CAC/PBC/DPP 加固 | `package/network/services/hostapd/{Makefile,README.md,files/*,patches/{911,912,914,919,923,924}}` | `upstream-openwrt` (`112c9284a9`, `7d8411109f`, `e7295e8438`, `7423e3bd86`, `87be38fd9b`, `f2b27e8544`, `29278064eb`, `3586d40fb1`, `e8e130a85f`, `45ad96f203`, `655fab3f8d`, `68b98b5dce`, `a0cdc009a5`, `ce7623459c`, `e0ee54a38f`, `dcfa993ce4`) | 停机先删 ubus 对象消除 `wpad` 重启 30s netifd 阻塞；修复 ubus ban 释放(`os_free`)与 >71.6 分钟 32 位超时溢出；`del_client` 支持 `ban_only`/`deauth_now` 与先发 Disassoc 并通过 `924` 保留未 ACK 密钥确保 MFP Deauth 生效；`923` 忽略过期 TX status；保留并上报 CAC；`919` 拒绝响应带 Multi-AP IE；`rrm_beacon_req` 支持 `last_indication`；`911` active PBC Beacon 带 UUID-E；`912` DPP 超时重试；校验 `RECONFIGURE == "OK"`。 | ✅ 通过 |
+| **P-25** | ubox Git HEAD 与 mbedtls EC-JPAKE 依赖补齐 | `package/system/ubox/Makefile`, `package/libs/mbedtls/Config.in` | `upstream-openwrt` (`7424e2ca30`, `13fc2e4e4b`) | 同步 ubox 至 2026-11-15，并选择 EC-JPAKE 所需 mbedtls 前置依赖。 | ✅ 通过 |
 
 ---
 
@@ -44,18 +50,18 @@
 2. **EDMA 短报文硬件校验和填充回落 (`2ed2c210c3`)**：
    - 所在文件：`qca_edma.c` (`EDMA_RXPH_L3_OFFSET_SHIFT`)
    - 核查结论：在当前分支基底提交 `e8ca976eff` 中已包含。
-3. **ath11k 160MHz NSS 空间流比率映射 (`953` 补丁)**：
+3. **ath11k 160MHz NSS 空间流比率映射 (`953` / `77e1366233`)**：
    - 所在文件：`package/kernel/mac80211/patches/ath11k/953-wifi-ath11k-apply-the-160-MHz-NSS-ratio-to-the-radio.patch`
    - 核查结论：本地基底已自带正式 patch。
-4. **USXGMII 速率握手掉速回退重连 (`59f295f58f`)**：
-   - 所在文件：`target/linux/qualcommax/files/drivers/net/pcs/pcs-qca-uniphy.c`
-   - 核查结论：基底提交 `145821ae50` 中已完整合并 Julius 的最终版自协商回退重连逻辑。
-5. **sysupgrade 刷机断网发 PADT 报文 (`a9931386ea`)**：
-   - 所在文件：`package/base-files/files/sbin/sysupgrade`
-   - 核查结论：基底提交 `a1cf78f741` 中已预置 `/etc/init.d/network shutdown` 优雅下线。
-6. **hostapd 802.11k 链路测量报告噪点清除 (`600-ubus_support.patch`)**：
-   - 所在文件：`package/network/services/hostapd/patches/600-ubus_support.patch`
-   - 核查结论：已在基底提交 `c4ca49f0c6` 中通过 `if (hapd->link_mesr_req_active)` 守卫根治。
+4. **USXGMII 速率握手掉速回退重连 (`59f295f58f`) 与 UNIPHY0 SGMII/半双工修复 (`ee6860ee0f`, `53ec2d05a4`)**：
+   - 所在文件：`pcs-qca-uniphy.c`、`qca_ppe_main.c`
+   - 核查结论：当前分支中已完整具备自协商回退重连、`uniphy_sgmii_mode()` 与 10/100Mbps 半双工支持。
+5. **ath11k PTK 原位替换 (`ec9306fa8d` / `992`)、WireGuard p2p sticky (`4d5d291a26`) 与 IPv4 `ipmr` GSO MTU 放行 (`142c6688df`)**：
+   - 所在文件：`package/kernel/mac80211/patches/ath11k/992-*`、Linux 6.18.60 `drivers/net/wireguard/socket.c`、`target/linux/generic/pending-6.18/682-*`
+   - 核查结论：均已在当前基底生效。
+6. **hostapd 802.11k 链路测量报告噪点清除 (`600-ubus_support.patch`)、`ucode` `cb_done_ack` (`ae9276426c`) 与 `wifi-scripts` `reporting_detail` (`3f0f32ac6b`/`8ff015a72b`)**：
+   - 所在文件：`600-ubus_support.patch`、`ucode-2026.10.28~dfc64d41/lib/rtnl.c`、`ubus.c`
+   - 核查结论：实机源码已内置对应实现（实测在 `ucode 2026-10-28` 叠加 `100-rtnl` 会重定义 `cb_done_ack`）。
 
 ---
 
@@ -69,10 +75,14 @@
    - 裁决原因：实机交叉编译核验证实，该补丁专为 kuncy7 独立维护的 IPQ50xx（带 an8855/qca8k 重构）分支定制，与当前分支基底中 Julius 原生 `0958`（qca-8021q 支持）的上下文完全脱节，故坚决放弃。
 4. **Sinan Cetinkaya 的 USXGMII 临时测试补丁 (`bb32d5b433`)**：
    - 裁决原因：属于早期在 NBG7815 上排查 10G/1G 降速的临时性状态位清理代码，后续已被 Julius 的正式提交 `59f295f58f` 完全取代，合并会导致代码逻辑冗余冲突。
-5. **独立 Host-Driven PPE 方案流控套件 (`luci-app-qca-ppe-qos`, `sqm-scripts-ppe`)**：
-   - 裁决原因：该方案专用于**未加载 NSS 固件**的纯 Linux 主机驱动 PPE 架构，深度依赖 `/sys/module/qca_ppe` 节点；在我们的 NSS 固件与 ECM 加速体系下无法挂载。当前固件采用的原生 `package/nss/nssqos` 与 `sqm-scripts-nss` 为芯片级加速正统方案，两者架构绝缘。
-6. **特定机型专用 Extroot 与分区覆盖脚本 (如 NBG7815 分区魔改)**：
-   - 裁决原因：极度特化于单一特定硬件机型，包含破坏通用升级规范的非标准分区逻辑，不合入通用生产基底。
+5. **独立 Host-Driven PPE 方案流控套件 (`luci-app-qca-ppe-qos`, `sqm-scripts-ppe`) 与动态 `qca_ppe_scheduler.c` AQM/TBF 补丁 (`a22c8d19d8`, `2bed23026c`, `38f352235b`, `fb5c803e0c`, `63861a1cf2`)**：
+   - 裁决原因：该方案专用于**未加载 NSS 固件**的纯 Linux 主机驱动 PPE 架构；本仓库保留原生 824 行静态 `qca_ppe_scheduler.c` 并采用 `package/nss/nssqos` 与 `sqm-scripts-nss` 硬件加速正统方案，两者架构绝缘。
+6. **特定机型专用 Extroot、IPQ50xx-only (`qpic-snand`, `qca-nss-pbuf` CPU cap)、Wi-Fi 7 MLO 专属变更与 `ath11k` 纯 `nss-wifi-drv` 补丁 (`e2be2e0fb9`, `bc5465bb2d`, `080cc9200c`+`76d3449fb4`, `95d6512f4f`, `744e537429`)**：
+   - 裁决原因：IPQ50xx 专有驱动不影响 IPQ807x/60xx；`nss-wifi-drv` 互斥于本仓库 `qca-nss-drv` + `ath11k/nss.c`（相应 QoS Null/EAPOL/`nss_ap_isolate` 能力已由 `214`/`657`/`199-001..003` + `999-943` 覆盖）；`744e537429` 在 NSS offload 下会跳过 `AP_VLAN` 重建。
+7. **`crypto.mk` ARM64 CE 模块化拆包 (`02e70c7548`)**：
+   - 裁决原因：本仓库 `target/linux/qualcommax/config-6.18` 已将 `CONFIG_CRYPTO_AES_ARM64_CE*` 与 `CONFIG_CRYPTO_GHASH_ARM64_CE` 设为内置（`=y`），若按外部模块打包会导致 `.ko` 缺失失败。
+8. **`qca-nss-ecm` `ppp_is_multilink`/`ppp_hold_channels` 无锁替换 (`e16ba70163`)**：
+   - 裁决原因：本仓库内核已应用 `652`/`653` 无锁发包补丁（未携带 QCA `__ppp_*` 导出），且 `qca-nss-ecm/Makefile` 已强制关闭 `PPTP`/`L2TPV2`，PPP 通道识别仅在控制路径建连时触发。
 
 ---
 

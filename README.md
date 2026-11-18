@@ -47,9 +47,9 @@
 - **对应层级**：`base/openwrt-upstream`（当前锚点：`593608fbda`, 2026-11-11）
 - **吸收内容**：
   - Linux 6.18.60 内核通用安全补丁与网络子系统更新（含 `sch_cake` debugfs 卸载清理、批处理 watchdog、per-tin dither、多队列活跃流加权带宽共享）；
-  - `mac80211` 无线协议栈子系统（含 `airtime` 吞吐估算 `WARN_ON_ONCE` 修复、`361` `sdata_dereference()` 修复，以及定向恢复的 14 个上游安全/稳定补丁 `007`–`012`/`014`×2/`015`/`451`/`454`/`479`–`481`，修复 encap offload 加密/端口授权与 AP_VLAN/ROC 稳定性）；
+  - `mac80211` 无线协议栈子系统（含 `airtime` 吞吐估算 `WARN_ON_ONCE` 修复、`361` `sdata_dereference()` 修复，以及定向恢复/合入的上游安全与稳定补丁 `007`–`012`/`014`×2/`015`/`016`/`017`/`451`/`454`/`479`–`481`/`501`–`503`/`505`，修复 encap offload 加密/未授权端口/tainted key、monitor 引用计数泄漏、SW crypto tailroom、fast-rx A-MSDU 统计、仅 monitor 帧过滤、`AP_VLAN`/RCU/ROC 与 64-bit TU 延时）；
   - `firewall4` 原子重启、保活状态匹配、渲染失败保留旧规则及 NAT 防泄露地址族匹配（`003`/`005`/`006`/`007`）；
-  - `mbedtls` 3.6.8（11 CVE）、`odhcpd` (2026-11-16)、`hostapd`（6GHz `op_class=132` 与 `set_bss_order` 防崩溃）、`wifi-scripts`（`legacy_rates` 与 WPA3 FT-SAE）、`netifd`、`procd`、`base-files`（LED 重置与空格名）、`dnsmasq` 上游同步。
+  - `mbedtls` 3.6.8（11 CVE + EC-JPAKE 依赖）、`ubox` (2026-11-15)、`odhcpd` (2026-11-16)、`hostapd`/`wpa_supplicant`（6GHz `op_class=132`、`set_bss_order` 防崩溃、停机先注销 ubus 防 30s 阻塞、长封禁防溢出、`ban_only`/`deauth_now`/先 Disassoc+`924` 保密钥防 MFP 丢包、`911`/`912`/`914`/`919`/`923`）、`wifi-scripts`、`netifd`、`procd`、`base-files`（LED 重置/空格名 + `sysupgrade` 优雅关闭网络发 PADT）、`dnsmasq` 上游同步。
 
 ---
 
@@ -62,8 +62,8 @@
   - **`ath11k` Monitor 监听抓包修复**：`988` 补丁（从 TLV uplink OFDMA info 提取 Trigger-based 帧的 NSS/MCS 速率）与 `989` 补丁（Radiotap/L-SIG 速率误报修复）；
   - **pstore 崩溃转储守卫** (`c3c7c4745a`)：防止早期开机时 NTP 授时跳变将 RAMOOPS 崩溃日志作为过期日志丢弃；
   - **ARMv8 CE 硬件加速** (`aa4eab97fb`)：补齐 AES-CCM 硬件指令集加速；
-  - **`ath11k` 生产级稳定性加固**：PTK 原位替换、国家码管制域信道限制适配、QMI 队列移除保护；
-  - **PPE 队列、时钟与 EDMA 驱动加固**：多队列 TDM 锁步、DRR 调度、multicast 队列防丢包；`qca_edma` 分片 RX 丢弃、ARM64 `smp_store_release`/`smp_load_acquire` TX 环序、`edma_ndo_stop` IRQ 重屏蔽 + `synchronize_irq` 与 `edma_rings_drain` BQL 复位；`qca_ppe` + `pcs-qca-uniphy` 双向时钟选源，以及 IPQ8074/IPQ6018 Port 5 SGMII 速率与 USB Master `BRANCH_HALT_VOTED` 双平台对齐（`0921`/`0922`/`0923`/`0924`）；
+  - **`ath11k` 生产级稳定性与 NSS 协同加固**：PTK 原位替换、国家码管制域信道限制适配、QMI 队列移除保护、WDS 4addr `AP_VLAN` 学习与卸载防 UAF（`999-934`/`999-940`/`999-941`）、RFC 8325 (`dscp_tid_map_rfc8325`) NSS TCL 队列映射（`999-942`）及并发 Monitor 下 WMI/NSS 双向 Ethernet 锁定与 `nss_ap_isolate` 恢复同步（`999-943`）；
+  - **PPE 队列、时钟与 EDMA 驱动加固**：多队列 TDM 锁步、DRR 调度、multicast 队列防丢包与 `qca_ppe_port_mdb_del` CPU 端口守卫、Port 3 `pcs_args` 长度校验；`qca_edma` 分片 RX 丢弃、ARM64 `smp_store_release`/`smp_load_acquire` TX 环序、`edma_ndo_stop` IRQ 重屏蔽 + `synchronize_irq` 与 `edma_rings_drain` BQL 复位；`qca_ppe` + `pcs-qca-uniphy` 双向时钟选源，以及 IPQ8074/IPQ6018 Port 5 SGMII 速率与 USB Master `BRANCH_HALT_VOTED` 双平台对齐（`0921`/`0922`/`0923`/`0924`）；
   - **NSS 驱动边界安全审计加固**：`qca-nss-drv` `0009`（`dynamic_interface` 发送路径类型与节点越界校验）、`qca-nss-clients` `0005`（`match` 与 `tunipip6` sysctl `copy_from_user` `-EFAULT`、无符号 `if_num` 与空指针守卫）。
 
 ---

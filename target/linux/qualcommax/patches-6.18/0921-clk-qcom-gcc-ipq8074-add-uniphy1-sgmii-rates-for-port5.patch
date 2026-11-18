@@ -18,7 +18,7 @@ Signed-off-by: Chris Busch <chrisb@toroidalsoftware.com>
 ---
 --- a/drivers/clk/qcom/gcc-ipq8074.c
 +++ b/drivers/clk/qcom/gcc-ipq8074.c
-@@ -1678,11 +1678,13 @@ static struct clk_regmap_div nss_port4_t
+@@ -1679,13 +1679,15 @@ static struct clk_regmap_div nss_port4_t
  };
  
  static const struct freq_conf ftbl_nss_port5_rx_clk_src_25[] = {
@@ -32,7 +32,9 @@ Signed-off-by: Chris Busch <chrisb@toroidalsoftware.com>
 +	C(P_UNIPHY1_RX, 1, 0, 0),
  	C(P_UNIPHY0_RX, 1, 0, 0),
  };
-@@ -1748,11 +1750,13 @@ static struct clk_regmap_div nss_port5_r
+ 
+ static const struct freq_multi_tbl ftbl_nss_port5_rx_clk_src[] = {
+@@ -1749,13 +1751,15 @@ static struct clk_regmap_div nss_port5_r
  };
  
  static const struct freq_conf ftbl_nss_port5_tx_clk_src_25[] = {
@@ -46,3 +48,5 @@ Signed-off-by: Chris Busch <chrisb@toroidalsoftware.com>
 +	C(P_UNIPHY1_TX, 1, 0, 0),
  	C(P_UNIPHY0_TX, 1, 0, 0),
  };
+ 
+ static const struct freq_multi_tbl ftbl_nss_port5_tx_clk_src[] = {

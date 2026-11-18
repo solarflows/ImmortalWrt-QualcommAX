@@ -270,10 +270,10 @@ index 00bc794..cfc0a4a 100644
  	}
  	nss_unregister_pppoe_session_if(if_number);
  	status = nss_dynamic_interface_dealloc_node(if_number, NSS_DYNAMIC_INTERFACE_TYPE_PPPOE);
-@@ -195,7 +192,7 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
+@@ -195,7 +192,6 @@ static int nss_connmgr_pppoe_disconnect(struct net_device *dev)
  				       entry->info.server_mac, entry->info.local_mac);
  	}
- done:
+-done:
 -	kfree(entry);
 +	kfree_rcu(entry, rcu);
  	return NOTIFY_DONE;

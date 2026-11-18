@@ -129,7 +129,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  {%+ if (redirect.smacs_neg): -%}
 --- a/root/usr/share/ucode/fw4.uc
 +++ b/root/usr/share/ucode/fw4.uc
-@@ -540,6 +540,29 @@ function nft_try_hw_offload(devices) {
+@@ -542,6 +542,29 @@ function nft_try_hw_offload(devices) {
  	return (rc == 0);
  }
  
@@ -189,7 +189,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  		this.state.defaults = defs;
  	},
  
-@@ -2184,6 +2216,8 @@ return {
+@@ -2185,6 +2217,8 @@ return {
  
  			masq6: [ "bool" ],
  
@@ -198,7 +198,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  			extra: [ "string", null, UNSUPPORTED ],
  			extra_src: [ "string", null, UNSUPPORTED ],
  			extra_dest: [ "string", null, UNSUPPORTED ],
-@@ -2201,6 +2235,8 @@ return {
+@@ -2200,6 +2234,8 @@ return {
  			counter: [ "bool", "1" ]
  		});
  
@@ -207,8 +207,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  		if (zone === false) {
  			this.warn_section(data, "skipped due to invalid options");
  			return;
-@@ -2405,8 +2441,11 @@ return {
- 		zone.related_subnets = related_subnets;
+@@ -2406,8 +2442,11 @@ return {
  		zone.related_physdevs = related_physdevs;
  		zone.related_l3devs = related_l3devs;
  

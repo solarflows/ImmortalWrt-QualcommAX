@@ -17,7 +17,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
 
 --- a/arch/arm64/boot/dts/qcom/ipq6018.dtsi
 +++ b/arch/arm64/boot/dts/qcom/ipq6018.dtsi
-@@ -447,7 +447,9 @@
+@@ -410,7 +410,9 @@
  				 <&uniphy1 UNIPHY_CLK_RX>,
  				 <&uniphy1 UNIPHY_CLK_TX>,
  				 <&cmn_pll IPQ6018_BIAS_PLL_CC_CLK>,
@@ -28,7 +28,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  			clock-names = "xo",
  				      "sleep_clk",
  				      "uniphy0_gcc_rx_clk",
-@@ -455,7 +457,9 @@
+@@ -418,7 +420,9 @@
  				      "uniphy1_gcc_rx_clk",
  				      "uniphy1_gcc_tx_clk",
  				      "bias_pll_cc_clk",

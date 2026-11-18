@@ -1,0 +1,32 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] clk: qcom: gcc-ipq6018: set BRANCH_HALT_VOTED for USB master clocks
+
+Like IPQ8074, IPQ5332, and IPQ5424, vendor U-Boot on IPQ6018 boards may leave
+USB master clocks active without releasing hardware votes, triggering
+"status stuck at 'on'" warnings and tainting the kernel when Linux disables
+unused clocks at boot.
+
+Mark gcc_usb0_master_clk and gcc_usb1_master_clk with BRANCH_HALT_VOTED so
+clk_branch_wait() avoids polling the halt register when disabling while
+keeping USB functional when enabled.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/drivers/clk/qcom/gcc-ipq6018.c
++++ b/drivers/clk/qcom/gcc-ipq6018.c
+@@ -3920,6 +3920,7 @@
+ 
+ static struct clk_branch gcc_usb0_master_clk = {
+ 	.halt_reg = 0x3e000,
++	.halt_check = BRANCH_HALT_VOTED,
+ 	.clkr = {
+ 		.enable_reg = 0x3e000,
+ 		.enable_mask = BIT(0),
+@@ -4078,6 +4079,7 @@
+ 
+ static struct clk_branch gcc_usb1_master_clk = {
+ 	.halt_reg = 0x3f000,
++	.halt_check = BRANCH_HALT_VOTED,
+ 	.clkr = {
+ 		.enable_reg = 0x3f000,
+ 		.enable_mask = BIT(0),

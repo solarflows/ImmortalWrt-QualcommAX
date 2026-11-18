@@ -199,7 +199,8 @@ return baseclass.extend({
 			},
 			update: function(items, freeze) {
 				var list = items ? items.slice() : [];
-				patchRows(freeze ? list : sortItems(list), !!freeze);
+				var shouldSort = !freeze && (cfg.autoSort !== false || !tbody.querySelector('tr[data-key]'));
+				patchRows(shouldSort ? sortItems(list) : list, !!freeze);
 			}
 		};
 	}

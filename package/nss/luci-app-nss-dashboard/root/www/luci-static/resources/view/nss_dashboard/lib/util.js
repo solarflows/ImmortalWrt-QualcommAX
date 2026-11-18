@@ -2,7 +2,7 @@
 'require baseclass';
 
 return baseclass.extend({
-	CSS_VERSION: '261028c',
+	CSS_VERSION: '261118e',
 
 	cssTextCache: null,
 

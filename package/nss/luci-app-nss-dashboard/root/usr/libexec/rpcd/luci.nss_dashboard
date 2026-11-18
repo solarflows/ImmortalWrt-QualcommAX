@@ -150,25 +150,38 @@ get_flows() {
 		for line in f:lines() do
 			local fam = (line:sub(1, 4) == "ipv6") and 6 or 4
 			local proto = line:match("^%S+%s+%d+%s+(%S+)") or "tcp"
-			local s1, d1, sp1, dp1, pk1, b1, s2, d2, sp2, dp2, pk2, b2 = line:match("src=(%S+)%s+dst=(%S+)%s+sport=(%d+)%s+dport=(%d+)%s+packets=(%d+)%s+bytes=(%d+)%s+src=(%S+)%s+dst=(%S+)%s+sport=(%d+)%s+dport=(%d+)%s+packets=(%d+)%s+bytes=(%d+)")
-			if s1 then
-				local tot_p = tonumber(pk1) + tonumber(pk2)
-				if tot_p > 0 then
-					local mark = tonumber(line:match("mark=(%d+)")) or 0
-					local state = (proto == "tcp") and (line:match("%s+([%u_]+)%s+src=") or "") or ""
-					n = n + 1
-					items[n] = {
-						fam,
-						proto,
-						s1,
-						tonumber(sp1),
-						d1,
-						tonumber(dp1),
-						tot_p,
-						tonumber(b1) + tonumber(b2),
-						mark,
-						state
-					}
+			-- Split original tuple and remaining tail so middle status flags ([UNREPLIED] / [OFFLOAD]) do not break tuple matching
+			local s1, d1, sp1, dp1, pk1, b1, tail = line:match("src=(%S+)%s+dst=(%S+)%s+sport=(%d+)%s+dport=(%d+)%s+packets=(%d+)%s+bytes=(%d+)%s+(.*)")
+			if s1 and tail then
+				local s2, d2, sp2, dp2, pk2, b2 = tail:match("src=(%S+)%s+dst=(%S+)%s+sport=(%d+)%s+dport=(%d+)%s+packets=(%d+)%s+bytes=(%d+)")
+				if s2 then
+					local is_loopback = (s1 == "127.0.0.1" and d1 == "127.0.0.1")
+						or (s1 == "::1" and d1 == "::1")
+						or (s1 == "0:0:0:0:0:0:0:1" and d1 == "0:0:0:0:0:0:0:1")
+					if not is_loopback then
+						local tot_p = tonumber(pk1) + tonumber(pk2)
+						local state = (proto == "tcp") and (line:match("%s+([%u_]+)%s+src=") or "") or ""
+						local is_unreplied = (line:find("[UNREPLIED]", 1, true) ~= nil)
+						local is_assured = (line:find("[ASSURED]", 1, true) ~= nil)
+						local is_offload = (line:find("[OFFLOAD]", 1, true) ~= nil) or (line:find("[HW_OFFLOAD]", 1, true) ~= nil)
+						-- Keep active ESTABLISHED/ASSURED/OFFLOAD flows across nlbwmon 30s counter resets even when pkts == 0
+						if tot_p > 0 or is_offload or (not is_unreplied and (is_assured or state == "ESTABLISHED")) then
+							local mark = tonumber(line:match("mark=(%d+)")) or 0
+							n = n + 1
+							items[n] = {
+								fam,
+								proto,
+								s1,
+								tonumber(sp1),
+								d1,
+								tonumber(dp1),
+								tot_p,
+								tonumber(b1) + tonumber(b2),
+								mark,
+								state
+							}
+						end
+					end
 				end
 			end
 		end

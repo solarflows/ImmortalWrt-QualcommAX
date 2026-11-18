@@ -1,0 +1,31 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] nss-drv: validate dynamic interface type and dealloc_node bounds in tx path
+
+Fix the off-by-one message type bound check in nss_dynamic_interface_tx()
+(ncm->type >= NSS_DYNAMIC_INTERFACE_MAX, matching nss_dynamic_interface_handler())
+and reject DEALLOC_NODE messages whose if_num falls outside the dynamic
+interface range for all callers (including direct async tx callers).
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/nss_dynamic_interface.c
++++ b/nss_dynamic_interface.c
+@@ -156,11 +156,17 @@ nss_tx_status_t nss_dynamic_interface_tx(struct nss_ctx_instance *nss_ctx, struc
+ 		return NSS_TX_FAILURE;
+ 	}
+ 
+-	if (ncm->type > NSS_DYNAMIC_INTERFACE_MAX) {
++	if (ncm->type >= NSS_DYNAMIC_INTERFACE_MAX) {
+ 		nss_warning("%px: message type out of range: %d", nss_ctx, ncm->type);
+ 		return NSS_TX_FAILURE;
+ 	}
+ 
++	if (ncm->type == NSS_DYNAMIC_INTERFACE_DEALLOC_NODE &&
++	    !nss_is_dynamic_interface(msg->msg.dealloc_node.if_num)) {
++		nss_warning("%px: dealloc_node if_num out of range: %d", nss_ctx, msg->msg.dealloc_node.if_num);
++		return NSS_TX_FAILURE_BAD_PARAM;
++	}
++
+ 	/*
+ 	 * Trace messages.
+ 	 */

@@ -250,7 +250,7 @@ List banned clients.
 
 
 ## notify_response
-When enabled, hostapd will send a ubus notification and wait for a response before responding to various requests. This is used by e.g. usteer to make it possible to ignore probe requests.
+When enabled, hostapd will send a ubus notification and wait for a response before responding to various requests. This is used by e.g. usteer to make it possible to ignore probe requests. The `address` of an `auth` or `assoc` notification is the MLD address of a client MLD.
 
 :warning: enabling this will cause hostapd to stop responding to probe requests unless a ubus subscriber responds to the ubus notifications.
 

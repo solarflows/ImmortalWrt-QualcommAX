@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
 PKG_VERSION:=2026.07
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_HASH:=78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e
 PKG_BUILD_DEPENDS:=!(TARGET_ramips||TARGET_mediatek_mt7623):arm-trusted-firmware-tools/host
 PKG_PARALLEL_VARIANTS:=1
@@ -991,6 +991,18 @@ define U-Boot/mt7986_jdcloud_re-cp-03
   DEPENDS:=+trusted-firmware-a-mt7986-emmc-ddr4
 endef
 
+define U-Boot/mt7986_mercusys_h90x-v1
+  NAME:=MERCUSYS Halo H90X v1
+  BUILD_SUBTARGET:=filogic
+  BUILD_DEVICES:=mercusys_h90x-v1-ubi
+  UBOOT_CONFIG:=mt7986_mercusys_h90x-v1
+  UBOOT_IMAGE:=u-boot.fip
+  BL2_BOOTDEV:=spim-nand-ubi
+  BL2_SOC:=mt7986
+  BL2_DDRTYPE:=ddr3
+  DEPENDS:=+trusted-firmware-a-mt7986-spim-nand-ubi-ddr3
+endef
+
 define U-Boot/mt7986_mercusys_mr90x-v1
   NAME:=MERCUSYS MR90X v1
   BUILD_SUBTARGET:=filogic
@@ -1591,6 +1603,7 @@ UBOOT_TARGETS := \
 	mt7986_bananapi_bpi-r3-mini-snand \
 	mt7986_glinet_gl-mt6000 \
 	mt7986_jdcloud_re-cp-03 \
+	mt7986_mercusys_h90x-v1 \
 	mt7986_mercusys_mr90x-v1 \
 	mt7986_netcore_n60 \
 	mt7986_netcore_n60-pro \

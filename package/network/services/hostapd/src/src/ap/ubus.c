@@ -3377,9 +3377,8 @@ ubus_event_cb(struct ubus_notify_request *req, int idx, int ret)
 	ureq->resp = ret;
 }
 
-static int hostapd_ubus_request_status(struct hostapd_data *hapd,
-				       struct hostapd_ubus_request *req,
-				       const u8 *addr)
+static int hostapd_ubus_ban_status(struct hostapd_data *hapd,
+				   const u8 *addr)
 {
 	struct ubus_banned_client *ban;
 
@@ -3403,6 +3402,10 @@ static int hostapd_ubus_request_status(struct hostapd_data *hapd,
 	const char *type = "mgmt";
 	struct ubus_event_req ureq = {};
 	struct ubus_object *obj = hostapd_ubus_notify_obj(hapd);
+	const u8 *addr;
+	u16 ban_status;
+
+	addr = req->mld_addr ? req->mld_addr : link_addr;
 
 	ban_status = hostapd_ubus_ban_status(hapd, req->mld_addr);
 	if (!ban_status)

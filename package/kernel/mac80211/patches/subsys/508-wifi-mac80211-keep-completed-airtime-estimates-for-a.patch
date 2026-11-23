@@ -43,9 +43,9 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  enum ieee80211_hw_flags {
 @@ -3143,6 +3152,7 @@ enum ieee80211_hw_flags {
  	IEEE80211_HW_HANDLES_QUIET_CSA,
++	IEEE80211_HW_DEFERRED_AIRTIME_REPORT,
  	IEEE80211_HW_STRICT,
  	IEEE80211_HW_SUPPORTS_NDP_BLOCKACK,
-+	IEEE80211_HW_DEFERRED_AIRTIME_REPORT,
  
  	/* keep last, obviously */
  	NUM_IEEE80211_HW_FLAGS
@@ -64,9 +64,9 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 +++ b/net/mac80211/debugfs.c
 @@ -483,6 +483,7 @@ static const char *hw_flag_names[] = {
  	FLAG(HANDLES_QUIET_CSA),
++	FLAG(DEFERRED_AIRTIME_REPORT),
  	FLAG(STRICT),
  	FLAG(SUPPORTS_NDP_BLOCKACK),
-+	FLAG(DEFERRED_AIRTIME_REPORT),
  #undef FLAG
  };
  

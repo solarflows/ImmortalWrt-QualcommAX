@@ -41,6 +41,9 @@
 | **P-27** | IPQ8074 片上 AHB Wi-Fi DP 环中断多核散列 | `package/kernel/mac80211/patches/ath11k/983-*.patch` | `JuliusBairaktaris` (`539bc14f22`) | 为片上 AHB 无线设备（IPQ8074 内部 Wi-Fi）的 4 个 REO 目的环与 TX 完成环通过 `irq_set_affinity_and_hint()` 自动均匀散列至 CPU0~CPU3，释放 4 流 TCP 上传多核线速吞吐。 | ✅ 通过 |
 | **P-28** | ath11k TCL 批处理发送消除原子锁开销 (`684c34518e`) | `package/kernel/mac80211/patches/ath11k/` | `JuliusBairaktaris` (`684c34518e`) | 经过深度源码审计与交叉编译验证，该补丁强耦合了 Julius 上游纯主机 PPE TSO 转发驱动栈（`ath11k_dp_tx_fraglist_tso`），在满血 NSS 硬件协处理器直通架构下无应用场景且会导致 patch reject。 | ❌ 判定免除 |
 | **P-29** | uclient HTTP 突破 4KB CSP Header 导致超时挂死 | `package/libs/uclient/Makefile` & `patches/0001,0002` | `JuliusBairaktaris` (`0514ded08c`), PR #20 | 解决 GitHub Release 重定向附带 >4096 字节 CSP 头导致 `uclient-fetch` 解析阻塞挂起（exit 4），支持跨流缓冲区拼装 Header（上限 64KB）。 | ✅ 通过 |
+| **P-30** | mac80211 批处理延迟上报 Airtime 空口时间估算校准 | `package/kernel/mac80211/patches/subsys/508-*.patch` | `upstream-openwrt` (`bd6492c2a0` by Felix Fietkau) | 针对高通等芯片固件异步延后上报 STA 空口耗时的情况，引入 `IEEE80211_HW_DEFERRED_AIRTIME_REPORT` 延后扣除已完成 airtime 计数，根除空口调度器（Airtime Fairness）权重漂移问题。 | ✅ 通过 |
+| **P-31** | PPE 主机流表驱动迎回与 Makefile 链接期条件压制 | `target/linux/qualcommax/patches-6.18/0952-*.patch` | 自研架构重构 (消除 `modify/delete` 冲突) | 迎回上游被删的 4 个主机 PPE 驱动文件（`qca_ppe_flow_offload.c` 等）保持代码树物理完整；在 `0952` 补丁中利用 `ifeq ($(CONFIG_QCA_NSS_DRV),)` 在开启 NSS 时剥离链接对象，实现与上游 master 平滑无冲突自动合并。 | ✅ 通过 |
+| **P-32** | hostapd 终端被拒连接实时广播 ubus `connect-refused` 事件 | `package/network/services/hostapd/patches/915-*.patch` | `upstream-openwrt` (`0ea98a49b3` by Felix Fietkau) | 当终端因密码错误、黑名单拦截、参数不兼容被拒绝关联时，通过 ubus 抛出带有状态码与详细原因代码的 `connect-refused` 广播，大幅增强无线排障可观测性。 | ✅ 通过 |
 
 ---
 

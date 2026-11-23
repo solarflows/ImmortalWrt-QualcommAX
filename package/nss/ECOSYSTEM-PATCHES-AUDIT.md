@@ -37,6 +37,10 @@
 | **P-23** | ath11k NSS WDS、RFC 8325 DSCP-TID、Monitor 模式与隔离同步 | `package/kernel/mac80211/patches/nss/{subsys/999-934,ath11k/999-940..999-943}` | `kuncy7` (`686fa9be73`, `5f7db84d4c`, `1d295096c4`), `JuliusBairaktaris` (`1ea004caca`, `8722828b79`) 移植适配 `ab->nss.enabled` | `999-934`/`999-940`/`999-941` 修复 WDS 4addr `AP_VLAN` ext_vdev offload、SA 学习与卸载防 UAF；`999-942` 在 NSS 模式下以 RFC 8325 写入 TCL DSCP-to-TID 表；`999-943` 在并发 monitor 关闭 decap offload 时锁定 WMI/NSS 双向 Ethernet 并在 `add_interface` 重同步 `nss_ap_isolate`。 | ✅ 通过 |
 | **P-24** | hostapd / wpa_supplicant ubus 与客户端断连/MFP/CAC/PBC/DPP 加固 | `package/network/services/hostapd/{Makefile,README.md,files/*,patches/{911,912,914,919,923,924}}` | `upstream-openwrt` (`112c9284a9`, `7d8411109f`, `e7295e8438`, `7423e3bd86`, `87be38fd9b`, `f2b27e8544`, `29278064eb`, `3586d40fb1`, `e8e130a85f`, `45ad96f203`, `655fab3f8d`, `68b98b5dce`, `a0cdc009a5`, `ce7623459c`, `e0ee54a38f`, `dcfa993ce4`) | 停机先删 ubus 对象消除 `wpad` 重启 30s netifd 阻塞；修复 ubus ban 释放(`os_free`)与 >71.6 分钟 32 位超时溢出；`del_client` 支持 `ban_only`/`deauth_now` 与先发 Disassoc 并通过 `924` 保留未 ACK 密钥确保 MFP Deauth 生效；`923` 忽略过期 TX status；保留并上报 CAC；`919` 拒绝响应带 Multi-AP IE；`rrm_beacon_req` 支持 `last_indication`；`911` active PBC Beacon 带 UUID-E；`912` DPP 超时重试；校验 `RECONFIGURE == "OK"`。 | ✅ 通过 |
 | **P-25** | ubox Git HEAD 与 mbedtls EC-JPAKE 依赖补齐 | `package/system/ubox/Makefile`, `package/libs/mbedtls/Config.in` | `upstream-openwrt` (`7424e2ca30`, `13fc2e4e4b`) | 同步 ubox 至 2026-11-15，并选择 EC-JPAKE 所需 mbedtls 前置依赖。 | ✅ 通过 |
+| **P-26** | mac80211 阻断 AP_VLAN 跨接口数据泄露 (CVE-2026-98822) | `package/kernel/mac80211/patches/subsys/018-*.patch` | `upstream-openwrt` (`0e2c2badbe` by Felix Fietkau) 专精适配 NSS | `ieee80211_lookup_ra_sta()` 限制仅在当前接口匹配目标 STA（控制端口/EAPOL 帧除外），根除网桥泛洪时单播帧跨 VLAN 穿透防火墙泄漏漏洞；重构兼容 NSS 补丁 657 EAPOL 硬件封装。 | ✅ 通过 |
+| **P-27** | IPQ8074 片上 AHB Wi-Fi DP 环中断多核散列 | `package/kernel/mac80211/patches/ath11k/983-*.patch` | `JuliusBairaktaris` (`539bc14f22`) | 为片上 AHB 无线设备（IPQ8074 内部 Wi-Fi）的 4 个 REO 目的环与 TX 完成环通过 `irq_set_affinity_and_hint()` 自动均匀散列至 CPU0~CPU3，释放 4 流 TCP 上传多核线速吞吐。 | ✅ 通过 |
+| **P-28** | ath11k TCL 批处理发送消除原子锁开销 (`684c34518e`) | `package/kernel/mac80211/patches/ath11k/` | `JuliusBairaktaris` (`684c34518e`) | 经过深度源码审计与交叉编译验证，该补丁强耦合了 Julius 上游纯主机 PPE TSO 转发驱动栈（`ath11k_dp_tx_fraglist_tso`），在满血 NSS 硬件协处理器直通架构下无应用场景且会导致 patch reject。 | ❌ 判定免除 |
+| **P-29** | uclient HTTP 突破 4KB CSP Header 导致超时挂死 | `package/libs/uclient/Makefile` & `patches/0001,0002` | `JuliusBairaktaris` (`0514ded08c`), PR #20 | 解决 GitHub Release 重定向附带 >4096 字节 CSP 头导致 `uclient-fetch` 解析阻塞挂起（exit 4），支持跨流缓冲区拼装 Header（上限 64KB）。 | ✅ 通过 |
 
 ---
 
@@ -83,6 +87,8 @@
    - 裁决原因：本仓库 `target/linux/qualcommax/config-6.18` 已将 `CONFIG_CRYPTO_AES_ARM64_CE*` 与 `CONFIG_CRYPTO_GHASH_ARM64_CE` 设为内置（`=y`），若按外部模块打包会导致 `.ko` 缺失失败。
 8. **`qca-nss-ecm` `ppp_is_multilink`/`ppp_hold_channels` 无锁替换 (`e16ba70163`)**：
    - 裁决原因：本仓库内核已应用 `652`/`653` 无锁发包补丁（未携带 QCA `__ppp_*` 导出），且 `qca-nss-ecm/Makefile` 已强制关闭 `PPTP`/`L2TPV2`，PPP 通道识别仅在控制路径建连时触发。
+9. **`ath11k` TCL 批处理非原子分段计数 (`684c34518e`)**：
+   - 裁决原因：经交叉编译核验证实，该补丁强依赖 Julius 针对非 NSS 纯主机 PPE 路由转发定制的切片合并补丁（`353b6253b0`，引入 `ath11k_dp_tx_fraglist_tso` 与 `qca_ppe_vp_flow_tso` 虚拟端口钩子）。在当前满血 NSS 架构下，Wi-Fi 流量由硬件协处理器直通接管，根本不走主机 PPE TSO 软件切片；脱离其定制 PPE 驱动强行合入会导致 `core.h` 与 `dp_tx.c` 出现 5 处严重 hunk reject，故判定免除。
 
 ---
 

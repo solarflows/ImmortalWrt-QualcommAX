@@ -1,0 +1,283 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-drv: fix dynamic interface/lag stack UAF, sync reinit_completion, and rx bounds
+
+1. In nss_dynamic_interface.c and nss_lag.c:
+   - Synchronous node alloc/dealloc and lag state changes passed local stack
+     structs (di_data, lag_msg_state) as app_data to firmware via async rings.
+     When wait_for_completion_timeout() expired, the function returned and
+     destroyed the stack frame. Belated firmware ACKs invoked the callback,
+     writing into stale stack memory and causing kernel Oops crashes.
+     Fix by lifting these states into module-scoped static structs protected
+     by dedicated mutexes (nss_dynamic_interface_mutex, nss_lag_mutex),
+     matching the pattern used by nss_ipv4_pvt and nss_bridge_pvt.
+2. In nss_ipv4.c, nss_ipv6.c, nss_bridge.c, and nss_vlan.c:
+   - Call reinit_completion() before issuing synchronous requests under sem.
+     Prevents stale completion.done flags left by delayed ACKs from causing
+     subsequent sync requests to return instantly without waiting.
+3. In nss_ipv4.c and nss_ipv6.c:
+   - Adjust message length check from rigid sizeof(struct nss_ipvX_msg) to
+     nss_ctx->rx_msg_buf_len, permitting variable-length CONN_STATS_SYNC_MANY
+     firmware replies without spurious drops.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+diff --git a/nss_bridge.c b/nss_bridge.c
+index 379a307af3..9f5a695295 100644
+--- a/nss_bridge.c
++++ b/nss_bridge.c
+@@ -178,6 +178,7 @@ nss_tx_status_t nss_bridge_tx_msg_sync(struct nss_ctx_instance *nss_ctx, struct
+ 	int ret = 0;
+ 
+ 	down(&bridge_pvt.sem);
++	reinit_completion(&bridge_pvt.complete);
+ 	bridge_pvt.cb = (void *)nbm->cm.cb;
+ 	bridge_pvt.app_data = (void *)nbm->cm.app_data;
+ 
+diff --git a/nss_dynamic_interface.c b/nss_dynamic_interface.c
+index 6f981b8345..57fe65de58 100644
+--- a/nss_dynamic_interface.c
++++ b/nss_dynamic_interface.c
+@@ -28,6 +28,11 @@ struct nss_dynamic_interface_msg_data {
+ 	enum nss_cmn_response response;	/* Message response */
+ };
+ 
++static DEFINE_MUTEX(nss_dynamic_interface_mutex);
++static struct nss_dynamic_interface_msg_data nss_dynamic_interface_pvt = {
++	.complete = COMPLETION_INITIALIZER(nss_dynamic_interface_pvt.complete),
++};
++
+ static nss_dynamic_interface_assigned nss_dynamic_interface_assigned_types[NSS_CORE_MAX][NSS_MAX_DYNAMIC_INTERFACES]; /* Array of assigned interface types */
+ 
+ /*
+@@ -209,23 +214,24 @@ int nss_dynamic_interface_alloc_node(enum nss_dynamic_interface_type type)
+ 	struct nss_ctx_instance *nss_ctx = NULL;
+ 	struct nss_dynamic_interface_msg ndim;
+ 	struct nss_dynamic_interface_alloc_node_msg *ndia;
+-	struct nss_dynamic_interface_msg_data di_data;
+ 	uint32_t core_id;
+ 	nss_tx_status_t status;
++	int if_num = -1;
+ 
+ 	if (type >= NSS_DYNAMIC_INTERFACE_TYPE_MAX) {
+ 		nss_warning("Dynamic if msg drooped as type is wrong %d\n", type);
+ 		return -1;
+ 	}
+ 
++	mutex_lock(&nss_dynamic_interface_mutex);
+ 	core_id = nss_top_main.dynamic_interface_table[type];
+ 	nss_ctx = (struct nss_ctx_instance *)&nss_top_main.nss[core_id];
+-	di_data.if_num = -1;
+-	di_data.response = NSS_CMN_RESPONSE_ACK;
+-	init_completion(&di_data.complete);
++	nss_dynamic_interface_pvt.if_num = -1;
++	nss_dynamic_interface_pvt.response = NSS_CMN_RESPONSE_ACK;
++	reinit_completion(&nss_dynamic_interface_pvt.complete);
+ 
+ 	nss_dynamic_interface_msg_init(&ndim, NSS_DYNAMIC_INTERFACE, NSS_DYNAMIC_INTERFACE_ALLOC_NODE,
+-				sizeof(struct nss_dynamic_interface_alloc_node_msg), nss_dynamic_interface_callback, (void *)&di_data);
++				sizeof(struct nss_dynamic_interface_alloc_node_msg), nss_dynamic_interface_callback, (void *)&nss_dynamic_interface_pvt);
+ 
+ 	ndia = &ndim.msg.alloc_node;
+ 	ndia->type = type;
+@@ -239,21 +245,25 @@ int nss_dynamic_interface_alloc_node(enum nss_dynamic_interface_type type)
+ 	/*
+ 	 * Calling synchronous transmit function.
+ 	 */
+-	status = nss_dynamic_interface_tx_sync(nss_ctx, &di_data, &ndim);
++	status = nss_dynamic_interface_tx_sync(nss_ctx, &nss_dynamic_interface_pvt, &ndim);
+ 	if (status != NSS_TX_SUCCESS) {
+ 		nss_warning("%px not able to transmit alloc node msg\n", nss_ctx);
++		mutex_unlock(&nss_dynamic_interface_mutex);
+ 		return -1;
+ 	}
+ 
+ 	/*
+ 	 * Check response and return -1 if its a NACK else proceed.
+ 	 */
+-	if (di_data.response != NSS_CMN_RESPONSE_ACK) {
+-		nss_warning("%px Received NACK from NSS - Response:%d\n", nss_ctx, di_data.response);
++	if (nss_dynamic_interface_pvt.response != NSS_CMN_RESPONSE_ACK) {
++		nss_warning("%px Received NACK from NSS - Response:%d\n", nss_ctx, nss_dynamic_interface_pvt.response);
++		mutex_unlock(&nss_dynamic_interface_mutex);
+ 		return -1;
+ 	}
+ 
+-	return di_data.if_num;
++	if_num = nss_dynamic_interface_pvt.if_num;
++	mutex_unlock(&nss_dynamic_interface_mutex);
++	return if_num;
+ }
+ 
+ /*
+@@ -269,7 +279,6 @@ nss_tx_status_t nss_dynamic_interface_dealloc_node(int if_num, enum nss_dynamic_
+ 	struct nss_ctx_instance *nss_ctx = NULL;
+ 	struct nss_dynamic_interface_msg ndim;
+ 	struct nss_dynamic_interface_dealloc_node_msg *ndid;
+-	struct nss_dynamic_interface_msg_data di_data;
+ 	uint32_t core_id;
+ 	nss_tx_status_t status;
+ 
+@@ -280,16 +289,18 @@ nss_tx_status_t nss_dynamic_interface_dealloc_node(int if_num, enum nss_dynamic_
+ 
+ 	core_id = nss_top_main.dynamic_interface_table[type];
+ 	nss_ctx = (struct nss_ctx_instance *)&nss_top_main.nss[core_id];
+-	di_data.response = NSS_CMN_RESPONSE_ACK;
+-	init_completion(&di_data.complete);
+ 
+ 	if (nss_is_dynamic_interface(if_num) == false) {
+ 		nss_warning("%px: nss_dynamic_interface if_num is not in range %d\n", nss_ctx, if_num);
+ 		return NSS_TX_FAILURE_BAD_PARAM;
+ 	}
+ 
++	mutex_lock(&nss_dynamic_interface_mutex);
++	nss_dynamic_interface_pvt.response = NSS_CMN_RESPONSE_ACK;
++	reinit_completion(&nss_dynamic_interface_pvt.complete);
++
+ 	nss_dynamic_interface_msg_init(&ndim, NSS_DYNAMIC_INTERFACE, NSS_DYNAMIC_INTERFACE_DEALLOC_NODE,
+-				sizeof(struct nss_dynamic_interface_dealloc_node_msg), nss_dynamic_interface_callback, (void *)&di_data);
++				sizeof(struct nss_dynamic_interface_dealloc_node_msg), nss_dynamic_interface_callback, (void *)&nss_dynamic_interface_pvt);
+ 
+ 	ndid = &ndim.msg.dealloc_node;
+ 	ndid->type = type;
+@@ -298,17 +309,20 @@ nss_tx_status_t nss_dynamic_interface_dealloc_node(int if_num, enum nss_dynamic_
+ 	/*
+ 	 * Calling synchronous transmit function.
+ 	 */
+-	status = nss_dynamic_interface_tx_sync(nss_ctx, &di_data, &ndim);
++	status = nss_dynamic_interface_tx_sync(nss_ctx, &nss_dynamic_interface_pvt, &ndim);
+ 	if (status != NSS_TX_SUCCESS) {
+ 		nss_warning("%px not able to transmit dealloc node msg\n", nss_ctx);
++		mutex_unlock(&nss_dynamic_interface_mutex);
+ 		return status;
+ 	}
+ 
+-	if (di_data.response != NSS_CMN_RESPONSE_ACK) {
++	if (nss_dynamic_interface_pvt.response != NSS_CMN_RESPONSE_ACK) {
+ 		nss_warning("%px Received NACK from NSS\n", nss_ctx);
++		mutex_unlock(&nss_dynamic_interface_mutex);
+ 		return NSS_TX_FAILURE;
+ 	}
+ 
++	mutex_unlock(&nss_dynamic_interface_mutex);
+ 	return status;
+ }
+ 
+diff --git a/nss_ipv4.c b/nss_ipv4.c
+index 2713d32554..292e865dcb 100644
+--- a/nss_ipv4.c
++++ b/nss_ipv4.c
+@@ -94,7 +94,7 @@ static void nss_ipv4_rx_msg_handler(struct nss_ctx_instance *nss_ctx, struct nss
+ 		return;
+ 	}
+ 
+-	if (nss_cmn_get_msg_len(ncm) > sizeof(struct nss_ipv4_msg)) {
++	if (nss_cmn_get_msg_len(ncm) > nss_ctx->rx_msg_buf_len) {
+ 		nss_warning("%px: message length is invalid: %d", nss_ctx, nss_cmn_get_msg_len(ncm));
+ 		return;
+ 	}
+@@ -305,6 +305,7 @@ nss_tx_status_t nss_ipv4_tx_sync(struct nss_ctx_instance *nss_ctx, struct nss_ip
+ 	int ret = 0;
+ 
+ 	down(&nss_ipv4_pvt.sem);
++	reinit_completion(&nss_ipv4_pvt.complete);
+ 	nss_ipv4_pvt.cb = (void *)nim->cm.cb;
+ 	nss_ipv4_pvt.app_data = (void *)nim->cm.app_data;
+ 
+diff --git a/nss_ipv6.c b/nss_ipv6.c
+index f63f18f9f4..5ada3ac959 100644
+--- a/nss_ipv6.c
++++ b/nss_ipv6.c
+@@ -89,7 +89,7 @@ static void nss_ipv6_rx_msg_handler(struct nss_ctx_instance *nss_ctx, struct nss
+ 		return;
+ 	}
+ 
+-	if (nss_cmn_get_msg_len(ncm) > sizeof(struct nss_ipv6_msg)) {
++	if (nss_cmn_get_msg_len(ncm) > nss_ctx->rx_msg_buf_len) {
+ 		nss_warning("%px: message length is invalid: %d", nss_ctx, nss_cmn_get_msg_len(ncm));
+ 		return;
+ 	}
+@@ -303,6 +303,7 @@ nss_tx_status_t nss_ipv6_tx_sync(struct nss_ctx_instance *nss_ctx, struct nss_ip
+ 	int ret = 0;
+ 
+ 	down(&nss_ipv6_pvt.sem);
++	reinit_completion(&nss_ipv6_pvt.complete);
+ 	nss_ipv6_pvt.cb = (void *)nim->cm.cb;
+ 	nss_ipv6_pvt.app_data = (void *)nim->cm.app_data;
+ 
+diff --git a/nss_lag.c b/nss_lag.c
+index cec2df1f8a..fd4e0ed2a9 100644
+--- a/nss_lag.c
++++ b/nss_lag.c
+@@ -34,6 +34,11 @@ struct nss_lag_pvt {
+ 	enum nss_cmn_response response;		/* Message response */
+ };
+ 
++static DEFINE_MUTEX(nss_lag_mutex);
++static struct nss_lag_pvt nss_lag_pvt_data = {
++	.complete = COMPLETION_INITIALIZER(nss_lag_pvt_data.complete),
++};
++
+ /*
+  * nss_lag_state_callback()
+  *	Call back function for nss LAG State
+@@ -234,10 +239,10 @@ nss_tx_status_t nss_lag_tx_slave_state(uint16_t lagid, int32_t slave_ifnum,
+ 	nss_tx_status_t status;
+ 	int ret;
+ 	struct nss_ctx_instance *nss_ctx = nss_lag_get_context();
+-	struct nss_lag_pvt lag_msg_state;
+ 
+-	init_completion(&lag_msg_state.complete);
+-	lag_msg_state.response = NSS_CMN_RESPONSE_ACK;
++	mutex_lock(&nss_lag_mutex);
++	reinit_completion(&nss_lag_pvt_data.complete);
++	nss_lag_pvt_data.response = NSS_CMN_RESPONSE_ACK;
+ 
+ 	/*
+ 	 * Construct a message to the NSS to update it
+@@ -245,7 +250,7 @@ nss_tx_status_t nss_lag_tx_slave_state(uint16_t lagid, int32_t slave_ifnum,
+ 	nss_lag_msg_init(&nm, lagid,
+ 			 NSS_TX_METADATA_LAG_STATE_CHANGE,
+ 			 sizeof(struct nss_lag_state_change),
+-			 nss_lag_state_callback, &lag_msg_state);
++			 nss_lag_state_callback, &nss_lag_pvt_data);
+ 
+ 	nlsc = &nm.msg.state;
+ 	nlsc->event = slave_state;
+@@ -255,19 +260,23 @@ nss_tx_status_t nss_lag_tx_slave_state(uint16_t lagid, int32_t slave_ifnum,
+ 	if (status != NSS_TX_SUCCESS) {
+ 		nss_warning("%px: Send LAG update failed, status: %d\n", nss_ctx,
+ 				status);
++		mutex_unlock(&nss_lag_mutex);
+ 		return NSS_TX_FAILURE;
+ 	}
+ 
+ 	/*
+ 	 * Blocking call, wait till we get ACK for this msg.
+ 	 */
+-	ret = wait_for_completion_timeout(&lag_msg_state.complete,
++	ret = wait_for_completion_timeout(&nss_lag_pvt_data.complete,
+ 			msecs_to_jiffies(NSS_LAG_RESP_TIMEOUT));
+ 	if (!ret) {
+ 		nss_warning("%px: Waiting for ack timed out\n", nss_ctx);
++		mutex_unlock(&nss_lag_mutex);
+ 		return NSS_TX_FAILURE;
+ 	}
+ 
+-	return (nss_tx_status_t)lag_msg_state.response;
++	status = (nss_tx_status_t)nss_lag_pvt_data.response;
++	mutex_unlock(&nss_lag_mutex);
++	return status;
+ }
+ EXPORT_SYMBOL(nss_lag_tx_slave_state);
+diff --git a/nss_vlan.c b/nss_vlan.c
+index 23b5c0ba55..3f55a4f0f8 100644
+--- a/nss_vlan.c
++++ b/nss_vlan.c
+@@ -177,6 +177,7 @@ nss_tx_status_t nss_vlan_tx_msg_sync(struct nss_ctx_instance *nss_ctx, struct ns
+ 	int ret = 0;
+ 
+ 	down(&vlan_pvt.sem);
++	reinit_completion(&vlan_pvt.complete);
+ 	vlan_pvt.cb = (void *)nvm->cm.cb;
+ 	vlan_pvt.app_data = (void *)nvm->cm.app_data;
+ 

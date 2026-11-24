@@ -63,7 +63,7 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  
  static struct sk_buff *__qca_tag_xmit(struct sk_buff *skb,
  				      struct net_device *dev, unsigned int len)
-@@ -177,14 +181,80 @@ static const struct dsa_device_ops qca_e
+@@ -177,14 +181,79 @@ static const struct dsa_device_ops qca_e
  
  DSA_TAG_DRIVER(qca_etype_netdev_ops);
  

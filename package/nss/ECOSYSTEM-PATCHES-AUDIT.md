@@ -44,6 +44,10 @@
 | **P-30** | mac80211 批处理延迟上报 Airtime 空口时间估算校准 | `package/kernel/mac80211/patches/subsys/508-*.patch` | `upstream-openwrt` (`bd6492c2a0` by Felix Fietkau) | 针对高通等芯片固件异步延后上报 STA 空口耗时的情况，引入 `IEEE80211_HW_DEFERRED_AIRTIME_REPORT` 延后扣除已完成 airtime 计数，根除空口调度器（Airtime Fairness）权重漂移问题。 | ✅ 通过 |
 | **P-31** | PPE 主机流表驱动迎回与 Makefile 链接期条件压制 | `target/linux/qualcommax/patches-6.18/0952-*.patch` | 自研架构重构 (消除 `modify/delete` 冲突) | 迎回上游被删的 4 个主机 PPE 驱动文件（`qca_ppe_flow_offload.c` 等）保持代码树物理完整；在 `0952` 补丁中利用 `ifeq ($(CONFIG_QCA_NSS_DRV),)` 在开启 NSS 时剥离链接对象，实现与上游 master 平滑无冲突自动合并。 | ✅ 通过 |
 | **P-32** | hostapd 终端被拒连接实时广播 ubus `connect-refused` 事件 | `package/network/services/hostapd/patches/915-*.patch` | `upstream-openwrt` (`0ea98a49b3` by Felix Fietkau) | 当终端因密码错误、黑名单拦截、参数不兼容被拒绝关联时，通过 ubus 抛出带有状态码与详细原因代码的 `connect-refused` 广播，大幅增强无线排障可观测性。 | ✅ 通过 |
+| **P-33** | DSA `tag_qca` 关网口软中断空指针崩溃修复 | `target/linux/qualcommax/patches-6.18/0957-*.patch` | `kuncy7` (`29c6909a4b` by Mykhailo Klimnyk) | 在 `ifdown -a`（固件升级前）或网桥端口解绑时，`dp->bridge` 为 NULL 导致软中断飞包访问空指针崩内核（实测 1/3 概率死机变砖）；加 `synchronize_net()` 与 `unlikely(!bridge)` 判空杜绝崩溃。 | ✅ 通过 |
+| **P-34** | `ustream-ssl` 跨 TLS 记录边界分块写入防挂死 (`361ed82bd0`) | `package/libs/ustream-ssl/` | `VIKINGYFY` (`361ed82bd0` by ViKing) | 经实地源码审查与编译核验，本代码库已升级至 `ustream-ssl-2026.03.01~99f1c0db`，官方早已重构写入调度移除了旧版 `pending_write`，该补丁专针对旧版 `cea28c5b`，新版已天然免疫该挂起问题。 | ❌ 判定免除 |
+| **P-35** | `ath11k` 补齐 6GHz AP 发射功率限制下发 (TPC) | `package/kernel/mac80211/patches/ath11k/957-*.patch` | OpenWrt PR #26901 by Andrei-Alexandru Bleortu | 修复高通 `ath11k` 仅对 STA 模式下发 `WMI_VDEV_SET_TPC_POWER_CMDID`、AP 模式遗漏下发导致 6GHz 频段 AP 信道发射功率归零 (衰减 10dB) 的缺陷，恢复满血 20dBm。 | ✅ 通过 |
+| **P-36** | `ath11k` 固件崩溃 SSR 自愈时 Spectral/CFR 释放时序修复 | `package/kernel/mac80211/patches/ath11k/958-*.patch` | `alxrxs/u6e-debian` (`dc0d493e50` by Andrei-Alexandru Bleortu) | 解决无线固件微码崩溃自愈（SSR）时因 `ath11k_dp_pdev_free()` 提前注销父 debugfs 导致子模块释放 UAF 引发系统级 Fatal Panic 的问题，提前注销时序，实现无线单射频优雅自愈。 | ✅ 通过 |
 
 ---
 

@@ -14,6 +14,7 @@ qca8k handlers as before.
 
 Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
+---
 --- a/include/net/dsa.h
 +++ b/include/net/dsa.h
 @@ -62,6 +62,7 @@ struct tc_action;
@@ -32,6 +33,19 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  };
  
  struct dsa_switch;
+--- a/net/dsa/port.c
++++ b/net/dsa/port.c
+@@ -471,6 +471,10 @@ void dsa_port_bridge_destroy(struct dsa_
+ 	if (bridge->num)
+ 		dsa_bridge_num_put(br, bridge->num);
+ 
++	/* A tagger's xmit may still hold the pointer it read from dp->bridge;
++	 * it runs under rcu_read_lock_bh().
++	 */
++	synchronize_net();
+ 	kfree(bridge);
+ }
+ 
 --- a/net/dsa/tag_qca.c
 +++ b/net/dsa/tag_qca.c
 @@ -8,10 +8,14 @@
@@ -49,7 +63,7 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
  
  static struct sk_buff *__qca_tag_xmit(struct sk_buff *skb,
  				      struct net_device *dev, unsigned int len)
-@@ -177,14 +181,77 @@ static const struct dsa_device_ops qca_e
+@@ -177,14 +181,80 @@ static const struct dsa_device_ops qca_e
  
  DSA_TAG_DRIVER(qca_etype_netdev_ops);
  
@@ -61,15 +75,17 @@ Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
 +					  struct net_device *dev)
 +{
 +	struct dsa_port *dp = dsa_user_to_port(dev);
++	const struct dsa_bridge *bridge = READ_ONCE(dp->bridge);
 +	u16 tx_vid = dsa_tag_8021q_standalone_vid(dp);
 +
 +	if (skb->offload_fwd_mark) {
-+		struct net_device *br = dsa_port_bridge_dev_get(dp);
++		if (unlikely(!bridge))
++			return NULL;
 +
-+		if (br_vlan_enabled(br))
++		if (br_vlan_enabled(bridge->dev))
 +			return skb;
 +
-+		tx_vid = dsa_tag_8021q_bridge_vid(dsa_port_bridge_num_get(dp));
++		tx_vid = dsa_tag_8021q_bridge_vid(bridge->num);
 +	}
 +
 +	return dsa_8021q_xmit(skb, dev, ETH_P_8021Q, tx_vid);

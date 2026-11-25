@@ -1,7 +1,7 @@
 # 高通 IPQ807x / IPQ60xx NSS 生态 Fork 补丁审计与吸收真理源
 
-> **文档状态**：已同步更新（2026-11-18 全量复盘审计）  
-> **分支基底**：`nss-edma-julius`（基于 `base/openwrt-upstream` `593608fbda`, 2026-11-11）  
+> **文档状态**：已同步更新（2026-11-25 全量复盘审计）  
+> **分支基底**：`nss-edma-julius`（已合并 `upstream-openwrt/main` 至 `5b32a15372`, 2026-11-25）  
 > **核心原则**：本文档记录了对整个高通开源社区及各大活跃 Fork 仓库（Julius、kuncy7、VIKINGYFY、qosmio、sinancetinkaya、77160860 等）的完整技术对齐审计。**列入本清单的项目均已完成原理排查、实地核验与最终裁决，后续迭代严禁重复翻案或无端展开同质化讨论。**
 
 ---
@@ -48,6 +48,8 @@
 | **P-34** | `ustream-ssl` 跨 TLS 记录边界分块写入防挂死 (`361ed82bd0`) | `package/libs/ustream-ssl/` | `VIKINGYFY` (`361ed82bd0` by ViKing) | 经实地源码审查与编译核验，本代码库已升级至 `ustream-ssl-2026.03.01~99f1c0db`，官方早已重构写入调度移除了旧版 `pending_write`，该补丁专针对旧版 `cea28c5b`，新版已天然免疫该挂起问题。 | ❌ 判定免除 |
 | **P-35** | `ath11k` 补齐 6GHz AP 发射功率限制下发 (TPC) | `package/kernel/mac80211/patches/ath11k/957-*.patch` | OpenWrt PR #26901 by Andrei-Alexandru Bleortu | 修复高通 `ath11k` 仅对 STA 模式下发 `WMI_VDEV_SET_TPC_POWER_CMDID`、AP 模式遗漏下发导致 6GHz 频段 AP 信道发射功率归零 (衰减 10dB) 的缺陷，恢复满血 20dBm。 | ✅ 通过 |
 | **P-36** | `ath11k` 固件崩溃 SSR 自愈时 Spectral/CFR 释放时序修复 | `package/kernel/mac80211/patches/ath11k/958-*.patch` | `alxrxs/u6e-debian` (`dc0d493e50` by Andrei-Alexandru Bleortu) | 解决无线固件微码崩溃自愈（SSR）时因 `ath11k_dp_pdev_free()` 提前注销父 debugfs 导致子模块释放 UAF 引发系统级 Fatal Panic 的问题，提前注销时序，实现无线单射频优雅自愈。 | ✅ 通过 |
+| **P-37** | `qualcommax` Q6 重启后 SMP2P 重协商恢复 | `target/linux/qualcommax/patches-6.18/{0830,0120,0121,0129,0145..0147}-*.patch` (移除旧 `0907`) | `upstream-openwrt` (`94ac3dc9c8`, 随 `5b32a15372` 合并) | 以通用 `0830-soc-qcom-smp2p-fix-rproc-restart-handle.patch` 替代旧 `0907`，修复 Q6 remoteproc 重启后 SMP2P 无法重新握手导致的重启序列卡死，与 `ath11k` SSR 形成闭环。 | ✅ 通过 |
+| **P-38** | QSDK `drv`/`ecm` sysctl 边界与 `host-build.mk` CI 下载加固 | `include/host-build.mk`, `package/nss/qca-nss-drv/patches/0008-*`, `package/nss/qca-nss-ecm/patches/{0001,0004}-*` | 本仓库全量代码审计与 M910X 实机验证 | `host-build.mk` 解除 `CONFIG_AUTOREMOVE` + `.built` 缓存对 `Download` 的跳过门禁；`0008` 补齐 `proc_dostring` 返回值校验与 `strscpy`；`ecm/0001` 锁内缓存日志变量消除并发读竞争；`ecm/0004` 修复空读 `defunct_by_iface` 报错。 | ✅ 通过 |
 
 ---
 
@@ -73,6 +75,10 @@
 6. **hostapd 802.11k 链路测量报告噪点清除 (`600-ubus_support.patch`)、`ucode` `cb_done_ack` (`ae9276426c`) 与 `wifi-scripts` `reporting_detail` (`3f0f32ac6b`/`8ff015a72b`)**：
    - 所在文件：`600-ubus_support.patch`、`ucode-2026.10.28~dfc64d41/lib/rtnl.c`、`ubus.c`
    - 核查结论：实机源码已内置对应实现（实测在 `ucode 2026-10-28` 叠加 `100-rtnl` 会重定义 `cb_done_ack`）。
+7. **参考仓库对齐快照（2026-11-25 审计基线）**：
+   - `openwrt-nss-edma`（`solarflows/openwrt-nss-edma@4d78941291`）：虽 git 拓扑因历史 squash/cherry-pick 差异显示领先 45 个 commit，但其核心 NSS/IPQ6018/crypto PLL/`nss.sysctl`/`ath11k` SSR/`sysupgrade` 关网特性均已全量吸收进本仓。
+   - `Qualcommax_NSS_Builder`（`JuliusBairaktaris@207e3f4`）：领先的 52 个提交均为其构建器发布流与 `ppe-update` 运维脚本，不纳入固件源码树。
+   - `LibWrt`（`LiBwrt/LibWrt@000a4e74b1`）：基于 `immortalwrt-25.12` 老内核体系，仅作问题模式参考，不直接混合移植。
 
 ---
 

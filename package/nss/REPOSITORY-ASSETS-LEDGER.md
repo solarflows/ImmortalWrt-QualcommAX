@@ -1,7 +1,7 @@
 # ImmortalWrt-QualcommAX 仓库四层资产全景总台账 (REPOSITORY-ASSETS-LEDGER.md)
 
 > **生效分支**：`nss-edma-julius`（生产基底分支）  
-> **更新日期**：2026-11-18  
+> **更新日期**：2026-11-25  
 > **文档定位**：本文档为本仓库面向多源上游协同（OpenWrt 官方 master、Julius 原生 NSS-EDMA、开源生态社区）的**核心资产确权与架构真理源**。明确定义 Layer 1 至 Layer 4 的职责边界、物理分支、锚点 Commit 与防护红线，从根本上杜绝版本同步过程中的代码覆盖、混淆视听与误判。
 
 ---
@@ -33,7 +33,7 @@ Default Project / ImmortalWrt-QualcommAX
 │   └── target/linux/qualcommax/dts/ (IPQ807x / IPQ60xx NSS 协处理器设备树节点与 reserved-memory 拓扑)
 │
 └── [Layer 1: OpenWrt 官方通用代码底座] ───> 分支: base/openwrt-upstream (基准快照)
-    ├── 官方历史快照锚点: Commit 593608fbda (2026-11-11, Linux 6.18.60 / backports 7.2)
+    ├── 官方同步锚点: Commit 5b32a15372 (2026-11-25 已合入 nss-edma-julius, Linux 6.18.64 / backports 7.2)
     ├── Toolchain 工具链 (GCC 14, musl libc, autotools, cmake)
     ├── target/linux/generic/ (Linux 6.18 通用内核基准、pending 补丁集)
     └── 通用系统与服务包 (procd, uci, ubus, netifd, hostapd, dnsmasq, nftables 等)
@@ -47,9 +47,9 @@ Default Project / ImmortalWrt-QualcommAX
 
 *   **对应分支**：`base/openwrt-upstream`
 *   **官方同步锚点 (Baseline Anchor)**：
-    *   **Commit SHA**：`593608fbda`（Linux 6.18.60 / backports 7.2）
-    *   **日期**：`2026-11-11`
-    *   **标题**：`rockchip: take the VOP2 UV address from the chroma buffer`
+    *   **Commit SHA**：`5b32a15372`（Linux 6.18.64 / backports 7.2）
+    *   **日期**：`2026-11-25`
+    *   **标题**：`loongarch64: set board_name on ACPI systems`（通过 `ab61b39070` 合并自 `upstream-openwrt/main`）
 *   **资产范围**：
     *   OpenWrt 官方原生构建体系：`include/`、`scripts/`、`tools/`、`toolchain/`；
     *   Linux 6.18 通用内核基础树：`target/linux/generic/`；

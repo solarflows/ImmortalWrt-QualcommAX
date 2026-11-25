@@ -129,16 +129,17 @@ index dff1afb32b..8a0790695c 100644
  		if (nim->cm.response == NSS_CMN_RESPONSE_ACK) {
  			ecm_nss_ipv4_sync_req_msg->msg.conn_stats_many.index = nicsm->next;
  		} else {
-@@ -690,6 +698,8 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+@@ -690,6 +698,9 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
  	int retry = 3;
  	unsigned long int current_jiffies;
  	unsigned long int waited = 0;
 +	bool is_round_start;
 +	unsigned int timeouts;
++	uint32_t next_idx = 0;
  	bool timed_out = false;
  
  	spin_lock_bh(&ecm_nss_ipv4_lock);
-@@ -706,18 +716,23 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+@@ -706,18 +718,25 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
  		}
  
  		/*
@@ -154,6 +155,8 @@ index dff1afb32b..8a0790695c 100644
 +		if (nicsm_req->index >= nss_ipv4_max_conn_count()) {
 +			nicsm_req->index = 0;
 +		}
++		timeouts = ecm_nss_ipv4_consecutive_timeouts;
++		next_idx = nicsm_req->index;
  		timed_out = true;
  	}
  	spin_unlock_bh(&ecm_nss_ipv4_lock);
@@ -162,11 +165,11 @@ index dff1afb32b..8a0790695c 100644
 -		pr_warn_ratelimited("ECM: IPv4 conn stats request unanswered for %u ms, restarting the sync\n",
 -				    jiffies_to_msecs(waited));
 +		pr_warn_ratelimited("ECM: IPv4 conn stats request unanswered for %u ms (consecutive: %u, next index: %u), backing off\n",
-+				    jiffies_to_msecs(waited), ecm_nss_ipv4_consecutive_timeouts, nicsm_req->index);
++				    jiffies_to_msecs(waited), timeouts, next_idx);
  	}
  
  	spin_lock_bh(&ecm_nss_ipv4_lock);
-@@ -728,24 +743,37 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+@@ -728,24 +747,37 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
  	}
  	spin_unlock_bh(&ecm_nss_ipv4_lock);
  
@@ -270,16 +273,17 @@ index 5b18b5788b..33e7854d3d 100644
  		if (nim->cm.response == NSS_CMN_RESPONSE_ACK) {
  			ecm_nss_ipv6_sync_req_msg->msg.conn_stats_many.index = nicsm->next;
  		} else {
-@@ -666,6 +674,8 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+@@ -666,6 +674,9 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
  	int retry = 3;
  	unsigned long int current_jiffies;
  	unsigned long int waited = 0;
 +	bool is_round_start;
 +	unsigned int timeouts;
++	uint32_t next_idx = 0;
  	bool timed_out = false;
  
  	spin_lock_bh(&ecm_nss_ipv6_lock);
-@@ -682,18 +692,23 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+@@ -682,18 +694,25 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
  		}
  
  		/*
@@ -295,6 +299,8 @@ index 5b18b5788b..33e7854d3d 100644
 +		if (nicsm_req->index >= nss_ipv6_max_conn_count()) {
 +			nicsm_req->index = 0;
 +		}
++		timeouts = ecm_nss_ipv6_consecutive_timeouts;
++		next_idx = nicsm_req->index;
  		timed_out = true;
  	}
  	spin_unlock_bh(&ecm_nss_ipv6_lock);
@@ -303,11 +309,11 @@ index 5b18b5788b..33e7854d3d 100644
 -		pr_warn_ratelimited("ECM: IPv6 conn stats request unanswered for %u ms, restarting the sync\n",
 -				    jiffies_to_msecs(waited));
 +		pr_warn_ratelimited("ECM: IPv6 conn stats request unanswered for %u ms (consecutive: %u, next index: %u), backing off\n",
-+				    jiffies_to_msecs(waited), ecm_nss_ipv6_consecutive_timeouts, nicsm_req->index);
++				    jiffies_to_msecs(waited), timeouts, next_idx);
  	}
  
  	spin_lock_bh(&ecm_nss_ipv6_lock);
-@@ -704,24 +719,37 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+@@ -704,24 +723,37 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
  	}
  	spin_unlock_bh(&ecm_nss_ipv6_lock);
  

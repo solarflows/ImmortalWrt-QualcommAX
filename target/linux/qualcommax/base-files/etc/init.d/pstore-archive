@@ -1,0 +1,42 @@
+#!/bin/sh /etc/rc.common
+# Archive pstore crash dumps to persistent storage early in boot, then
+# clear pstore so the next crash has free records.
+#
+# This runs before NTP has synced (and sysfixtime only offers the newest
+# file mtime), so the wall clock can lag reality and barely advance between
+# consecutive reboots - date-only directory names from back-to-back boots
+# then land seconds apart and read like repeat archives of a single boot.
+# Suffix the kernel's per-boot boot_id so every directory maps to exactly
+# one boot regardless of clock state.
+START=11
+
+boot() {
+	local boot_id dir d
+
+	grep -q pstore /proc/filesystems || return 0
+	mkdir -p /sys/fs/pstore
+	grep -q ' /sys/fs/pstore pstore ' /proc/mounts || \
+		mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+	ls /sys/fs/pstore/ 2>/dev/null | grep -q . || return 0
+
+	boot_id="$(cut -c1-8 /proc/sys/kernel/random/boot_id 2>/dev/null)"
+	dir="/root/pstore/$(date +%Y%m%d-%H%M%S)${boot_id:+-$boot_id}"
+	mkdir -p "$dir"
+	cp /sys/fs/pstore/* "$dir/" 2>/dev/null
+	rm -f /sys/fs/pstore/*
+	logger -t pstore-archive "crash dumps archived to $dir"
+
+	# Bound the history, but never by dropping a crash: an archive with a dmesg record
+	# (panic, Oops, lockup) is the evidence of a fault and is kept up to 50 of them; only
+	# console-only archives (clean reboots) rotate, the newest 20 kept. Mtime decides only
+	# among the same kind: before NTP the clock is a guess, and a mtime order once rotated a
+	# fresh crash record out behind older clean ones.
+	for d in $(ls -dt /root/pstore/*/ 2>/dev/null); do
+		ls "$d"dmesg-ramoops-* >/dev/null 2>&1 && echo "c $d" || echo "n $d"
+	done > /tmp/pstore.kinds
+	for d in $(grep '^n ' /tmp/pstore.kinds | cut -d' ' -f2 | tail -n +21) \
+		 $(grep '^c ' /tmp/pstore.kinds | cut -d' ' -f2 | tail -n +51); do
+		rm -rf "$d"
+	done
+	rm -f /tmp/pstore.kinds
+}

@@ -1,0 +1,121 @@
+From: Julius Bairaktaris <julius@bairaktaris.de>
+Subject: [PATCH] ath11k: keep NSS vdevs ethernet with monitor and restore ap_isolate
+
+mac80211 clears IEEE80211_OFFLOAD_DECAP_ENABLED while a virtual monitor
+interface exists (SUPPORTS_CONC_MON_RX_DECAP is unset on ath11k). When
+ath11k_mac_op_update_vif_offload() runs, it switches the WLAN firmware vdev
+RX decap mode to NATIVE_WIFI even though the NSS vdev remains in ETHERNET
+mode. Worse, ath11k_mac_op_add_interface() configured both NSS ENCAP and
+DECAP from IEEE80211_OFFLOAD_ENCAP_ENABLED while WMI RX decap followed
+IEEE80211_OFFLOAD_DECAP_ENABLED, causing immediate WMI vs NSS mismatch if a
+monitor interface already existed.
+
+Add ath11k_nss_vdev_mode() so AP and STA vdevs stay on ETHERNET in both
+directions when ab->nss.enabled is active (with Ethernet frame mode and not
+raw mode), keeping WMI and NSS FW encap/decap consistent.
+
+Also re-apply BSS nss_ap_isolate to NSS FW when adding an AP vdev (e.g.
+across ieee80211_reconfig firmware crash recovery, which does not replay
+nss_bss_info_changed).
+
+Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
+---
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -7362,8 +7362,29 @@ static int ath11k_mac_setup_vdev_create_
+ 		params->chains[NL80211_BAND_6GHZ].rx = ar->num_rx_chains;
+ 	}
+ 	return 0;
+ }
+ 
++/*
++ * Keep AP and STA vdevs in Ethernet encap/decap mode on both WLAN and NSS
++ * firmware when NSS offload is active, even while mac80211 clears RX decap
++ * offload during concurrent monitor mode.
++ */
++static u8 ath11k_nss_vdev_mode(struct ath11k_base *ab,
++			       struct ieee80211_vif *vif, u32 offload_flag)
++{
++	if ((vif->offload_flags & offload_flag) ||
++	    (ab->nss.enabled &&
++	     ath11k_frame_mode == ATH11K_HW_TXRX_ETHERNET &&
++	     !test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags) &&
++	     (vif->type == NL80211_IFTYPE_AP ||
++	      vif->type == NL80211_IFTYPE_STATION)))
++		return ATH11K_HW_TXRX_ETHERNET;
++	if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
++		return ATH11K_HW_TXRX_RAW;
++
++	return ATH11K_HW_TXRX_NATIVE_WIFI;
++}
++
+ static void ath11k_mac_op_update_vif_offload(struct ieee80211_hw *hw,
+ 					     struct ieee80211_vif *vif)
+ {
+@@ -7383,12 +7404,8 @@ static void ath11k_mac_op_update_vif_off
+ 		vif->offload_flags &= ~(IEEE80211_OFFLOAD_ENCAP_ENABLED |
+ 					IEEE80211_OFFLOAD_DECAP_ENABLED);
+ 
+-	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
+-		param_value = ATH11K_HW_TXRX_ETHERNET;
+-	else if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
+-		param_value = ATH11K_HW_TXRX_RAW;
+-	else
+-		param_value = ATH11K_HW_TXRX_NATIVE_WIFI;
++	param_value = ath11k_nss_vdev_mode(ab, vif,
++					   IEEE80211_OFFLOAD_ENCAP_ENABLED);
+ 
+ 	ret = ath11k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
+ 					    param_id, param_value);
+@@ -7399,12 +7416,8 @@ static void ath11k_mac_op_update_vif_off
+ 	}
+ 
+ 	param_id = WMI_VDEV_PARAM_RX_DECAP_TYPE;
+-	if (vif->offload_flags & IEEE80211_OFFLOAD_DECAP_ENABLED)
+-		param_value = ATH11K_HW_TXRX_ETHERNET;
+-	else if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
+-		param_value = ATH11K_HW_TXRX_RAW;
+-	else
+-		param_value = ATH11K_HW_TXRX_NATIVE_WIFI;
++	param_value = ath11k_nss_vdev_mode(ab, vif,
++					   IEEE80211_OFFLOAD_DECAP_ENABLED);
+ 
+ 	ret = ath11k_wmi_vdev_set_param_cmd(ar, arvif->vdev_id,
+ 					    param_id, param_value);
+@@ -7745,22 +7758,29 @@ static int ath11k_mac_op_add_interface(s
+ 		goto err_vdev_del;
+ 	}
+ 
++	if (ab->nss.enabled &&
++	    vif->type == NL80211_IFTYPE_AP &&
++	    vif->bss_conf.nss_ap_isolate) {
++		ret = ath11k_nss_vdev_set_cmd(arvif,
++					      ATH11K_NSS_WIFI_VDEV_CFG_AP_BRIDGE_CMD,
++					      !vif->bss_conf.nss_ap_isolate);
++		if (ret)
++			ath11k_warn(ab, "failed to set ap_isolate in nss %d\n", ret);
++	}
++
+ 	ath11k_mac_op_update_vif_offload(hw, vif);
+ 
+-	if (vif->offload_flags & IEEE80211_OFFLOAD_ENCAP_ENABLED)
+-		param_value = ATH11K_HW_TXRX_ETHERNET;
+-	else if (test_bit(ATH11K_FLAG_RAW_MODE, &ab->dev_flags))
+-		param_value = ATH11K_HW_TXRX_RAW;
+-	else
+-		param_value = ATH11K_HW_TXRX_NATIVE_WIFI;
+-
++	param_value = ath11k_nss_vdev_mode(ab, vif,
++					   IEEE80211_OFFLOAD_ENCAP_ENABLED);
+ 	ret = ath11k_nss_vdev_set_cmd(arvif, ATH11K_NSS_WIFI_VDEV_ENCAP_TYPE_CMD, param_value);
+ 
+ 	if(ret) {
+ 		ath11k_warn(ab, "failed to set encap type in nss %d\n", ret);
+ 		goto err_vdev_del;
+ 	}
+ 
++	param_value = ath11k_nss_vdev_mode(ab, vif,
++					   IEEE80211_OFFLOAD_DECAP_ENABLED);
+ 	ret = ath11k_nss_vdev_set_cmd(arvif, ATH11K_NSS_WIFI_VDEV_DECAP_TYPE_CMD, param_value);
+ 	if(ret) {
+ 		ath11k_warn(ab, "failed to set decap type in nss %d\n", ret);

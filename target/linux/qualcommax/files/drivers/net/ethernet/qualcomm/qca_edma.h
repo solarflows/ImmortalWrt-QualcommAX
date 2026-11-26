@@ -8,6 +8,7 @@
 
 #include <linux/dsa/tag_qca.h>
 #include <linux/qca_edma.h>
+#include <linux/soc/qcom/qca_edma.h>
 #include <linux/etherdevice.h>
 #include <linux/if_vlan.h>
 #include <linux/netdevice.h>
@@ -390,6 +391,12 @@ struct edma_queue {
 #define EDMA_MAX_QUEUES 4
 #define EDMA_IRQS_PER_QUEUE 3
 
+struct edma_dp_owner {
+	const struct qca_edma_dp_owner *ops;
+	void *ctx;
+	struct rcu_head rcu;
+};
+
 struct edma_priv {
 	const struct edma_soc_data *soc;
 	struct net_device *netdev;
@@ -429,6 +436,9 @@ struct edma_priv {
 	 */
 	struct dsa_switch *sw_ds;
 	const struct qca_edma_switch_ops *sw_ops;
+	struct edma_dp_owner __rcu *dp_owner[QCA_EDMA_DP_MAX_PORT + 1];
+	bool dp_injectable[QCA_EDMA_DP_MAX_PORT + 1];
+	atomic64_t dp_tx_ungranted[QCA_EDMA_DP_MAX_PORT + 1];
 };
 
 #endif /* __QCA_EDMA_H__ */

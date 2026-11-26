@@ -2,6 +2,7 @@
 
 #include <linux/bitmap.h>
 #include <linux/if_bridge.h>
+#include <linux/soc/qcom/qca_ppe.h>
 
 #include "qca_ppe.h"
 
@@ -136,12 +137,15 @@ ppe_vlan_alloc(struct qca_ppe_priv *priv, struct net_device *br_dev,
 		entry->pvid_ports = 0;
 		entry->xlt_idx = -1;
 		entry->xlt_pvid_idx = -1;
+		entry->eg_xlt_idx = -1;
 		return entry;
 	}
 
 	ppe_vsi_free(priv, vsi);
 	return NULL;
 }
+
+static void ppe_eg_xlt_idx_free(struct qca_ppe_priv *priv, int *idx);
 
 static void ppe_vlan_free(struct qca_ppe_priv *priv,
 			  struct qca_ppe_vlan_entry *entry)
@@ -150,6 +154,8 @@ static void ppe_vlan_free(struct qca_ppe_priv *priv,
 		ppe_xlt_idx_free(priv, &entry->xlt_idx);
 	if (entry->xlt_pvid_idx >= 0)
 		ppe_xlt_idx_free(priv, &entry->xlt_pvid_idx);
+	if (entry->eg_xlt_idx >= 0)
+		ppe_eg_xlt_idx_free(priv, &entry->eg_xlt_idx);
 	ppe_flow_purge_vsi(priv, entry->vsi);
 	ppe_vsi_free(priv, entry->vsi);
 	entry->br_dev = NULL;
@@ -405,3 +411,172 @@ int qca_ppe_port_vlan_del(struct dsa_switch *ds, int port,
 
 	return 0;
 }
+
+static int ppe_eg_xlt_idx_alloc(struct qca_ppe_priv *priv)
+{
+	int idx;
+
+	lockdep_assert_held(&priv->vlan_lock);
+
+	idx = find_first_zero_bit(priv->eg_xlt_bitmap, PPE_EG_XLT_TBL_NUM);
+	if (idx >= PPE_EG_XLT_TBL_NUM)
+		return -ENOSPC;
+
+	set_bit(idx, priv->eg_xlt_bitmap);
+	return idx;
+}
+
+static void ppe_eg_xlt_idx_free(struct qca_ppe_priv *priv, int *idx)
+{
+	lockdep_assert_held(&priv->vlan_lock);
+
+	regmap_write(priv->regmap, PPE_EG_XLT_RULE(*idx), 0);
+	regmap_write(priv->regmap, PPE_EG_XLT_RULE_W1(*idx), 0);
+	regmap_write(priv->regmap, PPE_EG_XLT_ACTION(*idx), 0);
+	regmap_write(priv->regmap, PPE_EG_XLT_ACTION_W1(*idx), 0);
+	clear_bit(*idx, priv->eg_xlt_bitmap);
+	*idx = -1;
+}
+
+static void ppe_eg_xlt_set(struct qca_ppe_priv *priv, int idx, int port,
+			   u32 vsi, u16 vid)
+{
+	u32 w0;
+
+	w0 = PPE_EG_XLT_VALID |
+	     FIELD_PREP(PPE_EG_XLT_PORT_BMP, BIT(port)) |
+	     PPE_EG_XLT_VSI_INCL |
+	     FIELD_PREP(PPE_EG_XLT_VSI, vsi) |
+	     PPE_EG_XLT_VSI_VALID |
+	     FIELD_PREP(PPE_EG_XLT_SKEY_FMT, 0x7);
+	regmap_write(priv->regmap, PPE_EG_XLT_RULE(idx), w0);
+	regmap_write(priv->regmap, PPE_EG_XLT_RULE_W1(idx),
+		     FIELD_PREP(PPE_EG_XLT_CKEY_FMT, 0x7));
+
+	regmap_write(priv->regmap, PPE_EG_XLT_ACTION(idx),
+		     FIELD_PREP(PPE_EG_XLT_CVID_CMD, PPE_EG_XLT_CVID_ADD) |
+		     FIELD_PREP(PPE_EG_XLT_CVID, vid));
+	regmap_write(priv->regmap, PPE_EG_XLT_ACTION_W1(idx), 0);
+}
+
+static void ppe_xlt_rule_set_allfmt(struct qca_ppe_priv *priv, int idx,
+				    u8 port_bmp, u16 vid)
+{
+	u32 w0, w1;
+
+	w0 = PPE_XLT_VALID | FIELD_PREP(PPE_XLT_PORT_BMP, port_bmp) |
+	     FIELD_PREP(PPE_XLT_SKEY_FMT, 0x7) | PPE_XLT_CKEY_FMT_0;
+	w1 = FIELD_PREP(PPE_XLT_CKEY_FMT_1, 0x3) | PPE_XLT_CKEY_VID_INCL |
+	     FIELD_PREP(PPE_XLT_CKEY_VID, vid);
+
+	regmap_write(priv->regmap, PPE_XLT_RULE_TBL(idx), w0);
+	regmap_write(priv->regmap, PPE_XLT_RULE_W1(idx), w1);
+	regmap_write(priv->regmap, PPE_XLT_RULE_TBL(idx) + 8, 0);
+}
+
+static void ppe_port_vlan_vsi_members_set(struct qca_ppe_priv *priv,
+					  struct qca_ppe_vlan_entry *entry,
+					  int port)
+{
+	regmap_write(priv->regmap, PPE_VSI_TBL(entry->vsi),
+		     FIELD_PREP(PPE_VSI_TBL_MEMBER,
+				BIT(port) | BIT(QCA_PPE_CPU_PORT)) |
+		     FIELD_PREP(PPE_VSI_TBL_UUC, BIT(QCA_PPE_CPU_PORT)) |
+		     FIELD_PREP(PPE_VSI_TBL_UMC, BIT(QCA_PPE_CPU_PORT)) |
+		     FIELD_PREP(PPE_VSI_TBL_BC, BIT(QCA_PPE_CPU_PORT)));
+	regmap_write(priv->regmap, PPE_VSI_TBL(entry->vsi) + 4,
+		     PPE_VSI_TBL_NEW_ADDR_LRN_EN | PPE_VSI_TBL_STA_MOVE_LRN_EN);
+}
+
+int qca_ppe_port_vlan_vsi_get(struct net_device *netdev, u16 vid)
+{
+	struct qca_ppe_vlan_entry *entry;
+	struct qca_ppe_priv *priv;
+	int port, idx;
+
+	priv = qca_ppe_user_port_resolve(netdev, &port);
+	if (!priv)
+		return -ENODEV;
+
+	guard(mutex)(&priv->vlan_lock);
+
+	entry = ppe_vlan_find(priv, netdev, vid);
+	if (entry)
+		return entry->vsi;
+
+	entry = ppe_vlan_alloc(priv, netdev, vid);
+	if (!entry)
+		return -ENOSPC;
+
+	idx = ppe_xlt_idx_alloc(priv);
+	if (idx < 0) {
+		ppe_vlan_free(priv, entry);
+		return -ENOSPC;
+	}
+
+	entry->ports = BIT(port);
+	entry->xlt_idx = idx;
+
+	idx = ppe_eg_xlt_idx_alloc(priv);
+	if (idx < 0) {
+		ppe_vlan_free(priv, entry);
+		return -ENOSPC;
+	}
+	entry->eg_xlt_idx = idx;
+
+	/* Firmware reads the VLAN from its own interface and CPU port re-tags
+	 * on egress, so strip the C-tag on ingress and re-add on egress via
+	 * EG_XLT while keeping the VSI domain.
+	 */
+	ppe_xlt_action_set(priv, entry->xlt_idx, entry->vsi, 0);
+	regmap_write(priv->regmap, PPE_XLT_ACTION_TBL(entry->xlt_idx),
+		     FIELD_PREP(PPE_XLT_CVID_CMD, PPE_XLT_CVID_DEL));
+	ppe_xlt_rule_set_allfmt(priv, entry->xlt_idx, BIT(port), vid);
+	ppe_eg_xlt_set(priv, entry->eg_xlt_idx, port, entry->vsi, vid);
+	ppe_port_vlan_vsi_members_set(priv, entry, port);
+
+	return entry->vsi;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_port_vlan_vsi_get);
+
+int qca_ppe_port_vlan_vsi_refresh(struct net_device *netdev, u16 vid)
+{
+	struct qca_ppe_vlan_entry *entry;
+	struct qca_ppe_priv *priv;
+	int port;
+
+	priv = qca_ppe_user_port_resolve(netdev, &port);
+	if (!priv)
+		return -ENODEV;
+
+	guard(mutex)(&priv->vlan_lock);
+
+	entry = ppe_vlan_find(priv, netdev, vid);
+	if (!entry)
+		return -ENOENT;
+
+	ppe_port_vlan_vsi_members_set(priv, entry, port);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_port_vlan_vsi_refresh);
+
+int qca_ppe_port_vlan_vsi_put(struct net_device *netdev, u16 vid)
+{
+	struct qca_ppe_vlan_entry *entry;
+	struct qca_ppe_priv *priv;
+	int port;
+
+	priv = qca_ppe_user_port_resolve(netdev, &port);
+	if (!priv)
+		return -ENODEV;
+
+	guard(mutex)(&priv->vlan_lock);
+
+	entry = ppe_vlan_find(priv, netdev, vid);
+	if (!entry)
+		return -ENOENT;
+
+	ppe_vlan_free(priv, entry);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_port_vlan_vsi_put);

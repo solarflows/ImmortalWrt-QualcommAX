@@ -2,6 +2,7 @@
 
 #include "ipq6018.dtsi"
 #include "ipq6018-512m.dtsi"
+#include "ipq6018-nss.dtsi"
 #include "ipq6018-ess.dtsi"
 
 #include <dt-bindings/gpio/gpio.h>
@@ -64,7 +65,6 @@
 		regulator-max-microvolt = <5000000>;
 		gpios = <&tlmm 0 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
-		regulator-boot-on;
 	};
 };
 
@@ -221,7 +221,6 @@
 };
 
 &qusb_phy_0 {
-	vdd-supply = <&reg_usb_vbus>;
 	status = "okay";
 };
 
@@ -231,12 +230,13 @@
 
 &usb3 {
 	dr_mode = "host";
-
+	vbus-supply = <&reg_usb_vbus>;
 	status = "okay";
 };
 
 &rpm {
 	status = "disabled";
+};
 };
 
 &mdio {

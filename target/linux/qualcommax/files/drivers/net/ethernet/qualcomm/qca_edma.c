@@ -2088,8 +2088,58 @@ drop:
 
 static netdev_tx_t edma_ndo_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
+	struct edma_priv *priv = netdev_priv(netdev);
 	bool tagged;
 	u16 dst_info = edma_tx_port(skb, netdev, &tagged);
+
+	if (tagged) {
+		unsigned int port = dst_info & EDMA_DST_PORT_ID_MASK;
+		struct edma_dp_owner *rd;
+
+		if (port <= QCA_EDMA_DP_MAX_PORT) {
+			rcu_read_lock();
+			rd = rcu_dereference(priv->dp_owner[port]);
+			if (rd) {
+				__be16 saved_hdr;
+				netdev_tx_t ret;
+
+				if (unlikely(!READ_ONCE(priv->dp_injectable[port]))) {
+					rcu_read_unlock();
+					dev_kfree_skb_any(skb);
+					atomic64_inc(&priv->dp_tx_ungranted[port]);
+					DEV_STATS_INC(netdev, tx_dropped);
+					return NETDEV_TX_OK;
+				}
+
+				if (unlikely(skb_cow_head(skb, 0))) {
+					rcu_read_unlock();
+					dev_kfree_skb_any(skb);
+					DEV_STATS_INC(netdev, tx_dropped);
+					return NETDEV_TX_OK;
+				}
+
+				saved_hdr = *(__be16 *)(skb->data + 2 * ETH_ALEN);
+				memmove(skb->data + QCA_HDR_LEN, skb->data,
+					2 * ETH_ALEN);
+				__skb_pull(skb, QCA_HDR_LEN);
+				skb_reset_mac_header(skb);
+
+				ret = rd->ops->xmit(skb, rd->ctx);
+				if (unlikely(ret == NETDEV_TX_BUSY)) {
+					__skb_push(skb, QCA_HDR_LEN);
+					memmove(skb->data,
+						skb->data + QCA_HDR_LEN,
+						2 * ETH_ALEN);
+					*(__be16 *)(skb->data + 2 * ETH_ALEN) =
+						saved_hdr;
+					skb_reset_mac_header(skb);
+				}
+				rcu_read_unlock();
+				return ret;
+			}
+			rcu_read_unlock();
+		}
+	}
 
 	return edma_xmit(skb, netdev, dst_info, tagged);
 }
@@ -2184,6 +2234,209 @@ static const struct net_device_ops edma_netdev_ops = {
 	.ndo_get_stats64 = dev_get_tstats64,
 	.ndo_setup_tc = edma_ndo_setup_tc,
 };
+
+static DEFINE_MUTEX(edma_dp_lock);
+
+bool qca_edma_netdev_is_conduit(const struct net_device *netdev)
+{
+	return netdev && netdev->netdev_ops == &edma_netdev_ops;
+}
+EXPORT_SYMBOL_GPL(qca_edma_netdev_is_conduit);
+
+int qca_edma_fw_baseline_restore(struct net_device *conduit)
+{
+	const struct edma_soc_data *soc;
+	struct edma_priv *priv;
+	unsigned int i;
+
+	if (!qca_edma_netdev_is_conduit(conduit))
+		return -EINVAL;
+
+	priv = netdev_priv(conduit);
+	soc = priv->soc;
+
+	edma_rings_disable(priv);
+
+	edma_qid2rid_set(priv);
+
+	regmap_write(priv->regmap, EDMA_REG_RXDESC2FILL_MAP_0, 0);
+	regmap_write(priv->regmap, EDMA_REG_RXDESC2FILL_MAP_1, 0);
+	if (soc->txcmpl_ring != soc->txdesc_ring)
+		for (i = 0; i < 3; i++)
+			regmap_write(priv->regmap, EDMA_REG_TXDESC2CMPL_MAP(i),
+				     0);
+
+	for (i = 0; i < priv->num_queues; i++) {
+		struct edma_queue *q = &priv->q[i];
+
+		regmap_set_bits(priv->regmap, q->rxdesc >= 10 ?
+				EDMA_REG_RXDESC2FILL_MAP_1 :
+				EDMA_REG_RXDESC2FILL_MAP_0,
+				(q->rxfill & 0x7) << ((q->rxdesc % 10) * 3));
+		if (soc->txcmpl_ring != soc->txdesc_ring)
+			regmap_set_bits(priv->regmap,
+					EDMA_REG_TXDESC2CMPL_MAP(q->txdesc / 10),
+					(q->txcmpl & 0x7) <<
+					((q->txdesc % 10) * 3));
+	}
+
+	edma_rings_enable(priv);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_edma_fw_baseline_restore);
+
+int qca_edma_port_dp_claim(struct net_device *conduit, unsigned int port,
+			   const struct qca_edma_dp_owner *owner, void *ctx)
+{
+	struct edma_dp_owner *rd;
+	struct edma_priv *priv;
+	int ret = 0;
+
+	if (!qca_edma_netdev_is_conduit(conduit) || !owner || !owner->xmit ||
+	    !owner->revoke || !owner->grant || port > QCA_EDMA_DP_MAX_PORT)
+		return -EINVAL;
+
+	priv = netdev_priv(conduit);
+
+	rd = kzalloc(sizeof(*rd), GFP_KERNEL);
+	if (!rd)
+		return -ENOMEM;
+
+	rd->ops = owner;
+	rd->ctx = ctx;
+
+	mutex_lock(&edma_dp_lock);
+	if (rcu_dereference_protected(priv->dp_owner[port],
+				      lockdep_is_held(&edma_dp_lock))) {
+		kfree(rd);
+		ret = -EBUSY;
+	} else {
+		bool was_open = priv->dp_injectable[port];
+
+		if (was_open)
+			WRITE_ONCE(priv->dp_injectable[port], false);
+		rcu_assign_pointer(priv->dp_owner[port], rd);
+		if (was_open && !owner->grant(ctx))
+			WRITE_ONCE(priv->dp_injectable[port], true);
+	}
+	mutex_unlock(&edma_dp_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(qca_edma_port_dp_claim);
+
+int qca_edma_port_dp_release(struct net_device *conduit, unsigned int port)
+{
+	struct edma_dp_owner *rd;
+	struct edma_priv *priv;
+
+	if (!qca_edma_netdev_is_conduit(conduit) ||
+	    port > QCA_EDMA_DP_MAX_PORT)
+		return -EINVAL;
+
+	priv = netdev_priv(conduit);
+
+	mutex_lock(&edma_dp_lock);
+	rd = rcu_replace_pointer(priv->dp_owner[port], NULL,
+				 lockdep_is_held(&edma_dp_lock));
+	mutex_unlock(&edma_dp_lock);
+
+	if (!rd)
+		return -ENOENT;
+
+	synchronize_net();
+	kfree(rd);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_edma_port_dp_release);
+
+void qca_edma_port_transition_begin(struct net_device *conduit,
+				    unsigned int port)
+{
+	struct edma_dp_owner *rd;
+	struct edma_priv *priv;
+
+	if (!qca_edma_netdev_is_conduit(conduit) ||
+	    port > QCA_EDMA_DP_MAX_PORT)
+		return;
+
+	priv = netdev_priv(conduit);
+
+	mutex_lock(&edma_dp_lock);
+	if (priv->dp_injectable[port]) {
+		WRITE_ONCE(priv->dp_injectable[port], false);
+		rd = rcu_dereference_protected(priv->dp_owner[port],
+					       lockdep_is_held(&edma_dp_lock));
+		if (rd)
+			rd->ops->revoke(rd->ctx);
+	}
+	mutex_unlock(&edma_dp_lock);
+}
+EXPORT_SYMBOL_GPL(qca_edma_port_transition_begin);
+
+void qca_edma_port_transition_end(struct net_device *conduit,
+				  unsigned int port)
+{
+	struct edma_dp_owner *rd;
+	struct edma_priv *priv;
+
+	if (!qca_edma_netdev_is_conduit(conduit) ||
+	    port > QCA_EDMA_DP_MAX_PORT)
+		return;
+
+	priv = netdev_priv(conduit);
+
+	mutex_lock(&edma_dp_lock);
+	if (!priv->dp_injectable[port]) {
+		rd = rcu_dereference_protected(priv->dp_owner[port],
+					       lockdep_is_held(&edma_dp_lock));
+		if (!rd || !rd->ops->grant(rd->ctx))
+			WRITE_ONCE(priv->dp_injectable[port], true);
+	}
+	mutex_unlock(&edma_dp_lock);
+}
+EXPORT_SYMBOL_GPL(qca_edma_port_transition_end);
+
+u64 qca_edma_port_dp_tx_ungranted(struct net_device *conduit, unsigned int port)
+{
+	struct edma_priv *priv;
+
+	if (!qca_edma_netdev_is_conduit(conduit) ||
+	    port > QCA_EDMA_DP_MAX_PORT)
+		return 0;
+
+	priv = netdev_priv(conduit);
+
+	return atomic64_read(&priv->dp_tx_ungranted[port]);
+}
+EXPORT_SYMBOL_GPL(qca_edma_port_dp_tx_ungranted);
+
+bool qca_edma_port_dp_injectable(struct net_device *conduit, unsigned int port)
+{
+	struct edma_priv *priv;
+
+	if (!qca_edma_netdev_is_conduit(conduit) ||
+	    port > QCA_EDMA_DP_MAX_PORT)
+		return false;
+
+	priv = netdev_priv(conduit);
+
+	return READ_ONCE(priv->dp_injectable[port]);
+}
+EXPORT_SYMBOL_GPL(qca_edma_port_dp_injectable);
+
+static bool edma_fw_owns_rings(struct edma_priv *priv)
+{
+	unsigned int port;
+
+	for (port = 0; port <= QCA_EDMA_DP_MAX_PORT; port++)
+		if (rcu_access_pointer(priv->dp_owner[port]))
+			return true;
+
+	return false;
+}
 
 /* The first ring set's three interrupts come before the misc one, and every
  * further set's three follow it, so a tree that names one set describes the
@@ -2431,9 +2684,16 @@ static int edma_ndo_change_mtu(struct net_device *netdev, int new_mtu)
 	struct edma_priv *priv = netdev_priv(netdev);
 	int ret = 0;
 
-	if (edma_rx_frame_len(new_mtu) != priv->rx_frame_len)
+	if (edma_rx_frame_len(new_mtu) != priv->rx_frame_len) {
+		if (edma_fw_owns_rings(priv)) {
+			netdev_warn(netdev,
+				    "MTU %d needs a receive buffer rebuild, which cannot be done while the NSS firmware shares the EDMA block\n",
+				    new_mtu);
+			return -EBUSY;
+		}
 		ret = edma_reconfigure(priv, new_mtu, priv->num_queues,
 				       priv->tx_ring_size, priv->rx_ring_size);
+	}
 	if (!ret)
 		WRITE_ONCE(netdev->mtu, new_mtu);
 
@@ -2679,9 +2939,20 @@ static void edma_remove(struct platform_device *pdev)
 {
 	struct edma_priv *priv = platform_get_drvdata(pdev);
 	struct page_pool *pools[EDMA_MAX_QUEUES];
+	struct edma_dp_owner *rd;
 	unsigned int i;
 
 	unregister_netdev(priv->netdev);
+
+	mutex_lock(&edma_dp_lock);
+	for (i = 0; i <= QCA_EDMA_DP_MAX_PORT; i++) {
+		rd = rcu_replace_pointer(priv->dp_owner[i], NULL,
+					 lockdep_is_held(&edma_dp_lock));
+		if (rd)
+			kfree_rcu(rd, rcu);
+	}
+	mutex_unlock(&edma_dp_lock);
+
 	for (i = 0; i < priv->max_queues; i++) {
 		netif_napi_del(&priv->q[i].napi);
 		pools[i] = priv->q[i].page_pool;

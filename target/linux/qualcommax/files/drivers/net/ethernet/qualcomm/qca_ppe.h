@@ -310,6 +310,7 @@
 #define PPE_EG_VSI_TAG(vsi)		(PPE_PTX_BASE + (vsi) * 0x4)
 #define   PPE_EG_VSI_TAG_UNMODIFIED	0xaaaa
 
+#define PPE_EG_XLT_TBL_NUM		64
 #define PPE_EG_XLT_RULE(idx)		(PPE_PTX_BASE + 0x200 + (idx) * 0x8)
 #define   PPE_EG_XLT_VALID		BIT(0)
 #define   PPE_EG_XLT_PORT_BMP		GENMASK(8, 1)
@@ -1144,7 +1145,10 @@
 #define PPE_QM_AC_MUL_W2(i)		(PPE_QM_BASE + 0x4a000 + (i) * 0x10 + 0x8)
 #define   PPE_AC_MUL_EN			BIT(0)
 #define   PPE_AC_MUL_CEILING		GENMASK(26, 16)
+#define   PPE_AC_MUL_GRN_MAX_LO		GENMASK(31, 27)
+#define   PPE_AC_MUL_GRN_MAX_HI		GENMASK(5, 0)
 #define   PPE_AC_MUL_GRN_RESUME_OFF	GENMASK(17, 7)
+#define   PPE_AC_MUL_GRN_RESUME_HI	PPE_AC_MUL_GRN_RESUME_OFF
 
 /* Live occupancy, in buffers: what a queue is holding right now rather than
  * what has passed through it.
@@ -1348,6 +1352,7 @@ struct qca_ppe_vlan_entry {
 	u8 pvid_ports;
 	int xlt_idx;
 	int xlt_pvid_idx;
+	int eg_xlt_idx;
 };
 
 /* What a counter has reached, and the raw register value that total was last
@@ -1602,8 +1607,10 @@ struct qca_ppe_priv {
 	struct devlink_region *regions[3];
 	DECLARE_BITMAP(vsi_bitmap, PPE_VSI_MAX);
 	DECLARE_BITMAP(xlt_bitmap, PPE_XLT_TBL_NUM);
+	DECLARE_BITMAP(eg_xlt_bitmap, PPE_EG_XLT_TBL_NUM);
 	/* The VSI each port is bound to, 0 outside a bridge. */
 	u32 port_vsi[QCA_PPE_MAX_PORTS];
+	u32 port_fw_vsi[QCA_PPE_MAX_PORTS];
 	/* The member mask each VSI was last programmed with, so a bridge flag
 	 * that narrows a flood class can reprogram every VSI it reaches.
 	 */
@@ -1789,6 +1796,8 @@ void ppe_vsi_member_set(struct qca_ppe_priv *priv, u32 vsi, u32 portmask);
 
 int ppe_xlt_idx_alloc(struct qca_ppe_priv *priv);
 void ppe_xlt_idx_free(struct qca_ppe_priv *priv, int *idx);
+struct qca_ppe_priv *qca_ppe_user_port_resolve(struct net_device *netdev,
+					       int *port);
 struct qca_ppe_vlan_entry *ppe_vlan_find(struct qca_ppe_priv *priv,
 					 struct net_device *br_dev, u16 vid);
 
@@ -1802,6 +1811,7 @@ int qca_ppe_port_vlan_add(struct dsa_switch *ds, int port,
 int qca_ppe_port_vlan_del(struct dsa_switch *ds, int port,
 			  const struct switchdev_obj_port_vlan *vlan);
 
+#ifndef QCA_PPE_FLOW_SUPPRESSED
 void ppe_flow_init(struct qca_ppe_priv *priv);
 int ppe_flow_op(struct qca_ppe_priv *priv, u32 op_type,
 		const u32 *entry, int nentry, const u32 *host, int nhost,
@@ -1814,6 +1824,10 @@ void ppe_flow_counter_read(struct qca_ppe_priv *priv, u32 index, u64 *packets,
 void ppe_flow_counter_clear(struct qca_ppe_priv *priv, u32 index);
 int ppe_flow_entry_delete(struct qca_ppe_priv *priv, u32 index);
 void ppe_flow_debugfs_init(struct qca_ppe_priv *priv);
+#else
+static inline void ppe_flow_init(struct qca_ppe_priv *priv) {}
+static inline void ppe_flow_debugfs_init(struct qca_ppe_priv *priv) {}
+#endif
 
 unsigned long ppe_clk_rate(struct qca_ppe_priv *priv);
 void ppe_debugfs_init(struct qca_ppe_priv *priv);
@@ -1835,6 +1849,7 @@ int ppe_mirror_analyzer_get(struct qca_ppe_priv *priv, int to_port);
 void ppe_mirror_analyzer_put(struct qca_ppe_priv *priv);
 struct flow_block_offload;
 
+#ifndef QCA_PPE_FLOW_SUPPRESSED
 int ppe_setup_ft_block(struct qca_ppe_priv *priv,
 		       struct flow_block_offload *f);
 int ppe_flow_offload_init(struct qca_ppe_priv *priv);
@@ -1845,6 +1860,43 @@ void ppe_flow_uplink_get(struct qca_ppe_priv *priv, char *name);
 int ppe_flow_uplink_set(struct qca_ppe_priv *priv, const char *name);
 int ppe_flow_shaper_set(struct qca_ppe_priv *priv, bool upload,
 			const char *name);
+void ppe_flow_purge_vsi(struct qca_ppe_priv *priv, u32 vsi);
+void ppe_flow_offload_exit(struct qca_ppe_priv *priv);
+#else
+static inline int ppe_setup_ft_block(struct qca_ppe_priv *priv,
+				     struct flow_block_offload *f)
+{
+	return -EOPNOTSUPP;
+}
+static inline int ppe_flow_offload_init(struct qca_ppe_priv *priv) { return 0; }
+static inline bool ppe_flow_xmit(struct dsa_switch *ds, struct sk_buff *skb,
+				 u32 flow)
+{
+	return false;
+}
+static inline void ppe_flow_purge_vsi(struct qca_ppe_priv *priv, u32 vsi) {}
+static inline void ppe_flow_offload_exit(struct qca_ppe_priv *priv) {}
+static inline void ppe_flow_shaper_get(struct qca_ppe_priv *priv, bool upload,
+				       char *name)
+{
+	name[0] = '\0';
+}
+static inline void ppe_flow_ct_dscp_set(struct qca_ppe_priv *priv, bool on) {}
+static inline void ppe_flow_uplink_get(struct qca_ppe_priv *priv, char *name)
+{
+	name[0] = '\0';
+}
+static inline int ppe_flow_uplink_set(struct qca_ppe_priv *priv,
+				      const char *name)
+{
+	return -EOPNOTSUPP;
+}
+static inline int ppe_flow_shaper_set(struct qca_ppe_priv *priv, bool upload,
+				      const char *name)
+{
+	return -EOPNOTSUPP;
+}
+#endif
 
 /* An ifindex takes all of an int, so the flags go above it. */
 #define PPE_XDEV_IFINDEX	GENMASK_ULL(31, 0)
@@ -1852,7 +1904,5 @@ int ppe_flow_shaper_set(struct qca_ppe_priv *priv, bool upload,
 #define PPE_XDEV_PUSH		BIT_ULL(32)
 #define PPE_XDEV_DL		BIT_ULL(33)
 #define PPE_XDEV_UL		BIT_ULL(34)
-void ppe_flow_purge_vsi(struct qca_ppe_priv *priv, u32 vsi);
-void ppe_flow_offload_exit(struct qca_ppe_priv *priv);
 
 #endif

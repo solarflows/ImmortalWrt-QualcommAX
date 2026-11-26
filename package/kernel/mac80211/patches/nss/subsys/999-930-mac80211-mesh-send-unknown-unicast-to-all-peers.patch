@@ -1,0 +1,171 @@
+From: nanotech17 <346107436+nanotech17@users.noreply.github.com>
+Subject: mac80211: mesh: send unicast for an unknown station to all peers
+
+With dot11MeshForwarding off every mesh node is a peer, so a unicast
+destination that is not a peer and has no proxy (mpp) entry is a station
+bridged behind one of the peers.  HWMP path discovery cannot find such a
+station: the PREQs time out after about 3 seconds and, with no mesh gate,
+the queued frames are dropped (dropped_frames_no_route).  mpp entries
+expire 600 seconds after last use, so the first frames to a quiet station
+are lost and a host with a stale ARP entry stalls for about 8 seconds
+until it falls back to a broadcast ARP request.
+
+In that case send a copy of the frame to every established peer, with
+the real destination in the Address Extension field, the way frames are
+handed to mesh gates.  The owner of the station bridges the frame to it,
+and the reply creates the mpp entry, so later frames go to one peer.
+With forwarding on, or when no copy can be made, discovery runs as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+--- a/net/mac80211/mesh.h
++++ b/net/mac80211/mesh.h
+@@ -328,6 +328,8 @@
+ 
+ int mesh_path_add_gate(struct mesh_path *mpath);
+ int mesh_path_send_to_gates(struct mesh_path *mpath);
++int mesh_path_send_to_peers(struct ieee80211_sub_if_data *sdata,
++			    struct sk_buff *skb);
+ int mesh_gate_num(struct ieee80211_sub_if_data *sdata);
+ u32 airtime_link_metric_get(struct ieee80211_local *local,
+ 			    struct sta_info *sta);
+--- a/net/mac80211/mesh_hwmp.c
++++ b/net/mac80211/mesh_hwmp.c
+@@ -1187,6 +1187,14 @@
+ 	if (!mesh_nexthop_lookup(sdata, skb))
+ 		return 0;
+ 
++	/* without forwarding, a non-peer destination is behind some peer */
++	if (!sdata->u.mesh.mshcfg.dot11MeshForwarding) {
++		info->control.flags |= IEEE80211_TX_INTCFL_NEED_TXPROCESSING;
++		ieee80211_set_qos_hdr(sdata, skb);
++		if (!mesh_path_send_to_peers(sdata, skb))
++			return -ENOENT;
++	}
++
+ 	/* no nexthop found, start resolving */
+ 	mpath = mesh_path_lookup(sdata, target_addr);
+ 	if (!mpath) {
+--- a/net/mac80211/mesh_pathtbl.c
++++ b/net/mac80211/mesh_pathtbl.c
+@@ -189,13 +189,11 @@
+ 	spin_unlock_irqrestore(&mpath->frame_queue.lock, flags);
+ }
+ 
+-static void prepare_for_gate(struct sk_buff *skb, char *dst_addr,
+-			     struct mesh_path *gate_mpath)
++static void mesh_frame_add_ae(struct sk_buff *skb)
+ {
+ 	struct ieee80211_hdr *hdr;
+ 	struct ieee80211s_hdr *mshdr;
+ 	int mesh_hdrlen, hdrlen;
+-	char *next_hop;
+ 
+ 	hdr = (struct ieee80211_hdr *) skb->data;
+ 	hdrlen = ieee80211_hdrlen(hdr->frame_control);
+@@ -218,6 +216,15 @@
+ 		memcpy(mshdr->eaddr1, hdr->addr3, ETH_ALEN);
+ 		memcpy(mshdr->eaddr2, hdr->addr4, ETH_ALEN);
+ 	}
++}
++
++static void prepare_for_gate(struct sk_buff *skb, char *dst_addr,
++			     struct mesh_path *gate_mpath)
++{
++	struct ieee80211_hdr *hdr;
++	char *next_hop;
++
++	mesh_frame_add_ae(skb);
+ 
+ 	/* update next hop */
+ 	hdr = (struct ieee80211_hdr *) skb->data;
+@@ -1131,6 +1138,90 @@
+ 	return (from_mpath == mpath) ? -EHOSTUNREACH : 0;
+ }
+ 
++static void prepare_for_peer(struct sk_buff *skb, struct sta_info *peer)
++{
++	struct ieee80211_hdr *hdr;
++
++	mesh_frame_add_ae(skb);
++
++	hdr = (struct ieee80211_hdr *) skb->data;
++	memcpy(hdr->addr1, peer->sta.addr, ETH_ALEN);
++	memcpy(hdr->addr2, peer->sdata->vif.addr, ETH_ALEN);
++	memcpy(hdr->addr3, peer->sta.addr, ETH_ALEN);
++	ieee80211_mps_set_frame_flags(peer->sdata, peer, hdr);
++}
++
++/**
++ * mesh_path_send_to_peers - send a frame for an unknown destination to all peers
++ *
++ * @sdata: network subif the frame will be sent through
++ * @skb: 802.11 frame to be sent
++ *
++ * Without mesh forwarding every mesh node is a peer, so a destination that
++ * is not a peer and has no proxy entry is a station behind one of the peers.
++ * Path discovery can never find it.  Give each established peer a copy
++ * addressed to that peer, with the real destination in the Address
++ * Extension field, the way frames are handed to mesh gates.  The peer that
++ * owns the station bridges it there, and the reply creates the proxy entry.
++ *
++ * Returns: 0 if the frame was queued for the peers, -ENOENT if the
++ * destination is a peer, there is no peer, or the copies could not be made.
++ * The frame is left untouched in that case.
++ */
++int mesh_path_send_to_peers(struct ieee80211_sub_if_data *sdata,
++			    struct sk_buff *skb)
++{
++	struct ieee80211_local *local = sdata->local;
++	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
++	int headroom = local->tx_headroom + IEEE80211_ENCRYPT_HEADROOM +
++		       2 * ETH_ALEN;
++	struct sta_info *sta, *last_peer = NULL;
++	struct sk_buff_head frames;
++	struct sk_buff *copy;
++
++	skb_queue_head_init(&frames);
++
++	rcu_read_lock();
++	if (sta_info_get(sdata, hdr->addr3))
++		goto fail;
++
++	list_for_each_entry_rcu(sta, &local->sta_list, list) {
++		if (sta->sdata != sdata ||
++		    sta->mesh->plink_state != NL80211_PLINK_ESTAB)
++			continue;
++
++		if (last_peer) {
++			copy = skb_copy_expand(skb, headroom, skb_tailroom(skb),
++					       GFP_ATOMIC);
++			if (!copy)
++				goto fail;
++			prepare_for_peer(copy, last_peer);
++			__skb_queue_tail(&frames, copy);
++		}
++		last_peer = sta;
++	}
++
++	if (!last_peer)
++		goto fail;
++
++	mpath_dbg(sdata, "Sending frame for %pM to %d peers\n",
++		  hdr->addr3, skb_queue_len(&frames) + 1);
++	if (skb_cow_head(skb, headroom))
++		goto fail;
++
++	prepare_for_peer(skb, last_peer);
++	__skb_queue_tail(&frames, skb);
++	rcu_read_unlock();
++
++	ieee80211_add_pending_skbs(local, &frames);
++	return 0;
++
++fail:
++	rcu_read_unlock();
++	__skb_queue_purge(&frames);
++	return -ENOENT;
++}
++
+ /**
+  * mesh_path_discard_frame - discard a frame whose path could not be resolved
+  *

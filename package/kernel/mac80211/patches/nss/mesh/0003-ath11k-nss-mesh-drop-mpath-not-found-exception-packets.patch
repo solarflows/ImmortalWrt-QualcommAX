@@ -1,0 +1,46 @@
+Subject: [PATCH] ath11k: nss: drop mesh "mpath not found" exception packets
+
+ath11k_nss_mesh_obj_ext_data_callback() re-sends packets that the NSS mesh
+encap returned with NSS_WIFI_MESH_ENCAP_EXT_DATA_PKT_TYPE_MPATH_NOT_FOUND_EXC
+by calling eth_type_trans() and then dev_queue_xmit().  eth_type_trans()
+pulls the Ethernet header, so the skb handed to mac80211 starts at the L3
+header.  mac80211 then takes the first bytes of the IPv6/IPv4 header as the
+destination MAC, creates bogus mesh paths (60:0x:.. for IPv6), sends PREQs
+for them and asks NSS to add them, until the NSS mpath table is full and
+every add fails with "failed to add an entry to mpath table".  The packet
+itself is never delivered.
+
+Keeping the Ethernet header and re-sending the packet was tried first: the
+host then forwards every exception in the slow path (about 20,000 packets/s
+while NSS lacked the path), and the IPQ8072A (Linksys MX5300) reset without
+any kernel message in 3 of 5 runs of the test.
+
+Drop the packet instead.  Delivery is unchanged (it was lost before as
+well), and path discovery does not depend on it: NSS reports
+NSS_WIFI_MESH_MSG_PATH_NOT_FOUND separately, which starts a PREQ through
+ieee80211_mesh_path_offld_change_notify().
+
+---
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
+@@ -2055,9 +2055,17 @@
+ 		case NSS_WIFI_MESH_ENCAP_EXT_DATA_PKT_TYPE_MPATH_NOT_FOUND_EXC:
+ 			ath11k_dbg_dump(ab, ATH11K_DBG_DP_RX, "", "msdu from nss ext_data for mpath not found : ",
+ 					skb->data, skb->len);
+-			skb->protocol = eth_type_trans(skb, dev);
+-			skb_reset_network_header(skb);
+-			dev_queue_xmit(skb);
++			/* Drop the packet.  Re-sending it after eth_type_trans()
++			 * hands mac80211 an skb without the Ethernet header, so the
++			 * L3 header is taken as the destination address and bogus
++			 * mesh paths (e.g. 60:0x:.. from IPv6) fill the NSS mpath
++			 * table ("failed to add an entry to mpath table").  Re-sending
++			 * it with the header kept makes the host forward every
++			 * exception in the slow path, which reset the IPQ8072A under
++			 * load.  Path discovery does not depend on this packet: NSS
++			 * reports NSS_WIFI_MESH_MSG_PATH_NOT_FOUND separately.
++			 */
++			dev_kfree_skb_any(skb);
+ 		break;
+ 		default:
+ 			ath11k_warn(ab, "unknown packet type received in mesh obj ext data %d",

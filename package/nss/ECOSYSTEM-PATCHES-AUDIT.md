@@ -1,7 +1,7 @@
 # 高通 IPQ807x / IPQ60xx NSS 生态 Fork 补丁审计与吸收真理源
 
-> **文档状态**：已同步更新（2026-11-25 全量复盘审计）  
-> **分支基底**：`nss-edma-julius`（已合并 `upstream-openwrt/main` 至 `5b32a15372`, 2026-11-25）  
+> **文档状态**：已同步更新（2026-11-26 全量复盘审计）  
+> **分支基底**：`nss-edma-main`（5 层线性堆栈，基于 `base/openwrt-upstream` `e50f7f9651`, 2026-11-26）  
 > **核心原则**：本文档记录了对整个高通开源社区及各大活跃 Fork 仓库（Julius、kuncy7、VIKINGYFY、qosmio、sinancetinkaya、77160860 等）的完整技术对齐审计。**列入本清单的项目均已完成原理排查、实地核验与最终裁决，后续迭代严禁重复翻案或无端展开同质化讨论。**
 
 ---
@@ -50,6 +50,9 @@
 | **P-36** | `ath11k` 固件崩溃 SSR 自愈时 Spectral/CFR 释放时序修复 | `package/kernel/mac80211/patches/ath11k/958-*.patch` | `alxrxs/u6e-debian` (`dc0d493e50` by Andrei-Alexandru Bleortu) | 解决无线固件微码崩溃自愈（SSR）时因 `ath11k_dp_pdev_free()` 提前注销父 debugfs 导致子模块释放 UAF 引发系统级 Fatal Panic 的问题，提前注销时序，实现无线单射频优雅自愈。 | ✅ 通过 |
 | **P-37** | `qualcommax` Q6 重启后 SMP2P 重协商恢复 | `target/linux/qualcommax/patches-6.18/{0830,0120,0121,0129,0145..0147}-*.patch` (移除旧 `0907`) | `upstream-openwrt` (`94ac3dc9c8`, 随 `5b32a15372` 合并) | 以通用 `0830-soc-qcom-smp2p-fix-rproc-restart-handle.patch` 替代旧 `0907`，修复 Q6 remoteproc 重启后 SMP2P 无法重新握手导致的重启序列卡死，与 `ath11k` SSR 形成闭环。 | ✅ 通过 |
 | **P-38** | QSDK `drv`/`ecm` sysctl 边界与 `host-build.mk` CI 下载加固 | `include/host-build.mk`, `package/nss/qca-nss-drv/patches/0008-*`, `package/nss/qca-nss-ecm/patches/{0001,0004}-*` | 本仓库全量代码审计与 M910X 实机验证 | `host-build.mk` 解除 `CONFIG_AUTOREMOVE` + `.built` 缓存对 `Download` 的跳过门禁；`0008` 补齐 `proc_dostring` 返回值校验与 `strscpy`；`ecm/0001` 锁内缓存日志变量消除并发读竞争；`ecm/0004` 修复空读 `defunct_by_iface` 报错。 | ✅ 通过 |
+| **P-39** | `ath11k` NSS `wifili_event_receive` 回调上下文映射修复 | `package/kernel/mac80211/patches/nss/ath11k/999-995-*.patch` | `nanotech17` (`bd5a9fbaba`) 适配 12.5 `nss.c` | `nss_register_wifili_radio_if` 注册的是 per-radio `ar`，原回调直接强转成 `ab` 导致误访 `ab->base_lock`/`ab->dev`；新增 `ath11k_nss_ctx_to_ab()` 安全映射回所属 `ath11k_base`。 | ✅ 通过 |
+| **P-40** | 撤销 `999-233` 解决 802.11s Mesh UDP 分片广播丢包与固件假死 | 移除 `999-233-*` 并同步精简 `999-374-*` | `nanotech17` (`bd5a9fbaba`) & `AgustinLorenzo` | 消除 Mesh 节点接收 2 片 UDP 分片广播（如 `usteer`）后广播/组播断流及固件卡死问题，并保持 `999-374` 在其余原生 decap 路径的 `skb_headroom` 保护。 | ✅ 通过 |
+| **P-41** | 802.11s Mesh 未知单播泛洪与 `MPATH_NOT_FOUND` 异常帧丢弃 | `nss/subsys/999-930-*.patch`, `nss/mesh/0003-*.patch` | `nanotech17` (`988ca2b707`, `5ae6bf9677`) | `subsys/999-930` 对非 peer 且无 `mpp` 目标帧泛洪已建连 peer 消除 8s 卡顿；`mesh/0003` 丢弃已剥以太网头的 `MPATH_NOT_FOUND` 异常帧防止刷爆 NSS `mpath` 表。 | ✅ 通过 |
 
 ---
 
@@ -79,6 +82,8 @@
    - `openwrt-nss-edma`（`solarflows/openwrt-nss-edma@4d78941291`）：虽 git 拓扑因历史 squash/cherry-pick 差异显示领先 45 个 commit，但其核心 NSS/IPQ6018/crypto PLL/`nss.sysctl`/`ath11k` SSR/`sysupgrade` 关网特性均已全量吸收进本仓。
    - `Qualcommax_NSS_Builder`（`JuliusBairaktaris@207e3f4`）：领先的 52 个提交均为其构建器发布流与 `ppe-update` 运维脚本，不纳入固件源码树。
    - `LibWrt`（`LiBwrt/LibWrt@000a4e74b1`）：基于 `immortalwrt-25.12` 老内核体系，仅作问题模式参考，不直接混合移植。
+   - `nanotech17/openwrt-qualcommax-nss`（`0a5c088711`）：`P-39`~`P-41` 已吸收进 `layer/custom-patches`；其 `01b47a9726`（`AP_VLAN ext_vdev`）与 `0040-tunipip6`（`ip_rt_put`）经核实本仓 `235/236` 与 QSDK `12.5` 源码早已自带。
+   - `xhikarishii/openwrt-ipq`（`e74466bb68`）：基于 OpenWrt 24.10 / Kernel 6.6（`KERNEL_PATCHVER:=6.6`）的 AW1000 专用分支（已标注即将废弃），无需要移植的新补丁。
 
 ---
 

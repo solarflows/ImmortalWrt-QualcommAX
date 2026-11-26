@@ -34,7 +34,7 @@ Default Project / ImmortalWrt-QualcommAX
 │   └── target/linux/qualcommax/dts/ (IPQ807x / IPQ60xx NSS 协处理器设备树节点与 reserved-memory 拓扑)
 │
 └── [Layer 1: OpenWrt 官方通用代码底座] ───> 分支: base/openwrt-upstream (基准快照)
-    ├── 官方同步锚点: Commit 5b32a15372 (2026-11-25 已合入 nss-edma-julius, Linux 6.18.64 / backports 7.2)
+    ├── 官方同步锚点: Commit e50f7f9651 (2026-11-26 已 Rolling 同步, Linux 6.18.64 / backports 7.2)
     ├── Toolchain 工具链 (GCC 14, musl libc, autotools, cmake)
     ├── target/linux/generic/ (Linux 6.18 通用内核基准、pending 补丁集)
     └── 通用系统与服务包 (procd, uci, ubus, netifd, hostapd, dnsmasq, nftables 等)
@@ -48,9 +48,9 @@ Default Project / ImmortalWrt-QualcommAX
 
 *   **对应分支**：`base/openwrt-upstream`
 *   **官方同步锚点 (Baseline Anchor)**：
-    *   **Commit SHA**：`5b32a15372`（Linux 6.18.64 / backports 7.2）
-    *   **日期**：`2026-11-25`
-    *   **标题**：`loongarch64: set board_name on ACPI systems`（通过 `ab61b39070` 合并自 `upstream-openwrt/main`）
+    *   **Commit SHA**：`e50f7f9651`（Linux 6.18.64 / backports 7.2）
+    *   **日期**：`2026-11-26`
+    *   **标题**：`linux-firmware: update to 20261124`（Rolling 同步自 `upstream-openwrt/main`）
 *   **资产范围**：
     *   OpenWrt 官方原生构建体系：`include/`、`scripts/`、`tools/`、`toolchain/`；
     *   Linux 6.18 通用内核基础树：`target/linux/generic/`；

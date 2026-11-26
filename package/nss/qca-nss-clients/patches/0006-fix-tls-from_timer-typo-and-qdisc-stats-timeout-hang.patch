@@ -1,0 +1,53 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-clients: fix tls from_timer container typo and qdisc stats timeout hang
+
+1. In tls/nss_tlsmgr_tun.c:
+   - In nss_tlsmgr_notify_decongestion(), the container_of helper from_timer()
+     mistakenly used 'notify.timer' instead of 'decongest.timer'.
+     Since notify and decongest are distinct struct members with different
+     offsets, this calculated an invalid pointer address, causing a kernel
+     panic upon decongestion timer execution. Fix it to 'decongest.timer'.
+2. In nss_qdisc/nss_qdisc_stats.c:
+   - When wait_event_timeout() times out waiting for FW stats response, the
+     retry loop lacked a decrement or break, causing an infinite 10s timeout
+     loop that permanently hung the stats kworker thread.
+     Reset pending_stat_resp to 0 and break on timeout to reschedule safely.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+diff --git a/nss_qdisc/nss_qdisc_stats.c b/nss_qdisc/nss_qdisc_stats.c
+index 461aa9eafa..b61f9d7841 100644
+--- a/nss_qdisc/nss_qdisc_stats.c
++++ b/nss_qdisc/nss_qdisc_stats.c
+@@ -504,12 +504,13 @@ static void nss_qdisc_stats_sync_msg_tx(struct nss_qdisc_stats_wq *nqsw)
+ 		if (!wait_event_timeout(nqsw->stats_resp_waitqueue, atomic_read(&nqsw->pending_stat_resp) == 0,
+ 					NSS_QDISC_COMMAND_TIMEOUT)) {
+ 			nss_qdisc_error("Stats request command for %x timedout!\n", nq->qos_tag);
+-		} else {
+-
+-			nss_qdisc_info("Qdisc %px nq:%p no more pending stat response  %d", nq->qdisc,
+-					nq, atomic_read(&nqsw->pending_stat_resp));
+-			return;
++			atomic_set(&nqsw->pending_stat_resp, 0);
++			break;
+ 		}
++
++		nss_qdisc_info("Qdisc %px nq:%p no more pending stat response  %d", nq->qdisc,
++				nq, atomic_read(&nqsw->pending_stat_resp));
++		return;
+ 	}
+ 
+ 	/*
+diff --git a/tls/nss_tlsmgr_tun.c b/tls/nss_tlsmgr_tun.c
+index 0b6d5368c6..115f23eab6 100644
+--- a/tls/nss_tlsmgr_tun.c
++++ b/tls/nss_tlsmgr_tun.c
+@@ -230,7 +230,7 @@ static void nss_tlsmgr_notify_event(struct timer_list *tm)
+  */
+ static void nss_tlsmgr_notify_decongestion(struct timer_list *tm)
+ {
+-	struct nss_tlsmgr_tun *tun = from_timer(tun, tm, notify.timer);
++	struct nss_tlsmgr_tun *tun = from_timer(tun, tm, decongest.timer);
+ 	nss_tlsmgr_decongest_callback_t cb;
+ 	void *app_data;
+ 

@@ -1,0 +1,139 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] nss-clients: fix sysctl copy_from_user -EFAULT, unsigned if_num checks, and NULL deref
+
+On modern Linux kernels with hardened usercopy, sysctl proc_handlers receive
+a kernel buffer (not a __user pointer) and proc_dostring() has already copied
+the string into ctl->data. Calling copy_from_user() on buffer fails with
+-EFAULT.
+
+Fix the two remaining sysctl handlers in nss_match_cmd.c to duplicate from
+nss_match_data (checking proc_dostring() return status), fix the unsigned
+uint32_t if_num < 0 dead error checks in reset_nexthop and set_if_nexthop,
+and guard cmd_buf against NULL after strsep() before indexing cmd_buf[0].
+
+Also replace copy_from_user() with bounded memcpy() + NUL termination in
+nss_connmgr_tunipip6_sysctl.c.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/match/nss_match_cmd.c
++++ b/match/nss_match_cmd.c
+@@ -130,25 +130,19 @@
+ 	char *input_msg, *input_msg_orig;
+ 	nss_match_cmd_t command;
+ 	struct nss_ctx_instance *nss_ctx = nss_match_get_context();
+-	size_t count = *lenp;
+ 	int ret = proc_dostring(ctl, write, buffer, lenp, ppos);
+ 
+-	if (!write) {
++	if (ret || !write) {
+ 		return ret;
+ 	}
+ 
+-	input_msg = (char *)kzalloc(count + 1, GFP_KERNEL);
++	input_msg = kstrdup(nss_match_data, GFP_KERNEL);
+ 	if (!input_msg) {
+ 		nss_match_warn("%px: Dynamic allocation falied while writing input message from file", ctl);
+ 		return -ENOMEM;
+ 	}
+ 
+ 	input_msg_orig = input_msg;
+-	if (copy_from_user(input_msg, buffer, count)) {
+-		kfree(input_msg);
+-		nss_match_warn("%px: Cannot copy user's entry to kernel memory\n", ctl);
+-		return -EFAULT;
+-	}
+ 
+ 	command_str = strsep(&input_msg, " ");
+ 	command = nss_match_cmd_parse(command_str);
+@@ -454,7 +448,8 @@
+ static int nss_match_cmd_procfs_reset_nexthop(struct ctl_table *ctl, int write, void __user *buffer, size_t *lenp, loff_t *ppos)
+ {
+ 	struct net_device *dev;
+-	uint32_t if_num, type = 0;
++	int32_t if_num;
++	uint32_t type = 0;
+ 	int ret;
+ 	char *dev_name;
+ 	char *cmd_buf = nss_match_data;
+@@ -468,7 +463,7 @@
+ 	}
+ 
+ 	ret = proc_dostring(ctl, write, buffer, lenp, ppos);
+-	if (!write) {
++	if (ret || !write) {
+ 		pr_warn("%px: Reset nexthop failed.\n", nss_ctx);
+ 		return ret;
+ 	}
+@@ -524,18 +519,18 @@
+ static int nss_match_cmd_procfs_set_if_nexthop(struct ctl_table *ctl, int write, void __user *buffer, size_t *lenp, loff_t *ppos)
+ {
+ 	struct net_device *dev;
+-	uint32_t if_num, type = 0;
++	int32_t if_num;
++	uint32_t type = 0;
+ 	uint32_t nh_if_num;
+ 	int table_id;
+ 	struct nss_ctx_instance *nss_ctx = nss_match_get_context();
+ 	struct nss_ctx_instance *wifi_nss_ctx = nss_wifi_get_context();
+ 	char *dev_name, *nexthop_msg;
+ 	char *cmd_buf = NULL;
+-	size_t count = *lenp;
+ 	nss_tx_status_t nss_tx_status;
+ 	int ret = proc_dostring(ctl, write, buffer, lenp, ppos);
+ 
+-	if (!write) {
++	if (ret || !write) {
+ 		return ret;
+ 	}
+ 
+@@ -544,17 +539,11 @@
+ 		return -ENOMEM;
+ 	}
+ 
+-	cmd_buf = (char *)kzalloc(count + 1, GFP_KERNEL);
++	cmd_buf = kstrdup(nss_match_data, GFP_KERNEL);
+ 	nexthop_msg = cmd_buf;
+ 	if (!cmd_buf) {
+ 		pr_warn("%px: Cannot allocate buffer to read input", nss_ctx);
+ 		return -ENOMEM;
+-	}
+-
+-	if (copy_from_user(cmd_buf, buffer, count)) {
+-		kfree(nexthop_msg);
+-		pr_warn("%px: Cannot copy user's entry to kernel memory\n", nss_ctx);
+-		return -EFAULT;
+ 	}
+ 
+ 	dev_name = strsep(&cmd_buf, " ");
+@@ -573,7 +562,7 @@
+ 		return -ENODEV;
+ 	}
+ 
+-	if (isdigit(cmd_buf[0])) {
++	if (cmd_buf && isdigit(cmd_buf[0])) {
+ 		if (!sscanf(cmd_buf, "%u", &nh_if_num)) {
+ 			pr_warn("%px, Failed to write the nexthop if_num token to integer\n", nss_ctx);
+ 			kfree(nexthop_msg);
+--- a/tunipip6/nss_connmgr_tunipip6_sysctl.c
++++ b/tunipip6/nss_connmgr_tunipip6_sysctl.c
+@@ -79,14 +79,11 @@
+ 	}
+ 	pfree = buf;
+ 	count = *lenp;
+-	if (count > MAX_PROC_SIZE) {
+-		count = MAX_PROC_SIZE;
+-	}
+-
+-	if (copy_from_user(buf, buffer, count)) {
+-		kfree(pfree);
+-		return -EFAULT;
+-	}
++	if (count >= MAX_PROC_SIZE) {
++		count = MAX_PROC_SIZE - 1;
++	}
++
++	memcpy(buf, buffer, count);
+ 
+ 	while (buf) {
+ 		char *param, *value;

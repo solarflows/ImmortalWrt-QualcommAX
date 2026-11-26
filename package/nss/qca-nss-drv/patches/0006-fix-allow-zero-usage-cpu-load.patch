@@ -1,0 +1,22 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] nss-drv: allow zero-usage samples in CPU load calculation
+
+In idle or light-traffic scenarios on high-frequency NSS cores (e.g. 1.68GHz),
+instruction count per millisecond (inst_cnt) is often around 1000-2000 instructions.
+With max_ins = 1689600, integer division `(inst_cnt * 100) / max_ins` evaluates
+to 0. The vendor check `|| (actual_usage == 0)` caused the driver to discard
+these samples without incrementing avg_ctr, freezing cpu_load_ubi at its
+last high-traffic historical value. Allow zero-usage samples to pass through
+so that the rolling 1-second average smoothly decays to 0% in idle periods.
+
+--- a/nss_freq.c
++++ b/nss_freq.c
+@@ -144,7 +144,7 @@ static void nss_freq_compute_cpu_usage(struct nss_ctx_instance *nss_ctx, uint32_t inst_cnt)
+ 	 * TODO: To improve estimation algorithm for calculating how many actual instructions are executed.
+ 	 */
+ 	actual_usage = (inst_cnt * 100) / nss_freq_cpu_status.max_ins;
+-	if ((actual_usage > NSS_FREQ_CPU_USAGE_MAX) || (actual_usage == 0)) {
++	if (actual_usage > NSS_FREQ_CPU_USAGE_MAX) {
+ 		spin_unlock_bh(&nss_freq_cpu_usage_lock);
+ 		return;
+ 	}

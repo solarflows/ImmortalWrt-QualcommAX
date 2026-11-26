@@ -167,14 +167,25 @@ function iface_freq_info(iface, config, params)
 
 	/*
 	 * 6 GHz has no HT Operation IE, so the secondary channel offset cannot
-	 * be derived the usual way. For wide channels pass a null offset so the
+	 * be derived the usual way. Operating class 132 is 40 MHz despite its
+	 * USE_HT width value. For wide channels pass a null offset so the
 	 * C helper auto-derives it and computes the segment centre frequency; a
 	 * 0 offset would make it skip the centre calculation.
 	 */
-	if (freq > 5925 && width > 0 && sec_offset == 0)
+	if (freq > 5925 && sec_offset == 0 &&
+	    (width > 0 || index(config.radio.data, "op_class=132") >= 0))
 		sec_offset = null;
 
-	return hostapd.freq_info(freq, sec_offset, width);
+	let info = hostapd.freq_info(freq, sec_offset, width);
+	// 20 MHz has no secondary channel. Clear centres retained from the
+	// previous wide channel instead of leaving them unchanged in iface.start().
+	if (info && width == 0 && sec_offset == 0) {
+		info.center_seg0_idx = 0;
+		info.center_seg1_idx = 0;
+		info.center_freq1 = freq;
+		info.center_freq2 = 0;
+	}
+	return info;
 }
 
 function iface_add(phy, config, phy_status)
@@ -2761,10 +2772,6 @@ function bss_event(type, name, data) {
 
 return {
 	shutdown: function() {
-		// ubusd drops a reply to an object that is gone
-		for (let wait in hostapd.data.link_remove_wait)
-			mld_link_remove_reply(wait, wait.bss);
-
 		// Nothing serves the connection from here on, so a caller that
 		// still resolves an object waits for its own timeout.
 		hostapd.data.obj?.remove();
@@ -2808,6 +2815,11 @@ return {
 	bss_link_remove_timed: function(phy, name, obj) {
 		iface_link_reload_timed(phy, name, obj);
 		mld_link_remove_answer(phy, name, obj);
+	},
+	cac_start: function(phy, cac) {
+		hostapd.data.obj?.notify("cac_start",
+			{ wiphy: hostapd.data.config[phy]?.phy, ...cac },
+			null, null, null, -1);
 	},
 	cac_start: function(phy, cac) {
 		hostapd.data.obj?.notify("cac_start",

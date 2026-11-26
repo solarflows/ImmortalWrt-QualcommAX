@@ -18,12 +18,12 @@ on:
           - 'ipq60xx'
           - 'both'
       branch:
-        description: '源码分支 (nss-edma-julius / nss-edma-rolling / nss-edma-custom)'
+        description: '源码分支 (nss-edma-main / nss-edma-rolling / nss-edma-custom)'
         required: false
-        default: 'nss-edma-julius'
+        default: 'nss-edma-main'
         type: choice
         options:
-          - 'nss-edma-julius'
+          - 'nss-edma-main'
           - 'nss-edma-rolling'
           - 'nss-edma-custom'
       release_type:
@@ -106,7 +106,7 @@ jobs:
     with:
       matrix_target:                      ${{ matrix.target }}
       matrix_repo:                        'solarflows/ImmortalWrt-QualcommAX'
-      matrix_ref:                         ${{ inputs.branch || 'nss-edma-julius' }}
+      matrix_ref:                         ${{ inputs.branch || 'nss-edma-main' }}
       matrix_packages_branch:             'qualcommax'
       standard_packages_branch:           'qualcommax'
       matrix_release_repo:                'solarflows/ImmortalWrt-QualcommAX'

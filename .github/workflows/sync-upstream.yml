@@ -1,7 +1,7 @@
 # ════════════════════════════════════════════════════════════════════════
 # Upstream Sync & Rolling Canary Build
 # 双轨自动同步工作流:
-# 1. 以生产基底 nss-edma-julius 为起点派生并重置 nss-edma-rolling 分支
+# 1. 以生产基底 nss-edma-main 为起点派生并重置 nss-edma-rolling 分支
 # 2. 在路径级保护盾 (merge=ours) 下合并 OpenWrt 官方 master 通用演进
 # 3. 自动同步 ImmortalWrt 签名公钥
 # 4. 强制推送更新至 origin/nss-edma-rolling
@@ -102,7 +102,7 @@ jobs:
           echo "require_signing=${{ inputs.require_signing || false }}" >> "$GITHUB_OUTPUT"
 
           # 确保获取本地最新人工基底
-          git fetch origin nss-edma-julius:nss-edma-julius --force
+          git fetch origin nss-edma-main:nss-edma-main --force
 
           # 同步并强校验 ImmortalWrt 官方快照签名公钥 (APK ECDSA + usign Ed25519)
           KEY_CHANGED="false"
@@ -113,7 +113,7 @@ jobs:
              [ "$(wc -c < /tmp/immortalwrt-snapshots.pem)" -gt 64 ] && \
              [ "$(wc -c < /tmp/immortalwrt-snapshots.pem)" -lt 512 ] && \
              openssl pkey -pubin -in /tmp/immortalwrt-snapshots.pem -noout >/dev/null 2>&1; then
-            CUR_APK_HASH=$(git show nss-edma-julius:package/system/openwrt-keyring/files/apk/immortalwrt-snapshots.pem 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+            CUR_APK_HASH=$(git show nss-edma-main:package/system/openwrt-keyring/files/apk/immortalwrt-snapshots.pem 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
             NEW_APK_HASH=$(sha256sum /tmp/immortalwrt-snapshots.pem | awk '{print $1}')
             if [ "$CUR_APK_HASH" != "$NEW_APK_HASH" ]; then
               echo "ImmortalWrt APK public key update detected: ${CUR_APK_HASH:-none} -> ${NEW_APK_HASH}"
@@ -128,7 +128,7 @@ jobs:
              [ "$(wc -c < /tmp/8ead5420c4005b0d)" -gt 40 ] && \
              [ "$(wc -c < /tmp/8ead5420c4005b0d)" -lt 256 ] && \
              grep -v '^untrusted comment:' /tmp/8ead5420c4005b0d | grep -qxE 'RWS[A-Za-z0-9+/=]{50,60}'; then
-            CUR_USIGN_HASH=$(git show nss-edma-julius:package/system/openwrt-keyring/files/usign/8ead5420c4005b0d 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
+            CUR_USIGN_HASH=$(git show nss-edma-main:package/system/openwrt-keyring/files/usign/8ead5420c4005b0d 2>/dev/null | sha256sum | awk '{print $1}' || echo "")
             NEW_USIGN_HASH=$(sha256sum /tmp/8ead5420c4005b0d | awk '{print $1}')
             if [ "$CUR_USIGN_HASH" != "$NEW_USIGN_HASH" ]; then
               echo "ImmortalWrt usign public key update detected: ${CUR_USIGN_HASH:-none} -> ${NEW_USIGN_HASH}"
@@ -156,9 +156,9 @@ jobs:
           BASE_SHA="${{ steps.check.outputs.base_sha }}"
           KEY_CHANGED="${{ steps.check.outputs.key_changed }}"
 
-          # 1. 始终以最新人工真理源 nss-edma-julius 重置滚动分支
-          echo "Resetting nss-edma-rolling branch from origin/nss-edma-julius..."
-          git checkout -B nss-edma-rolling nss-edma-julius
+          # 1. 始终以最新人工真理源 nss-edma-main 重置滚动分支
+          echo "Resetting nss-edma-rolling branch from origin/nss-edma-main..."
+          git checkout -B nss-edma-rolling nss-edma-main
 
           # 2. 动态注入硬件防护盾至 runner 的 .git/info/attributes 并启用 merge=ours 合并驱动
           echo "Configuring rolling merge=ours protection shield in .git/info/attributes..."
@@ -181,7 +181,7 @@ jobs:
             fi
             echo "All conflicts reside within protected paths. Auto-resolving via secondary protection..."
             git rm -rf --quiet target/linux/qualcommax package/kernel/mac80211 package/nss 2>/dev/null || true
-            git checkout nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss
+            git checkout nss-edma-main -- target/linux/qualcommax package/kernel/mac80211 package/nss
             git add target/linux/qualcommax package/kernel/mac80211 package/nss
             git commit -m "$MERGE_MSG"
           fi
@@ -189,7 +189,7 @@ jobs:
           # 3. 第二道物理防线：彻底清除上游合并引入的新增文件，将受保护目录物理重置为基底分支
           echo "Applying secondary protection layer to hardware offload paths..."
           git rm -rf --quiet target/linux/qualcommax package/kernel/mac80211 package/nss 2>/dev/null || true
-          git checkout nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss
+          git checkout nss-edma-main -- target/linux/qualcommax package/kernel/mac80211 package/nss
 
           # 提交修正以收敛合并
           git add target/linux/qualcommax package/kernel/mac80211 package/nss
@@ -197,14 +197,14 @@ jobs:
             git commit --amend --no-edit || true
           fi
 
-          # 断言受保护路径与本地真理源 nss-edma-julius 绝对 100% 零差异
-          PROTECTED_DIFF=$(git diff nss-edma-julius -- target/linux/qualcommax package/kernel/mac80211 package/nss)
+          # 断言受保护路径与本地真理源 nss-edma-main 绝对 100% 零差异
+          PROTECTED_DIFF=$(git diff nss-edma-main -- target/linux/qualcommax package/kernel/mac80211 package/nss)
           if [ -n "$PROTECTED_DIFF" ]; then
-            echo "::error::Protected path assertion failed: differences detected against nss-edma-julius!"
+            echo "::error::Protected path assertion failed: differences detected against nss-edma-main!"
             echo "$PROTECTED_DIFF" | head -n 30
             exit 1
           fi
-          echo "Protected hardware paths verified (zero diff against nss-edma-julius)."
+          echo "Protected hardware paths verified (zero diff against nss-edma-main)."
 
           # 4. 注入更新后的快照公钥 (若有变更)
           if [ "$KEY_CHANGED" = "true" ]; then

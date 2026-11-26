@@ -73,7 +73,7 @@ top
 | 分支名称 | 属性 | 说明 |
 | :--- | :---: | :--- |
 | **`main`** | 管控分支 | 存放 GitHub Actions 构建工作流、Seeds 种子配置与上游基准跟踪文件（`.github/openwrt.sha`） |
-| **`nss-edma-julius`** | 稳定分支 | 生产基底分支，由人工维护 NSS 源码树、平台补丁及板级设备树（DTS），输出稳定版固件 |
+| **`nss-edma-main`** | 稳定分支 | 生产基底分支，由人工维护 NSS 源码树、平台补丁及板级设备树（DTS），输出稳定版固件 |
 | **`nss-edma-rolling`** | 滚动分支 | 自动派生分支，每周同步 OpenWrt 官方主线，受保护路径（`qualcommax`、`mac80211`、`nss`）不被覆盖，输出 Canary 固件 |
 
 ---
@@ -82,7 +82,7 @@ top
 
 ```sh
 # 克隆仓库
-git clone -b nss-edma-julius https://github.com/solarflows/ImmortalWrt-QualcommAX.git openwrt
+git clone -b nss-edma-main https://github.com/solarflows/ImmortalWrt-QualcommAX.git openwrt
 cd openwrt
 
 # 更新 feeds 并应用种子配置 (以 IPQ807x 为例)

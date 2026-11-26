@@ -1,7 +1,7 @@
 From 7f93ca31f7fd9b42e7d692f59514436d448ac908 Mon Sep 17 00:00:00 2001
 From: Felix Fietkau <nbd@nbd.name>
 Date: Wed, 16 Sep 2026 11:48:32 +0200
-Subject: wifi: mac80211: prevent AP VLAN tx from other interfaces
+Subject: [PATCH] wifi: mac80211: prevent AP VLAN tx from other interfaces
 
 Since the station lookup was factored out of ieee80211_build_hdr(),
 ieee80211_lookup_ra_sta() uses sta_info_get_bss() for all AP and AP VLAN
@@ -17,10 +17,11 @@ Fixes: 97ffe75791b3 ("mac80211: factor out station lookup from ieee80211_build_h
 Signed-off-by: Felix Fietkau <nbd@nbd.name>
 Link: https://patch.msgid.link/20260916094833.164219-1-nbd@nbd.name
 Signed-off-by: Johannes Berg <johannes.berg@intel.com>
+[adapted for NSS offload compatibility: preserve EAPOL offload check in 657]
 ---
  net/mac80211/ieee80211_i.h |  2 +-
- net/mac80211/tx.c          | 24 +++++++++++++++---------
- 2 files changed, 16 insertions(+), 10 deletions(-)
+ net/mac80211/tx.c          | 14 ++++++++------
+ 2 files changed, 9 insertions(+), 7 deletions(-)
 
 --- a/net/mac80211/ieee80211_i.h
 +++ b/net/mac80211/ieee80211_i.h
@@ -66,29 +67,17 @@ Signed-off-by: Johannes Berg <johannes.berg@intel.com>
  		goto out_free;
  
  	if (IS_ERR(sta))
-@@ -4859,7 +4863,10 @@ static void __ieee80211_subif_start_xmit
+@@ -4859,7 +4863,8 @@ static void __ieee80211_subif_start_xmit
  
  	rcu_read_lock();
  
 -	if (ieee80211_lookup_ra_sta(sdata, skb, &sta)) {
-+	if (unlikely(sdata->control_port_protocol == ehdr->h_proto))
-+		goto skip_offload;
-+
-+	if (ieee80211_lookup_ra_sta(sdata, skb, &sta, false)) {
++	if (ieee80211_lookup_ra_sta(sdata, skb, &sta,
++				    sdata->control_port_protocol == ehdr->h_proto)) {
  		kfree_skb(skb);
  		goto out;
  	}
-@@ -4880,8 +4887,7 @@ static void __ieee80211_subif_start_xmit
- 		link = &sdata->deflink;
- 		key = rcu_dereference(link->default_multicast_key);
- 	} else if (unlikely(IS_ERR_OR_NULL(sta) || !sta->uploaded ||
--		   !test_sta_flag(sta, WLAN_STA_AUTHORIZED) ||
--	    sdata->control_port_protocol == ehdr->h_proto)) {
-+		   !test_sta_flag(sta, WLAN_STA_AUTHORIZED))) {
- 		goto skip_offload;
- 	} else {
- 		key = rcu_dereference(sta->ptk[sta->ptk_idx]);
-@@ -4942,7 +4948,7 @@ ieee80211_build_data_template(struct iee
+@@ -4942,7 +4947,7 @@ ieee80211_build_data_template(struct iee
  
  	rcu_read_lock();
  
@@ -97,7 +86,7 @@ Signed-off-by: Johannes Berg <johannes.berg@intel.com>
  		kfree_skb(skb);
  		skb = ERR_PTR(-EINVAL);
  		goto out;
-@@ -5013,7 +5019,7 @@ static bool ieee80211_tx_pending_skb(str
+@@ -5013,7 +5018,7 @@ static bool ieee80211_tx_pending_skb(str
  		}
  		result = ieee80211_tx(sdata, NULL, skb, true);
  	} else if (info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) {
@@ -106,7 +95,7 @@ Signed-off-by: Johannes Berg <johannes.berg@intel.com>
  			dev_kfree_skb(skb);
  			return true;
  		}
-@@ -6646,7 +6652,7 @@ int ieee80211_tx_control_port(struct wip
+@@ -6646,7 +6651,7 @@ int ieee80211_tx_control_port(struct wip
  	 * AF_PACKET
  	 */
  	rcu_read_lock();

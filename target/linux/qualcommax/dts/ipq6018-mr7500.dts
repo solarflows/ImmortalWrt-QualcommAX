@@ -6,6 +6,7 @@
 #include "ipq6018.dtsi"
 #include "ipq6018-cp-cpu.dtsi"
 #include "ipq6018-512m.dtsi"
+#include "ipq6018-nss.dtsi"
 #include "ipq6018-ess.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
@@ -510,7 +511,6 @@
 
 &qusb_phy_0 {
 	status = "okay";
-	vdd-supply = <&reg_usb_vbus>;
 };
 
 &usb3 {

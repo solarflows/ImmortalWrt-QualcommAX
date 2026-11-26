@@ -10,4 +10,8 @@
 / {
 	model = "Netgear RBR750";
 	compatible = "netgear,rbr750", "qcom,ipq8074";
+
+	chosen {
+		bootargs-append = " ubi.mtd=rootfs ubi.mtd=reserved2 root=/dev/ubiblock0_1";
+	};
 };

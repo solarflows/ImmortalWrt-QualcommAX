@@ -15,7 +15,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
 @@ -3058,6 +3058,29 @@ static void sta_set_link_sinfo(struct st
  	}
  }
- 
+
 +static u32 sta_estimate_expected_throughput(struct sta_info *sta,
 +					    struct station_info *sinfo)
 +{

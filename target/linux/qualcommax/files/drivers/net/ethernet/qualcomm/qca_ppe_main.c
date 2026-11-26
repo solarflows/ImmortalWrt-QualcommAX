@@ -2,6 +2,8 @@
 
 #include <linux/delay.h>
 #include <linux/qca_edma.h>
+#include <linux/soc/qcom/qca_edma.h>
+#include <linux/soc/qcom/qca_ppe.h>
 #include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
@@ -22,6 +24,9 @@
  * as no counter wraps twice unobserved between folds.
  */
 #define PPE_MIB_FOLD_INTERVAL	(30 * HZ)
+
+static struct qca_ppe_priv *qca_ppe_instance;
+static struct workqueue_struct *qca_ppe_wq;
 
 static void ppe_port_gmac_set(struct qca_ppe_priv *priv, int port,
 			      bool tx_en, bool rx_en)
@@ -297,6 +302,17 @@ void ppe_vsi_member_set(struct qca_ppe_priv *priv, u32 vsi,
 		     PPE_VSI_TBL_NEW_ADDR_LRN_EN | PPE_VSI_TBL_STA_MOVE_LRN_EN);
 }
 
+static bool ppe_is_fw_vsi(struct qca_ppe_priv *priv, u32 vsi)
+{
+	int p;
+
+	for (p = 0; p < QCA_PPE_MAX_PORTS; p++)
+		if (priv->port_fw_vsi[p] == vsi)
+			return true;
+
+	return false;
+}
+
 /* VSI 0 is skipped: it carries the ports no bridge has claimed, whose flood set
  * is the host alone whatever their flags say.
  */
@@ -305,7 +321,7 @@ static void ppe_vsi_flood_refresh(struct qca_ppe_priv *priv)
 	int vsi;
 
 	for_each_set_bit(vsi, priv->vsi_bitmap, PPE_VSI_MAX)
-		if (vsi)
+		if (vsi && !ppe_is_fw_vsi(priv, vsi))
 			ppe_vsi_member_set(priv, vsi, priv->vsi_member[vsi]);
 }
 
@@ -944,8 +960,10 @@ static int qca_ppe_setup(struct dsa_switch *ds)
 	port_mask = BIT(num_ports) - 1;
 	frame_size = PPE_DEFAULT_MTU + 2 * VLAN_HLEN;
 
-	for (i = 0; i < num_ports; i++)
+	for (i = 0; i < num_ports; i++) {
 		priv->port_vsi[i] = 0;
+		priv->port_fw_vsi[i] = PPE_VSI_INVALID;
+	}
 
 	regmap_write(priv->regmap, PPE_FDB_OP, 0);
 
@@ -1061,6 +1079,10 @@ static int qca_ppe_port_enable(struct dsa_switch *ds, int port,
 static void qca_ppe_port_disable(struct dsa_switch *ds, int port)
 {
 	struct qca_ppe_priv *priv = ds_to_priv(ds);
+	struct dsa_port *dp = dsa_to_port(ds, port);
+
+	if (!dsa_is_cpu_port(ds, port) && dp)
+		qca_edma_port_transition_begin(dsa_port_to_conduit(dp), port);
 
 	ppe_port_bridge_txmac_set(priv, port, false);
 	ppe_port_queues_enable(priv, port, false);
@@ -1687,6 +1709,8 @@ static void qca_ppe_mac_link_down(struct phylink_config *config,
 	if (dsa_is_cpu_port(dp->ds, port))
 		return;
 
+	qca_edma_port_transition_begin(dsa_port_to_conduit(dp), port);
+
 	/* Gate the fabric before the MAC is torn down; qca_ppe_mac_link_up()
 	 * turns it back on once the MAC is up. Left on across a flap, the
 	 * fabric dequeues into a MAC that is still being re-clocked and
@@ -1877,7 +1901,158 @@ static void qca_ppe_mac_link_up(struct phylink_config *config,
 	 * above bring no MAC up, so they leave the gate closed on purpose.
 	 */
 	ppe_port_bridge_txmac_set(priv, port, true);
+	qca_edma_port_transition_end(dsa_port_to_conduit(dp), port);
 }
+
+static const struct dsa_switch_ops qca_ppe_ops;
+
+struct qca_ppe_priv *qca_ppe_user_port_resolve(struct net_device *netdev,
+					       int *port)
+{
+	struct dsa_port *dp;
+
+	ASSERT_RTNL();
+
+	if (!netdev || !dsa_user_dev_check(netdev))
+		return NULL;
+
+	dp = dsa_port_from_netdev(netdev);
+	if (IS_ERR(dp) || dp->ds->ops != &qca_ppe_ops)
+		return NULL;
+
+	*port = dp->index;
+	return ds_to_priv(dp->ds);
+}
+
+static void fw_vsi_tbl_write(struct qca_ppe_priv *priv, int port, u32 vsi)
+{
+	regmap_write(priv->regmap, PPE_VSI_TBL(vsi),
+		     FIELD_PREP(PPE_VSI_TBL_MEMBER,
+				BIT(port) | BIT(QCA_PPE_CPU_PORT)) |
+		     FIELD_PREP(PPE_VSI_TBL_UUC,
+				BIT(port) | BIT(QCA_PPE_CPU_PORT)) |
+		     FIELD_PREP(PPE_VSI_TBL_UMC,
+				BIT(port) | BIT(QCA_PPE_CPU_PORT)) |
+		     FIELD_PREP(PPE_VSI_TBL_BC,
+				BIT(port) | BIT(QCA_PPE_CPU_PORT)));
+	regmap_write(priv->regmap, PPE_VSI_TBL(vsi) + 4,
+		     PPE_VSI_TBL_NEW_ADDR_LRN_EN | PPE_VSI_TBL_STA_MOVE_LRN_EN);
+}
+
+int qca_ppe_port_fw_vsi_get(struct net_device *netdev)
+{
+	struct qca_ppe_priv *priv;
+	int port, vsi;
+
+	priv = qca_ppe_user_port_resolve(netdev, &port);
+	if (!priv)
+		return -ENODEV;
+
+	if (priv->port_fw_vsi[port] != PPE_VSI_INVALID)
+		return priv->port_fw_vsi[port];
+
+	vsi = ppe_vsi_alloc(priv);
+	if (vsi < 0)
+		return vsi;
+
+	fw_vsi_tbl_write(priv, port, vsi);
+	priv->port_fw_vsi[port] = vsi;
+
+	return vsi;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_port_fw_vsi_get);
+
+int qca_ppe_port_fw_vsi_refresh(struct net_device *netdev)
+{
+	struct qca_ppe_priv *priv;
+	int port;
+
+	priv = qca_ppe_user_port_resolve(netdev, &port);
+	if (!priv)
+		return -ENODEV;
+
+	if (priv->port_fw_vsi[port] == PPE_VSI_INVALID)
+		return -ENOENT;
+
+	fw_vsi_tbl_write(priv, port, priv->port_fw_vsi[port]);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_port_fw_vsi_refresh);
+
+int qca_ppe_bridge_vsi_get(struct net_device *br_dev)
+{
+	struct qca_ppe_priv *priv = qca_ppe_instance;
+	struct qca_ppe_bridge_vsi *bvsi;
+
+	ASSERT_RTNL();
+
+	if (!priv || !br_dev)
+		return -ENODEV;
+
+	bvsi = bridge_vsi_find(priv, br_dev);
+	if (!bvsi)
+		return -ENODEV;
+
+	return bvsi->vsi;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_bridge_vsi_get);
+
+int qca_ppe_bridge_vsi_refresh(struct net_device *br_dev)
+{
+	struct qca_ppe_priv *priv = qca_ppe_instance;
+	struct qca_ppe_bridge_vsi *bvsi;
+
+	ASSERT_RTNL();
+
+	if (!priv || !br_dev)
+		return -ENODEV;
+
+	bvsi = bridge_vsi_find(priv, br_dev);
+	if (!bvsi)
+		return -ENODEV;
+
+	bridge_vsi_members_update(priv, bvsi);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_bridge_vsi_refresh);
+
+struct qca_ppe_fdb_del_work {
+	struct work_struct work;
+	struct qca_ppe_priv *priv;
+	unsigned char addr[ETH_ALEN];
+	u32 vsi;
+};
+
+static void qca_ppe_fdb_del_worker(struct work_struct *work)
+{
+	struct qca_ppe_fdb_del_work *w =
+		container_of(work, struct qca_ppe_fdb_del_work, work);
+
+	ppe_fdb_op(w->priv, w->addr, 0, w->vsi, PPE_FDB_OP_DEL);
+	kfree(w);
+}
+
+int qca_ppe_fdb_del(const unsigned char *addr, u32 vsi)
+{
+	struct qca_ppe_priv *priv = qca_ppe_instance;
+	struct qca_ppe_fdb_del_work *w;
+
+	if (!priv || !qca_ppe_wq || !addr)
+		return -ENODEV;
+
+	w = kzalloc(sizeof(*w), GFP_ATOMIC);
+	if (!w)
+		return -ENOMEM;
+
+	INIT_WORK(&w->work, qca_ppe_fdb_del_worker);
+	w->priv = priv;
+	ether_addr_copy(w->addr, addr);
+	w->vsi = vsi;
+	queue_work(qca_ppe_wq, &w->work);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(qca_ppe_fdb_del);
 
 /* Tw_sys for 100BASE-TX is 30 us, the longest of the speeds offered. */
 #define PPE_LPI_WAKE_US		32
@@ -3246,6 +3421,16 @@ static int qca_ppe_probe(struct platform_device *pdev)
 	ppe_debugfs_init(priv);
 	ppe_flow_debugfs_init(priv);
 
+	qca_ppe_wq = alloc_workqueue("qca_ppe", WQ_UNBOUND, 1);
+	if (!qca_ppe_wq) {
+		ppe_debugfs_exit(priv);
+		ppe_scheduler_unready(priv);
+		dsa_unregister_switch(ds);
+		ret = -ENOMEM;
+		goto err_flow;
+	}
+	qca_ppe_instance = priv;
+
 	platform_set_drvdata(pdev, priv);
 
 	return 0;
@@ -3262,6 +3447,11 @@ static void qca_ppe_remove(struct platform_device *pdev)
 {
 	struct qca_ppe_priv *priv = platform_get_drvdata(pdev);
 
+	qca_ppe_instance = NULL;
+	if (qca_ppe_wq) {
+		destroy_workqueue(qca_ppe_wq);
+		qca_ppe_wq = NULL;
+	}
 	ppe_debugfs_exit(priv);
 	ppe_scheduler_unready(priv);
 	dsa_unregister_switch(&priv->ds);

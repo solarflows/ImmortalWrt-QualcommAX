@@ -1,0 +1,113 @@
+From: nanotech17 <346107436+nanotech17@users.noreply.github.com>
+Subject: [PATCH] ath11k: nss: map wifili event context back to ath11k_base
+
+nss_wifili_handler() calls the wifili event callback with the net_device
+that was registered for the interface the message came from
+(subsys_dp_register[ncm->interface].ndev). ath11k registers the soc
+interface with ab (nss_register_wifili_if) but each radio interface with
+ar (nss_register_wifili_radio_if), and every NOTIFY message goes to the
+same ath11k_nss_wifili_event_receive(). Events coming from a radio
+interface were therefore handled with a struct ath11k pointer used as a
+struct ath11k_base: the peer stats path took ab->base_lock and walked
+ab->peers inside the wrong object about every second, and the NSS debug
+print dereferenced a bogus ab->dev (oops in dev_driver_string seen with
+pstore on MX4200v1).
+
+Keep the registered ab pointers and map the callback context back to the
+owning ab, accepting either ab itself or one of its ar. Drop the event if
+the context is unknown.
+
+--- a/drivers/net/wireless/ath/ath11k/nss.c
++++ b/drivers/net/wireless/ath/ath11k/nss.c
+@@ -343,12 +343,66 @@ static void ath11k_nss_peer_mem_free(str
+ /*-----------------------------Events/Callbacks------------------------------*/
+ 
+-static void ath11k_nss_wifili_event_receive(struct ath11k_base *ab, struct nss_wifili_msg *msg)
++/* nss_wifili_handler() passes the net_device registered for the interface
++ * a message came from: ab for the soc interface, ar for each radio.
++ */
++#define ATH11K_NSS_MAX_SOC	2
++static struct ath11k_base *ath11k_nss_socs[ATH11K_NSS_MAX_SOC];
++static DEFINE_SPINLOCK(ath11k_nss_socs_lock);
++
++static void ath11k_nss_soc_register(struct ath11k_base *ab)
++{
++	int i;
++
++	spin_lock_bh(&ath11k_nss_socs_lock);
++	for (i = 0; i < ATH11K_NSS_MAX_SOC; i++) {
++		if (!ath11k_nss_socs[i] || ath11k_nss_socs[i] == ab) {
++			ath11k_nss_socs[i] = ab;
++			break;
++		}
++	}
++	spin_unlock_bh(&ath11k_nss_socs_lock);
++}
++
++static void ath11k_nss_soc_unregister(struct ath11k_base *ab)
++{
++	int i;
++
++	spin_lock_bh(&ath11k_nss_socs_lock);
++	for (i = 0; i < ATH11K_NSS_MAX_SOC; i++)
++		if (ath11k_nss_socs[i] == ab)
++			ath11k_nss_socs[i] = NULL;
++	spin_unlock_bh(&ath11k_nss_socs_lock);
++}
++
++static struct ath11k_base *ath11k_nss_ctx_to_ab(void *context)
++{
++	struct ath11k_base *found = NULL;
++	int i, j;
++
++	spin_lock_bh(&ath11k_nss_socs_lock);
++	for (i = 0; i < ATH11K_NSS_MAX_SOC && !found; i++) {
++		struct ath11k_base *ab = ath11k_nss_socs[i];
++
++		if (!ab)
++			continue;
++		if (context == ab)
++			found = ab;
++		for (j = 0; j < ab->num_radios && !found; j++)
++			if (context == ab->pdevs[j].ar)
++				found = ab;
++	}
++	spin_unlock_bh(&ath11k_nss_socs_lock);
++	return found;
++}
++
++static void ath11k_nss_wifili_event_receive(void *context, struct nss_wifili_msg *msg)
+ {
+ 	u32 msg_type = msg->cm.type;
+ 	enum nss_cmn_response response = msg->cm.response;
+ 	u32 error =  msg->cm.error;
+ 	u32 peer_id;
+ 	struct nss_wifili_peer_stats *peer_stats;
++	struct ath11k_base *ab = ath11k_nss_ctx_to_ab(context);
+ 
+ 	if (!ab)
+ 		return;
+@@ -3117,6 +3171,7 @@ int ath11k_nss_setup(struct ath11k_base
+ 		ath11k_warn(ab, "nss wifili register failure\n");
+ 		goto free;
+ 	}
++	ath11k_nss_soc_register(ab);
+ 
+ 	if (nss_cmn_get_state(nss_contex) != NSS_STATE_INITIALIZED) {
+ 		ath11k_warn(ab, "nss state in default init state\n");
+@@ -3166,6 +3221,7 @@ int ath11k_nss_setup(struct ath11k_base
+ 	return 0;
+ 
+ unregister:
++	ath11k_nss_soc_unregister(ab);
+ 	nss_unregister_wifili_if(ab->nss.if_num);
+ free:
+ 	ath11k_nss_tx_desc_mem_free(ab);
+@@ -3453,6 +3509,7 @@ void ath11k_nss_teardown(struct ath11k_b
+ 	}
+ 
+ 	/* Unregister wifili interface */
++	ath11k_nss_soc_unregister(ab);
+ 	nss_unregister_wifili_if(ab->nss.if_num);
+ 
+ free:

@@ -1,0 +1,2 @@
+config nss_dashboard 'security'
+	option auto_block '1'

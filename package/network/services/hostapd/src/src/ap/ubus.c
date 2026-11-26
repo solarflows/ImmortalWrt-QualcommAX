@@ -3377,7 +3377,8 @@ ubus_event_cb(struct ubus_notify_request *req, int idx, int ret)
 	ureq->resp = ret;
 }
 
-static u16 hostapd_ubus_ban_status(struct hostapd_data *hapd, const u8 *addr)
+static int hostapd_ubus_ban_status(struct hostapd_data *hapd,
+				   const u8 *addr)
 {
 	struct ubus_banned_client *ban;
 
@@ -3489,17 +3490,15 @@ static int hostapd_ubus_request_status(struct hostapd_data *hapd,
 
 int hostapd_ubus_handle_event(struct hostapd_data *hapd, struct hostapd_ubus_request *req)
 {
-	const u8 *link_addr = req->mgmt_frame ? req->mgmt_frame->sa : req->addr;
+	const u8 *addr = req->mgmt_frame ? req->mgmt_frame->sa : req->addr;
 	int status;
 
-	status = hostapd_ubus_request_status(hapd, req, link_addr);
+	status = hostapd_ubus_request_status(hapd, req, addr);
 
 	/* A pending Deauthentication would end the new association */
 	if (status == WLAN_STATUS_SUCCESS &&
-	    req->type != HOSTAPD_UBUS_PROBE_REQ) {
-		hostapd_ubus_deauth_cancel(hapd, req->mld_addr);
-		hostapd_ubus_deauth_cancel(hapd, link_addr);
-	}
+	    req->type != HOSTAPD_UBUS_PROBE_REQ)
+		hostapd_ubus_deauth_cancel(hapd, addr);
 
 	return status;
 }

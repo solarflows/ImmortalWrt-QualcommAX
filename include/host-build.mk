@@ -256,13 +256,32 @@ ifndef DUMP
   endef
 endif
 
+# ── CI 缓存与 CONFIG_AUTOREMOVE=y 下的 Host 下载规则保留修正 ──
+# [上游原逻辑保留 (已注释无效化)]
+# 原逻辑在 $(if $(and $(CONFIG_AUTOREMOVE), $(wildcard $(HOST_STAMP_INSTALLED), $(wildcard $(HOST_STAMP_BUILT)))),,...)
+# 试图跳过已构建 Host 包的 Download 注册。但在 CI 恢复 hostpkg 缓存 (.built) 且
+# dl/ 未缓存的环境中，一旦上游包升级导致 PKG_FILES_MD5 变更，Make 需重建
+# .prepared<new_md5> 并重新解包，却因 Download,default 被跳过而报 No such file or directory。
+# 注释掉该跳过判断后，Make 始终注册下载配方：缓存命中时 0 开销跳过，仅在重建且缺包时按需拉取。
+#
+# define HostBuild
+#   $(HostBuild/Core)
+#   $(if $(USE_HOST_GIT_SRC_CHECKOUT)$(USE_HOST_GIT_TREE),,
+# 	$(if $(if $(PKG_HOST_ONLY),,$(if $(and $(filter host-%,$(MAKECMDGOALS)),$(PKG_SKIP_DOWNLOAD)),,$(STAMP_PREPARED))),,
+# 		$(if $(and $(CONFIG_AUTOREMOVE), $(wildcard $(HOST_STAMP_INSTALLED), $(wildcard $(HOST_STAMP_BUILT)))),,
+# 			$(if $(strip $(PKG_SOURCE_URL)),$(call Download,default))
+# 		)
+# 	)
+#   )
+# endef
+
 define HostBuild
   $(HostBuild/Core)
   $(if $(USE_HOST_GIT_SRC_CHECKOUT)$(USE_HOST_GIT_TREE),,
 	$(if $(if $(PKG_HOST_ONLY),,$(if $(and $(filter host-%,$(MAKECMDGOALS)),$(PKG_SKIP_DOWNLOAD)),,$(STAMP_PREPARED))),,
-		$(if $(and $(CONFIG_AUTOREMOVE), $(wildcard $(HOST_STAMP_INSTALLED), $(wildcard $(HOST_STAMP_BUILT)))),,
-			$(if $(strip $(PKG_SOURCE_URL)),$(call Download,default))
-		)
+		$(if $(strip $(PKG_SOURCE_URL)),$(call Download,default))
 	)
   )
 endef
+
+# (备注: 保持原 $(HOST_STAMP_PREPARED) 依赖结构不变，仅解除下载规则注册门禁，确保 Go/Rust 等原生兼容)

@@ -6,7 +6,7 @@ DEFAULT_PACKAGES += \
 	kmod-qca-nss-drv-pppoe kmod-qca-nss-drv-bridge-mgr kmod-qca-nss-drv-vlan-mgr \
 	kmod-qca-nss-drv-qdisc kmod-qca-nss-drv-igs \
 	kmod-qca-nss-drv-mirror kmod-qca-nss-drv-netlink \
-	nss-tools luci-app-nss nssqos luci-app-nssqos sqm-scripts-nss nssinfo
+	nss-tools luci-app-nss luci-app-nss-dashboard nssqos luci-app-nssqos sqm-scripts-nss nssinfo
 
 define Target/Description
 	Build firmware images for Qualcomm Atheros IPQ807x based boards.

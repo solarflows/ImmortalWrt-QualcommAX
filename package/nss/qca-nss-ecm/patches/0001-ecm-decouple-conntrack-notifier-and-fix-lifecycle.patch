@@ -1,0 +1,423 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-ecm: decouple conntrack notifier, modernize workqueue, and add atomic exponential backoff
+
+1. In ecm_conntrack_notifier.c:
+   - Call dedicated nf_conntrack_register_ecm_notifier() and
+     nf_conntrack_unregister_ecm_notifier() instead of clobbering ctnetlink.
+2. In frontends/nss/ecm_nss_ipv4.c and frontends/nss/ecm_nss_ipv6.c:
+   - Initialize delta_jiffies = 0 to prevent stack wild value additions.
+   - When !ci or elapsed < 0 with non-zero residual traffic counts, jump to
+     sync_conntrack to account tail packets into Linux conntrack acct before exit.
+   - Guard ct->timeout updates with if (delta_jiffies && ...) so tail packet
+     accounting never artificially extends defunct connection timeouts.
+   - Replace msleep_interruptible(4) with high-resolution usleep_range_idle(3800, 4000).
+   - In periodic stats sync, replace msleep_interruptible blocking inside the
+     workqueue with non-blocking queue_delayed_work() rescheduling.
+   - Implement atomic exponential backoff and cursor stepping under spinlock:
+     * When unanswered timeout occurs, advance cursor by page capacity rather
+       than resetting to 0, preventing sticky loops. Wrap safely at max capacity.
+     * Scale reschedule delay exponentially (1s, 2s, 4s, 8s, 16s, max 32s).
+     * Atomically reset consecutive_timeouts upon receiving any valid ACK.
+     * Retain pr_warn_ratelimited logging with timeout count and index for observability.
+3. In frontends/sfe/ecm_sfe_ipv4.c and frontends/sfe/ecm_sfe_ipv6.c:
+   - Replace msleep blocking inside workqueue with queue_delayed_work() rescheduling.
+   - Attach 5000ms watchdog timeout on sfe_tx_status == SUCCESS to prevent permanent
+     pipeline stall upon missed stats sync callbacks.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+diff --git a/ecm_conntrack_notifier.c b/ecm_conntrack_notifier.c
+index 1d4174ad76..347747c974 100644
+--- a/ecm_conntrack_notifier.c
++++ b/ecm_conntrack_notifier.c
+@@ -44,7 +44,13 @@
+ #include <net/netfilter/nf_conntrack_l4proto.h>
+ #include <net/netfilter/nf_conntrack_zones.h>
+ #include <net/netfilter/nf_conntrack_core.h>
++#include <net/netfilter/nf_conntrack_ecache.h>
+ #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
++
++#ifndef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
++extern void nf_conntrack_register_ecm_notifier(struct net *net, const struct nf_ct_event_notifier *nb);
++extern void nf_conntrack_unregister_ecm_notifier(struct net *net);
++#endif
+ #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
+ 
+ /*
+@@ -521,7 +527,7 @@ int ecm_conntrack_notifier_init(struct dentry *dentry)
+ 		goto init_cleanup_1;
+ 	}
+ #else
+-	nf_conntrack_register_notifier(&init_net, &ecm_conntrack_notifier);
++	nf_conntrack_register_ecm_notifier(&init_net, &ecm_conntrack_notifier);
+ #endif
+ 
+ 	/*
+@@ -549,7 +555,7 @@ init_cleanup_2:
+ #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
+ 	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
+ #else
+-	nf_conntrack_unregister_notifier(&init_net);
++	nf_conntrack_unregister_ecm_notifier(&init_net);
+ #endif
+ 
+ init_cleanup_1:
+@@ -577,7 +583,7 @@ void ecm_conntrack_notifier_exit(void)
+ #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
+ 	nf_conntrack_unregister_notifier(&init_net, &ecm_conntrack_notifier);
+ #else
+-	nf_conntrack_unregister_notifier(&init_net);
++	nf_conntrack_unregister_ecm_notifier(&init_net);
+ #endif
+ #endif
+ 	/*
+diff --git a/frontends/nss/ecm_nss_ipv4.c b/frontends/nss/ecm_nss_ipv4.c
+index dff1afb32b..8a0790695c 100644
+--- a/frontends/nss/ecm_nss_ipv4.c
++++ b/frontends/nss/ecm_nss_ipv4.c
+@@ -146,6 +146,7 @@ static unsigned long int ecm_nss_ipv4_stats_request_success = 0;	/* Number of su
+ static unsigned long int ecm_nss_ipv4_stats_request_fail = 0;		/* Number of failed stats request */
+ static unsigned long int ecm_nss_ipv4_stats_request_nack = 0;		/* Number of NACK'd stats request */
+ static unsigned long int ecm_nss_ipv4_stats_request_timeout = 0;	/* Number of stats request left unanswered */
++static unsigned int ecm_nss_ipv4_consecutive_timeouts = 0;		/* Consecutive unanswered stats sync requests for backoff */
+ static unsigned long int ecm_nss_ipv4_sync_req_seq;			/* Tag of the latest stats request */
+ static unsigned long int ecm_nss_ipv4_sync_req_jiffies;		/* When that request was sent */
+ static bool ecm_nss_ipv4_sync_req_pending;				/* A stats request is awaiting its reply */
+@@ -218,7 +219,7 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
+ 	struct ecm_classifier_rule_sync class_sync;
+ 	int flow_dir;
+ 	int return_dir;
+-	unsigned long int delta_jiffies;
++	unsigned long int delta_jiffies = 0;
+ 	int elapsed;
+ 
+ 	/*
+@@ -263,6 +264,9 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
+ #endif
+ 	if (!ci) {
+ 		DEBUG_TRACE("%px: NSS Sync: no connection\n", sync);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+ 
+@@ -303,6 +307,9 @@ static inline void ecm_nss_ipv4_process_one_conn_sync_msg(struct nss_ipv4_conn_s
+ 	elapsed = ecm_db_connection_elapsed_defunct_timer(ci);
+ 	if (elapsed < 0) {
+ 		ecm_db_connection_deref(ci);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+ 	DEBUG_TRACE("%px: elapsed: %d\n", ci, elapsed);
+@@ -524,7 +531,7 @@ sync_conntrack:
+ 	 * Only update if this is not a fixed timeout
+ 	 * delta_jiffies is the elapsed time since the last sync of this connection.
+ 	 */
+-	if (!test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
++	if (delta_jiffies && !test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
+ 		spin_lock_bh(&ct->lock);
+ 		ct->timeout += delta_jiffies;
+ 		spin_unlock_bh(&ct->lock);
+@@ -649,6 +656,7 @@ static void ecm_nss_ipv4_connection_sync_many_callback(void *app_data, struct ns
+ 			&& ((unsigned long int)app_data == ecm_nss_ipv4_sync_req_seq);
+ 	if (current_reply) {
+ 		ecm_nss_ipv4_sync_req_pending = false;
++		ecm_nss_ipv4_consecutive_timeouts = 0;
+ 		if (nim->cm.response == NSS_CMN_RESPONSE_ACK) {
+ 			ecm_nss_ipv4_sync_req_msg->msg.conn_stats_many.index = nicsm->next;
+ 		} else {
+@@ -690,6 +698,9 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+ 	int retry = 3;
+ 	unsigned long int current_jiffies;
+ 	unsigned long int waited = 0;
++	bool is_round_start;
++	unsigned int timeouts;
++	uint32_t next_idx = 0;
+ 	bool timed_out = false;
+ 
+ 	spin_lock_bh(&ecm_nss_ipv4_lock);
+@@ -706,18 +718,25 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+ 		}
+ 
+ 		/*
+-		 * The reply never came: restart the walk.
++		 * The reply never came: advance cursor and backoff.
+ 		 */
+ 		ecm_nss_ipv4_sync_req_pending = false;
+ 		ecm_nss_ipv4_stats_request_timeout++;
+-		nicsm_req->index = 0;
++		ecm_nss_ipv4_consecutive_timeouts++;
++		nicsm_req->index += (PAGE_SIZE - offsetof(struct nss_ipv4_msg, msg.conn_stats_many.conn_sync))
++					/ sizeof(struct nss_ipv4_conn_sync);
++		if (nicsm_req->index >= nss_ipv4_max_conn_count()) {
++			nicsm_req->index = 0;
++		}
++		timeouts = ecm_nss_ipv4_consecutive_timeouts;
++		next_idx = nicsm_req->index;
+ 		timed_out = true;
+ 	}
+ 	spin_unlock_bh(&ecm_nss_ipv4_lock);
+ 
+ 	if (timed_out) {
+-		pr_warn_ratelimited("ECM: IPv4 conn stats request unanswered for %u ms, restarting the sync\n",
+-				    jiffies_to_msecs(waited));
++		pr_warn_ratelimited("ECM: IPv4 conn stats request unanswered for %u ms (consecutive: %u, next index: %u), backing off\n",
++				    jiffies_to_msecs(waited), timeouts, next_idx);
+ 	}
+ 
+ 	spin_lock_bh(&ecm_nss_ipv4_lock);
+@@ -728,24 +747,37 @@ static void ecm_nss_ipv4_stats_sync_req_work(struct work_struct *work)
+ 	}
+ 	spin_unlock_bh(&ecm_nss_ipv4_lock);
+ 
+-	msleep_interruptible(ECM_NSS_IPV4_STATS_SYNC_UDELAY / 1000);
++	usleep_range_idle(ECM_NSS_IPV4_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV4_STATS_SYNC_UDELAY);
+ 
+ 	/*
+-	 * If index is 0, we are starting a new round, but if we still have time remain
+-	 * in this round, sleep until it ends
++	 * If index is 0 or we timed out, check next schedule time with exponential backoff.
+ 	 */
+-	if (nicsm_req->index == 0) {
++	spin_lock_bh(&ecm_nss_ipv4_lock);
++	is_round_start = (nicsm_req->index == 0);
++	timeouts = ecm_nss_ipv4_consecutive_timeouts;
++	spin_unlock_bh(&ecm_nss_ipv4_lock);
++
++	if (is_round_start || timeouts) {
++		unsigned long int sync_period = ECM_NSS_IPV4_STATS_SYNC_PERIOD;
++
++		if (timeouts) {
++			int shift = min_t(int, timeouts, 5);
++			sync_period = ECM_NSS_IPV4_STATS_SYNC_PERIOD << shift;
++		}
++
+ 		current_jiffies = jiffies;
+ 
+-		if (time_is_after_jiffies(ecm_nss_ipv4_roll_check_jiffies))  {
+-			ecm_nss_ipv4_next_req_time = jiffies + ECM_NSS_IPV4_STATS_SYNC_PERIOD;
++		if (time_is_after_jiffies(ecm_nss_ipv4_roll_check_jiffies) || timeouts)  {
++			ecm_nss_ipv4_next_req_time = jiffies + sync_period;
+ 		}
+ 
+ 		if (time_after(ecm_nss_ipv4_next_req_time, current_jiffies)) {
+-			msleep_interruptible(jiffies_to_msecs(ecm_nss_ipv4_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_nss_ipv4_workqueue, &ecm_nss_ipv4_work,
++					   ecm_nss_ipv4_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_nss_ipv4_roll_check_jiffies = jiffies;
+-		ecm_nss_ipv4_next_req_time = ecm_nss_ipv4_roll_check_jiffies + ECM_NSS_IPV4_STATS_SYNC_PERIOD;
++		ecm_nss_ipv4_next_req_time = ecm_nss_ipv4_roll_check_jiffies + sync_period;
+ 	}
+ 
+ 	while (retry) {
+diff --git a/frontends/nss/ecm_nss_ipv6.c b/frontends/nss/ecm_nss_ipv6.c
+index 5b18b5788b..33e7854d3d 100644
+--- a/frontends/nss/ecm_nss_ipv6.c
++++ b/frontends/nss/ecm_nss_ipv6.c
+@@ -133,6 +133,7 @@ static unsigned long int ecm_nss_ipv6_stats_request_success = 0;	/* Number of su
+ static unsigned long int ecm_nss_ipv6_stats_request_fail = 0;		/* Number of failed stats request */
+ static unsigned long int ecm_nss_ipv6_stats_request_nack = 0;		/* Number of NACK'd stats request */
+ static unsigned long int ecm_nss_ipv6_stats_request_timeout = 0;	/* Number of stats request left unanswered */
++static unsigned int ecm_nss_ipv6_consecutive_timeouts = 0;		/* Consecutive unanswered stats sync requests for backoff */
+ static unsigned long int ecm_nss_ipv6_sync_req_seq;			/* Tag of the latest stats request */
+ static unsigned long int ecm_nss_ipv6_sync_req_jiffies;		/* When that request was sent */
+ static bool ecm_nss_ipv6_sync_req_pending;				/* A stats request is awaiting its reply */
+@@ -219,7 +220,7 @@ static inline void ecm_nss_ipv6_process_one_conn_sync_msg(struct nss_ipv6_conn_s
+ 	struct ecm_classifier_rule_sync class_sync;
+ 	int flow_dir;
+ 	int return_dir;
+-	unsigned long int delta_jiffies;
++	unsigned long int delta_jiffies = 0;
+ 	int elapsed;
+ 
+ 	ECM_NSS_IPV6_ADDR_TO_IP_ADDR(flow_ip, sync->flow_ip);
+@@ -242,6 +243,9 @@ static inline void ecm_nss_ipv6_process_one_conn_sync_msg(struct nss_ipv6_conn_s
+ 	ci = ecm_db_connection_find_and_ref_hash_first(flow_ip, return_ip, sync->protocol, (int)sync->flow_ident, (int)sync->return_ident);
+ 	if (!ci) {
+ 		DEBUG_TRACE("%px: NSS Sync: no connection\n", sync);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+ 
+@@ -282,6 +286,9 @@ static inline void ecm_nss_ipv6_process_one_conn_sync_msg(struct nss_ipv6_conn_s
+ 	elapsed = ecm_db_connection_elapsed_defunct_timer(ci);
+ 	if (elapsed < 0) {
+ 		ecm_db_connection_deref(ci);
++		if (sync->flow_rx_packet_count || sync->return_rx_packet_count) {
++			goto sync_conntrack;
++		}
+ 		return;
+ 	}
+ 	delta_jiffies = elapsed * HZ;
+@@ -501,7 +508,7 @@ sync_conntrack:
+ 	 * Only update if this is not a fixed timeout
+ 	 * delta_jiffies is the elapsed time since the last sync of this connection.
+ 	 */
+-	if (!test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
++	if (delta_jiffies && !test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
+ 		spin_lock_bh(&ct->lock);
+ 		ct->timeout += delta_jiffies;
+ 		spin_unlock_bh(&ct->lock);
+@@ -625,6 +632,7 @@ static void ecm_nss_ipv6_connection_sync_many_callback(void *app_data, struct ns
+ 			&& ((unsigned long int)app_data == ecm_nss_ipv6_sync_req_seq);
+ 	if (current_reply) {
+ 		ecm_nss_ipv6_sync_req_pending = false;
++		ecm_nss_ipv6_consecutive_timeouts = 0;
+ 		if (nim->cm.response == NSS_CMN_RESPONSE_ACK) {
+ 			ecm_nss_ipv6_sync_req_msg->msg.conn_stats_many.index = nicsm->next;
+ 		} else {
+@@ -666,6 +674,9 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+ 	int retry = 3;
+ 	unsigned long int current_jiffies;
+ 	unsigned long int waited = 0;
++	bool is_round_start;
++	unsigned int timeouts;
++	uint32_t next_idx = 0;
+ 	bool timed_out = false;
+ 
+ 	spin_lock_bh(&ecm_nss_ipv6_lock);
+@@ -682,18 +694,25 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+ 		}
+ 
+ 		/*
+-		 * The reply never came: restart the walk.
++		 * The reply never came: advance cursor and backoff.
+ 		 */
+ 		ecm_nss_ipv6_sync_req_pending = false;
+ 		ecm_nss_ipv6_stats_request_timeout++;
+-		nicsm_req->index = 0;
++		ecm_nss_ipv6_consecutive_timeouts++;
++		nicsm_req->index += (PAGE_SIZE - offsetof(struct nss_ipv6_msg, msg.conn_stats_many.conn_sync))
++					/ sizeof(struct nss_ipv6_conn_sync);
++		if (nicsm_req->index >= nss_ipv6_max_conn_count()) {
++			nicsm_req->index = 0;
++		}
++		timeouts = ecm_nss_ipv6_consecutive_timeouts;
++		next_idx = nicsm_req->index;
+ 		timed_out = true;
+ 	}
+ 	spin_unlock_bh(&ecm_nss_ipv6_lock);
+ 
+ 	if (timed_out) {
+-		pr_warn_ratelimited("ECM: IPv6 conn stats request unanswered for %u ms, restarting the sync\n",
+-				    jiffies_to_msecs(waited));
++		pr_warn_ratelimited("ECM: IPv6 conn stats request unanswered for %u ms (consecutive: %u, next index: %u), backing off\n",
++				    jiffies_to_msecs(waited), timeouts, next_idx);
+ 	}
+ 
+ 	spin_lock_bh(&ecm_nss_ipv6_lock);
+@@ -704,24 +723,37 @@ static void ecm_nss_ipv6_stats_sync_req_work(struct work_struct *work)
+ 	}
+ 	spin_unlock_bh(&ecm_nss_ipv6_lock);
+ 
+-	msleep_interruptible(ECM_NSS_IPV6_STATS_SYNC_UDELAY / 1000);
++	usleep_range_idle(ECM_NSS_IPV6_STATS_SYNC_UDELAY - 200, ECM_NSS_IPV6_STATS_SYNC_UDELAY);
+ 
+ 	/*
+-	 * If index is 0, we are starting a new round, but if we still have time remain
+-	 * in this round, sleep until it ends
++	 * If index is 0 or we timed out, check next schedule time with exponential backoff.
+ 	 */
+-	if (nicsm_req->index == 0) {
++	spin_lock_bh(&ecm_nss_ipv6_lock);
++	is_round_start = (nicsm_req->index == 0);
++	timeouts = ecm_nss_ipv6_consecutive_timeouts;
++	spin_unlock_bh(&ecm_nss_ipv6_lock);
++
++	if (is_round_start || timeouts) {
++		unsigned long int sync_period = ECM_NSS_IPV6_STATS_SYNC_PERIOD;
++
++		if (timeouts) {
++			int shift = min_t(int, timeouts, 5);
++			sync_period = ECM_NSS_IPV6_STATS_SYNC_PERIOD << shift;
++		}
++
+ 		current_jiffies = jiffies;
+ 
+-		if (time_is_after_jiffies(ecm_nss_ipv6_roll_check_jiffies))  {
+-			ecm_nss_ipv6_next_req_time = jiffies + ECM_NSS_IPV6_STATS_SYNC_PERIOD;
++		if (time_is_after_jiffies(ecm_nss_ipv6_roll_check_jiffies) || timeouts)  {
++			ecm_nss_ipv6_next_req_time = jiffies + sync_period;
+ 		}
+ 
+ 		if (time_after(ecm_nss_ipv6_next_req_time, current_jiffies)) {
+-			msleep_interruptible(jiffies_to_msecs(ecm_nss_ipv6_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_nss_ipv6_workqueue, &ecm_nss_ipv6_work,
++					   ecm_nss_ipv6_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_nss_ipv6_roll_check_jiffies = jiffies;
+-		ecm_nss_ipv6_next_req_time = ecm_nss_ipv6_roll_check_jiffies + ECM_NSS_IPV6_STATS_SYNC_PERIOD;
++		ecm_nss_ipv6_next_req_time = ecm_nss_ipv6_roll_check_jiffies + sync_period;
+ 	}
+ 
+ 	while (retry) {
+diff --git a/frontends/sfe/ecm_sfe_ipv4.c b/frontends/sfe/ecm_sfe_ipv4.c
+index 8dc2163054..9b58cf7077 100644
+--- a/frontends/sfe/ecm_sfe_ipv4.c
++++ b/frontends/sfe/ecm_sfe_ipv4.c
+@@ -98,6 +98,7 @@ int ecm_sfe_ipv4_pending_decel_count = 0;			/* Total pending deceleration reques
+ 
+ #define ECM_SFE_IPV4_STATS_SYNC_PERIOD msecs_to_jiffies(1000)
+ #define ECM_SFE_IPV4_STATS_SYNC_UDELAY 4000     /* Delay for 4 ms */
++#define ECM_SFE_IPV4_STATS_SYNC_TIMEOUT msecs_to_jiffies(5000)	/* Give up on an unanswered request */
+ /*
+  * Workqueue for the connection sync
+  */
+@@ -779,7 +780,9 @@ static void ecm_sfe_ipv4_stats_sync_req_work(struct work_struct *work)
+ 		}
+ 
+ 		if (time_after(ecm_sfe_ipv4_next_req_time, current_jiffies)) {
+-			msleep(jiffies_to_msecs(ecm_sfe_ipv4_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_sfe_ipv4_workqueue, &ecm_sfe_ipv4_work,
++					   ecm_sfe_ipv4_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_sfe_ipv4_roll_check_jiffies = jiffies;
+ 		ecm_sfe_ipv4_next_req_time = ecm_sfe_ipv4_roll_check_jiffies + ECM_SFE_IPV4_STATS_SYNC_PERIOD;
+@@ -792,6 +795,7 @@ static void ecm_sfe_ipv4_stats_sync_req_work(struct work_struct *work)
+ 		sfe_tx_status = sfe_ipv4_tx(ecm_sfe_ipv4_mgr, ecm_sfe_ipv4_sync_req_msg);
+ 		if (sfe_tx_status == SFE_TX_SUCCESS) {
+ 			ecm_sfe_ipv4_stats_request_success++;
++			queue_delayed_work(ecm_sfe_ipv4_workqueue, &ecm_sfe_ipv4_work, ECM_SFE_IPV4_STATS_SYNC_TIMEOUT);
+ 			return;
+ 		}
+ 		ecm_sfe_ipv4_stats_request_fail++;
+diff --git a/frontends/sfe/ecm_sfe_ipv6.c b/frontends/sfe/ecm_sfe_ipv6.c
+index 8643f907e3..3f5f1b8700 100644
+--- a/frontends/sfe/ecm_sfe_ipv6.c
++++ b/frontends/sfe/ecm_sfe_ipv6.c
+@@ -93,6 +93,7 @@
+ 
+ #define ECM_SFE_IPV6_STATS_SYNC_PERIOD msecs_to_jiffies(1000)
+ #define ECM_SFE_IPV6_STATS_SYNC_UDELAY 4000	/* Delay for 4ms */
++#define ECM_SFE_IPV6_STATS_SYNC_TIMEOUT msecs_to_jiffies(5000)	/* Give up on an unanswered request */
+ 
+ static struct ctl_table_header *ecm_sfe_ipv6_ctl_table_header;	/* Sysctl table header */
+ 
+@@ -788,7 +789,9 @@ static void ecm_sfe_ipv6_stats_sync_req_work(struct work_struct *work)
+ 		}
+ 
+ 		if (time_after(ecm_sfe_ipv6_next_req_time, current_jiffies)) {
+-			msleep(jiffies_to_msecs(ecm_sfe_ipv6_next_req_time - current_jiffies));
++			queue_delayed_work(ecm_sfe_ipv6_workqueue, &ecm_sfe_ipv6_work,
++					   ecm_sfe_ipv6_next_req_time - current_jiffies);
++			return;
+ 		}
+ 		ecm_sfe_ipv6_roll_check_jiffies = jiffies;
+ 		ecm_sfe_ipv6_next_req_time = ecm_sfe_ipv6_roll_check_jiffies + ECM_SFE_IPV6_STATS_SYNC_PERIOD;
+@@ -801,6 +804,7 @@ static void ecm_sfe_ipv6_stats_sync_req_work(struct work_struct *work)
+ 		nss_tx_status = sfe_ipv6_tx(ecm_sfe_ipv6_mgr, ecm_sfe_ipv6_sync_req_msg);
+ 		if (nss_tx_status == SFE_TX_SUCCESS) {
+ 			ecm_sfe_ipv6_stats_request_success++;
++			queue_delayed_work(ecm_sfe_ipv6_workqueue, &ecm_sfe_ipv6_work, ECM_SFE_IPV6_STATS_SYNC_TIMEOUT);
+ 			return;
+ 		}
+ 		ecm_sfe_ipv6_stats_request_fail++;

@@ -1,0 +1,45 @@
+From: Husky <hyiy666@gmail.com>
+Subject: [PATCH] qca-nss-ecm: allow empty read on defunct_by_iface sysctl
+
+When /proc/sys/net/ecm/defunct_by_iface has not been written to yet,
+ecm_interface_defunct_iface is an empty string. scnprintf() returns 0,
+causing ecm_interface_defunct_by_iface_read() to log
+"Failed to format iface" and return -EINVAL.
+
+Format into an IFNAMSIZ + 2 buffer with a trailing newline in one pass so
+reading an unset defunct_by_iface cleanly returns an empty line.
+
+Signed-off-by: Husky <hyiy666@gmail.com>
+---
+--- a/ecm_interface.c
++++ b/ecm_interface.c
+@@ -10076,26 +10076,17 @@ static int ecm_interface_defunct_by_ifac
+ 	size_t bytes = 0;
+ 	char *read_buf;
+ 	int len;
+ 
+-	read_buf = kzalloc(IFNAMSIZ * sizeof(char), GFP_KERNEL);
++	read_buf = kzalloc(IFNAMSIZ + 2, GFP_KERNEL);
+ 	if (!read_buf) {
+ 		DEBUG_ERROR("Failed to allocate buffer for iface\n");
+ 		return -ENOMEM;
+ 	}
+ 
+-	len = scnprintf(read_buf, IFNAMSIZ, "%s", ecm_interface_defunct_iface);
+-	if (!len) {
+-		DEBUG_ERROR("Failed to format iface\n");
+-		kfree(read_buf);
+-		return -EINVAL;
+-	}
+-
+-	bytes += len;
+-	len = scnprintf(read_buf + bytes, 4, "\n");
+-	bytes += len;
+-	bytes = memory_read_from_buffer(buffer, *lenp, ppos, read_buf, bytes);
++	len = scnprintf(read_buf, IFNAMSIZ + 2, "%s\n", ecm_interface_defunct_iface);
++	bytes = memory_read_from_buffer(buffer, *lenp, ppos, read_buf, len);
+ 	*lenp = bytes;
+ 	kfree(read_buf);
+ 
+ 	return 0;
+ }

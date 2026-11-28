@@ -1,7 +1,7 @@
 # ImmortalWrt-QualcommAX 仓库四层资产全景总台账 (REPOSITORY-ASSETS-LEDGER.md)
 
 > **生效分支**：`nss-edma-main`（生产发布分支）  
-> **更新日期**：2026-11-26  
+> **更新日期**：2026-11-28  
 > **文档定位**：本文档为本仓库面向多源上游协同（OpenWrt 官方 master、Julius 原生 NSS-EDMA、开源生态社区）的**核心资产确权与架构真理源**。明确定义 Layer 1 至 Layer 4 的职责边界、物理分支、锚点 Commit 与防护红线，从根本上杜绝版本同步过程中的代码覆盖、混淆视听与误判。
 
 ---
@@ -27,14 +27,14 @@ Default Project / ImmortalWrt-QualcommAX
 │   ├── import(vikingyfy): nss_freq 芯片与协处理器底层锁频工具
 │   └── import(immortalwrt): autocore ARM64 负载均衡与状态监测
 │
-├── [Layer 2: 高通 NSS-EDMA 协处理器内联基盘] ──> 分支: layer/julius-nss-base (7 Commits)
+├── [Layer 2: 高通 NSS-EDMA 协处理器内联基盘] ──> 分支: layer/julius-nss-base (1 Commit)
 │   ├── package/nss/ (全套自包含内联驱动与微码固件: drv, ecm, clients, userspace, sqm, firmware)
-│   ├── target/linux/qualcommax/files/drivers/net/ (qca_edma, qca_ppe_main, pcs-qca-uniphy 协同驱动)
+│   ├── target/linux/qualcommax/files/drivers/net/ (主线化 qca_edma / qca_ppe + 极简 NSS 导出钩子)
 │   ├── package/kernel/mac80211/patches/nss/ath11k/ (全套 30+ Wi-Fi NSS 直通卸载驱动补丁)
 │   └── target/linux/qualcommax/dts/ (IPQ807x / IPQ60xx NSS 协处理器设备树节点与 reserved-memory 拓扑)
 │
 └── [Layer 1: OpenWrt 官方通用代码底座] ───> 分支: base/openwrt-upstream (基准快照)
-    ├── 官方同步锚点: Commit e50f7f9651 (2026-11-26 已 Rolling 同步, Linux 6.18.64 / backports 7.2)
+    ├── 官方同步锚点: Commit 5fb8f35f60 (2026-11-28 已 Rolling 同步, Linux 6.18.64 / backports 7.2)
     ├── Toolchain 工具链 (GCC 14, musl libc, autotools, cmake)
     ├── target/linux/generic/ (Linux 6.18 通用内核基准、pending 补丁集)
     └── 通用系统与服务包 (procd, uci, ubus, netifd, hostapd, dnsmasq, nftables 等)
@@ -48,9 +48,9 @@ Default Project / ImmortalWrt-QualcommAX
 
 *   **对应分支**：`base/openwrt-upstream`
 *   **官方同步锚点 (Baseline Anchor)**：
-    *   **Commit SHA**：`e50f7f9651`（Linux 6.18.64 / backports 7.2）
-    *   **日期**：`2026-11-26`
-    *   **标题**：`linux-firmware: update to 20261124`（Rolling 同步自 `upstream-openwrt/main`）
+    *   **Commit SHA**：`5fb8f35f60`（Linux 6.18.64 / backports 7.2）
+    *   **日期**：`2026-11-28`
+    *   **标题**：`hostapd: expose negotiated client security over ubus`（Rolling 同步自 `upstream-openwrt/main`）
 *   **资产范围**：
     *   OpenWrt 官方原生构建体系：`include/`、`scripts/`、`tools/`、`toolchain/`；
     *   Linux 6.18 通用内核基础树：`target/linux/generic/`；
@@ -75,8 +75,8 @@ Default Project / ImmortalWrt-QualcommAX
         *   `package/nss/nss-userspace-oss`：用户态通信、PPE 调试库与 `libnss_nl`；
         *   `package/nss/sqm-scripts-nss`：基于 NSS 芯片级硬件队列的 SQM 流控脚本。
     2.  **以太网与 Uniphy 协同驱动 (`target/linux/qualcommax/files/drivers/net/`)**：
-        *   `ethernet/qualcomm/qca_edma.c` / `qca_edma.h`：与 NSS 固件共享环形描述符队列的硬件以太网驱动；
-        *   `ethernet/qualcomm/qca_ppe_main.c` / `qca_ppe.h` / `qca_ppe_vlan.c`：专供 NSS 固件操作的 PPE 芯片寄存器驱动；
+        *   `ethernet/qualcomm/qca_edma.c` / `qca_edma.h`：**已于 2026-11-28 回归 `base/openwrt-upstream` 主线多队列实现**，仅保留极简 NSS 接管钩子（`QCA_HDR` 剥离与重试还原、`qca_edma_fw_baseline_restore()`、`qca_edma_port_dp_claim/release()`、`qca_edma_port_transition_begin/end()`）；
+        *   `ethernet/qualcomm/qca_ppe_main.c` / `qca_ppe.h` / `qca_ppe_vlan.c`：**已回归 `base/openwrt-upstream` 主线 DSA 驱动**，配合 `0959` 补丁开启 `-DQCA_PPE_FLOW_SUPPRESSED` 编译期压制主机流表驱动 (`qca_ppe_flow*.o`)，仅保留 `port_fw_vsi`、`bridge_vsi`、`port_vlan_vsi` 与 `qca_ppe_fdb_del` 导出钩子；
         *   `pcs/pcs-qca-uniphy.c` / `pcs-qca-uniphy.h`：2.5G / 10G USXGMII 自协商握手驱动。
     3.  **Wi-Fi NSS 直通卸载驱动补丁 (`package/kernel/mac80211/patches/nss/ath11k/`)**：
         *   包含 `199-003-ath11k-add-nss-support.patch` 在内的 30+ 补丁，实现 `ath11k` 数据报文绕过 Linux 主机协议栈直通协处理器硬件加速。
@@ -102,7 +102,7 @@ Default Project / ImmortalWrt-QualcommAX
 
 ### 4. Layer 4：自研特性与生态加固生产层 (Production / Custom IP & Fixes)
 
-*   **对应分支**：`nss-edma-julius`（Parent: `layer/community-tuning`，生产 HEAD 分支）
+*   **对应分支**：`layer/custom-patches` / `nss-edma-main`（Parent: `layer/community-tuning`，生产 HEAD 分支）
 *   **提交范围**：覆盖起点 Commit `4a9b3a53de` 及后续连续吸收/加固批次
 *   **资产属性**：**100% 由我们自主研发、深度重构或严格审查验证的核心业务资产**。
 *   **核心资产清单与物理路径**：
